@@ -1,0 +1,326 @@
+/**
+ * Dashboard left-nav availability: loads out/availability_calendar_latest.json
+ * and shows only likely-open windows for the next 7 calendar days (document TZ).
+ */
+function str(v) {
+    return typeof v === "string" ? v : "";
+}
+function escapeHtml(s) {
+    return s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+function isoToYmdInZone(iso, timeZone) {
+    return new Intl.DateTimeFormat("en-CA", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).format(new Date(iso));
+}
+function subtractDateIntervals(base, toRemove) {
+    if (!base.length)
+        return [];
+    if (!toRemove.length)
+        return base.slice();
+    const removes = [...toRemove]
+        .filter((r) => r.end.getTime() > r.start.getTime())
+        .sort((a, b) => a.start.getTime() - b.start.getTime());
+    const out = [];
+    for (const b of base) {
+        let cur = b.start;
+        for (const r of removes) {
+            if (r.end.getTime() <= cur.getTime())
+                continue;
+            if (r.start.getTime() >= b.end.getTime())
+                break;
+            if (r.start.getTime() > cur.getTime()) {
+                out.push({ start: cur, end: r.start });
+            }
+            if (r.end.getTime() > cur.getTime()) {
+                cur = r.end;
+            }
+            if (cur.getTime() >= b.end.getTime())
+                break;
+        }
+        if (cur.getTime() < b.end.getTime())
+            out.push({ start: cur, end: b.end });
+    }
+    return out.filter((x) => x.end.getTime() > x.start.getTime());
+}
+function segmentIsoIntervalForDay(isoStart, isoEnd, dayKey, tz) {
+    const t0 = new Date(isoStart).getTime();
+    const t1 = new Date(isoEnd).getTime();
+    if (!(t1 > t0))
+        return null;
+    const startDay = isoToYmdInZone(isoStart, tz);
+    const endDay = isoToYmdInZone(isoEnd, tz);
+    if (dayKey !== startDay && dayKey !== endDay)
+        return null;
+    if (startDay === dayKey && endDay === dayKey) {
+        return { start: new Date(isoStart), end: new Date(isoEnd) };
+    }
+    if (startDay === dayKey) {
+        const dayEnd = new Date(`${dayKey}T23:59:59.999`);
+        return { start: new Date(isoStart), end: dayEnd };
+    }
+    const dayStart = new Date(`${dayKey}T00:00:00`);
+    return { start: dayStart, end: new Date(isoEnd) };
+}
+function formatDatePairInTz(a, b, timeZone) {
+    const opts = {
+        timeZone,
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+    };
+    const fmt = new Intl.DateTimeFormat("en-GB", opts);
+    return `${fmt.format(a)}–${fmt.format(b)}`;
+}
+function parseHm(hm) {
+    if (!hm || !/^\d{1,2}:\d{2}$/.test(hm))
+        return null;
+    const [h, m] = hm.split(":").map((x) => parseInt(x, 10));
+    return { h, m };
+}
+function formatHm24(p) {
+    return `${String(p.h).padStart(2, "0")}:${String(p.m).padStart(2, "0")}`;
+}
+function formatLocalHmRange(start, end) {
+    const sm = parseHm(start);
+    const em = parseHm(end);
+    if (sm && em)
+        return `${formatHm24(sm)}–${formatHm24(em)}`;
+    return `${start ?? ""}–${end ?? ""}`;
+}
+function commitmentRangeOnDay(c, dateKey) {
+    if (c.date !== dateKey)
+        return null;
+    const sm = parseHm(c.start_local);
+    const em = parseHm(c.assumed_end_local);
+    if (!sm || !em)
+        return null;
+    const start = new Date(`${dateKey}T${String(sm.h).padStart(2, "0")}:${String(sm.m).padStart(2, "0")}:00`);
+    const end = new Date(`${dateKey}T${String(em.h).padStart(2, "0")}:${String(em.m).padStart(2, "0")}:00`);
+    if (!(end.getTime() > start.getTime()))
+        return null;
+    return { start, end };
+}
+/** Today's calendar date YYYY-MM-DD in the given IANA zone. */
+function todayYmdInTz(timeZone) {
+    return new Intl.DateTimeFormat("en-CA", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).format(new Date());
+}
+/** Add whole calendar days to a YYYY-MM-DD string (Gregorian, noon UTC anchor). */
+function addDaysToYmd(ymd, deltaDays) {
+    const [Y, M, D] = ymd.split("-").map(Number);
+    if (!Y || !M || !D)
+        return null;
+    const u = Date.UTC(Y, M - 1, D + deltaDays, 12, 0, 0);
+    return new Date(u).toISOString().slice(0, 10);
+}
+function nextNDaysFromYmd(startYmd, n) {
+    const out = [];
+    for (let i = 0; i < n; i++) {
+        const d = addDaysToYmd(startYmd, i);
+        if (d)
+            out.push(d);
+    }
+    return out;
+}
+function dayHeadingLabel(ymd) {
+    const d = new Date(`${ymd}T12:00:00Z`);
+    return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+}
+function getTimeZone(data) {
+    const meta = (data.meta || {});
+    return str(meta.timezone).trim() || "America/New_York";
+}
+function buildDayAgenda(dateKey, data) {
+    const tz = getTimeZone(data);
+    const items = [];
+    const parentingByDate = new Map();
+    for (const row of data.parenting_unavailable_local ?? []) {
+        parentingByDate.set(str(row.date), row);
+    }
+    const childHomeByDate = new Map();
+    for (const row of data.child_home_virtual_only_local ?? []) {
+        childHomeByDate.set(str(row.date), row);
+    }
+    const openByDate = new Map();
+    for (const row of data.availability_for_new_meetings_iso ?? []) {
+        openByDate.set(str(row.date), row);
+    }
+    const commitments = data.calendar_commitments_from_screenshot ?? [];
+    const busy = data.busy_with_buffers_iso ?? [];
+    const pday = parentingByDate.get(dateKey);
+    for (const iv of pday?.intervals_iso ?? []) {
+        const seg = segmentIsoIntervalForDay(str(iv.start), str(iv.end), dateKey, tz);
+        if (!seg)
+            continue;
+        items.push({
+            layer: "parenting",
+            start: seg.start,
+            end: seg.end,
+            timeLine: formatDatePairInTz(seg.start, seg.end, tz),
+            title: "Parenting",
+            detail: str(iv.id),
+        });
+    }
+    const chDay = childHomeByDate.get(dateKey);
+    const childHomeSegs = [];
+    for (const iv of chDay?.intervals_iso ?? []) {
+        const seg = segmentIsoIntervalForDay(str(iv.start), str(iv.end), dateKey, tz);
+        if (!seg)
+            continue;
+        childHomeSegs.push({ start: seg.start, end: seg.end, id: str(iv.id) });
+    }
+    const busySegs = [];
+    for (const b of busy) {
+        const seg = segmentIsoIntervalForDay(b.start, b.end, dateKey, tz);
+        if (!seg)
+            continue;
+        busySegs.push(seg);
+        items.push({
+            layer: "busy",
+            start: seg.start,
+            end: seg.end,
+            timeLine: formatDatePairInTz(seg.start, seg.end, tz),
+            title: "Busy (+buffers)",
+            detail: b.source,
+        });
+    }
+    const now = new Date();
+    const virtualOnlyAvail = subtractDateIntervals(childHomeSegs.map(({ start, end }) => ({ start, end })), busySegs)
+        .map((seg) => {
+        if (seg.end.getTime() <= now.getTime())
+            return null;
+        if (seg.start.getTime() < now.getTime())
+            return { start: now, end: seg.end };
+        return seg;
+    })
+        .filter((x) => x !== null);
+    for (const seg of virtualOnlyAvail) {
+        items.push({
+            layer: "child_home",
+            start: seg.start,
+            end: seg.end,
+            timeLine: formatDatePairInTz(seg.start, seg.end, tz),
+            title: "Virtual only",
+            detail: "",
+        });
+    }
+    const openDay = openByDate.get(dateKey);
+    for (const w of openDay?.likely_open_windows ?? []) {
+        const seg = segmentIsoIntervalForDay(str(w.start), str(w.end), dateKey, tz);
+        if (!seg)
+            continue;
+        items.push({
+            layer: "open",
+            start: seg.start,
+            end: seg.end,
+            timeLine: formatDatePairInTz(seg.start, seg.end, tz),
+            title: "Open",
+            detail: str(w._note),
+        });
+    }
+    for (const c of commitments) {
+        const seg = commitmentRangeOnDay(c, dateKey);
+        if (!seg)
+            continue;
+        const hint = c.location_hint ? `${c.kind ?? ""} · ${c.location_hint}`.trim() : (c.kind ?? "");
+        items.push({
+            layer: "commit",
+            start: seg.start,
+            end: seg.end,
+            timeLine: formatLocalHmRange(c.start_local, c.assumed_end_local),
+            title: c.title ?? "(event)",
+            detail: hint || str(c._note),
+        });
+    }
+    const layerOrder = { parenting: 0, child_home: 1, busy: 2, open: 3, commit: 4 };
+    items.sort((a, b) => {
+        const d0 = a.start.getTime() - b.start.getTime();
+        if (d0 !== 0)
+            return d0;
+        return layerOrder[a.layer] - layerOrder[b.layer];
+    });
+    return items;
+}
+function renderAgendaDayHtml(dateKey, data, opts) {
+    let items = buildDayAgenda(dateKey, data);
+    if (opts.openOnly)
+        items = items.filter((it) => it.layer === "open" || it.layer === "child_home");
+    const openMeta = (data.availability_for_new_meetings_iso ?? []).find((d) => str(d.date) === dateKey);
+    const parentingMeta = (data.parenting_unavailable_local ?? []).find((d) => str(d.date) === dateKey);
+    const childHomeMeta = (data.child_home_virtual_only_local ?? []).find((d) => str(d.date) === dateKey);
+    const foot = opts.openOnly
+        ? [str(openMeta?._note)].filter(Boolean).join(" ")
+        : [str(openMeta?._note), str(parentingMeta?._note), str(childHomeMeta?._note)].filter(Boolean).join(" ");
+    const emptyMsg = opts.openOnly ? "No open or virtual-only slots this day." : "No blocks this day.";
+    const rows = items.length === 0
+        ? `<li class="dash-avail-empty">${escapeHtml(emptyMsg)}</li>`
+        : items
+            .map((it) => {
+            const tip = [it.timeLine, it.title, it.detail].filter(Boolean).join("\n");
+            const sub = it.detail ? `<div class="dash-avail-detail">${escapeHtml(it.detail)}</div>` : "";
+            return `<li class="dash-avail-row dash-avail-row--${it.layer}" title="${escapeHtml(tip)}">
+            <div class="dash-avail-time">${escapeHtml(it.timeLine)}</div>
+            <div class="dash-avail-body">
+              <div class="dash-avail-title">${escapeHtml(it.title)}</div>
+              ${sub}
+            </div>
+          </li>`;
+        })
+            .join("");
+    return `<section class="dash-avail-day" data-date="${escapeHtml(dateKey)}">
+    <header class="dash-avail-day-head">
+      <div class="dash-avail-day-name">${escapeHtml(dayHeadingLabel(dateKey))}</div>
+      <div class="dash-avail-day-ymd">${escapeHtml(dateKey)}</div>
+    </header>
+    <ul class="dash-avail-list">${rows}</ul>
+    ${foot ? `<p class="dash-avail-foot">${escapeHtml(foot)}</p>` : ""}
+  </section>`;
+}
+const LEFT_NAV_AVAILABILITY_DAYS = 7;
+function renderAgendaHtml(data) {
+    const tz = getTimeZone(data);
+    const today = todayYmdInTz(tz);
+    const days = nextNDaysFromYmd(today, LEFT_NAV_AVAILABILITY_DAYS);
+    if (!days.length)
+        return '<p class="dash-avail-error">No date range in availability file.</p>';
+    const openOnly = true;
+    return `<div class="dash-avail-agenda">${days.map((d) => renderAgendaDayHtml(d, data, { openOnly })).join("")}</div>`;
+}
+/** Loads /out/availability_calendar_latest.json and fills #availability-section. */
+export async function refreshAvailabilityPanel() {
+    const section = document.getElementById("availability-section");
+    const metaEl = document.getElementById("availability-meta");
+    const agendaEl = document.getElementById("availability-agenda");
+    if (!section || !metaEl || !agendaEl)
+        return;
+    const url = `/out/availability_calendar_latest.json?cb=${Date.now()}`;
+    try {
+        const res = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+        if (!res.ok) {
+            section.hidden = false;
+            metaEl.innerHTML = `No calendar availability file yet (<code>out/availability_calendar_latest.json</code>, HTTP ${res.status}). It is written when <code>dashboard_server.py</code> runs its scheduled export.`;
+            agendaEl.innerHTML = "";
+            return;
+        }
+        const data = (await res.json());
+        section.hidden = false;
+        agendaEl.innerHTML = renderAgendaHtml(data);
+    }
+    catch (e) {
+        section.hidden = false;
+        metaEl.textContent = `Availability load failed: ${e instanceof Error ? e.message : String(e)}`;
+        agendaEl.innerHTML = "";
+    }
+}

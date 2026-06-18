@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#101216" />
+  <meta name="description" content="Fivelanes inbox dashboard — threads, meetings, lanes, and plans" />
+  <title>Fivelanes</title>
+  <link rel="icon" href="/square5.jpg" type="image/jpeg" />
+  <link rel="stylesheet" href="/frontend/styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#page-root">Skip to main content</a>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <img src="/square5.jpg" alt="" class="brand-logo" width="52" height="52" decoding="async" />
+        <div class="brand-text">
+          <h1>Fivelanes</h1>
+        </div>
+      </div>
+      <div class="brand-lanes" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <div class="header-controls">
+        <div class="backend-control">
+          <span class="backend-label" id="backend-label">Backend: …</span>
+          <div class="backend-switch" id="backend-switch" role="group" aria-labelledby="backend-label">
+            <button type="button" class="backend-switch-btn" data-backend="llama" aria-pressed="false">
+              Llama
+            </button>
+            <button type="button" class="backend-switch-btn" data-backend="claude" aria-pressed="false">
+              Claude
+            </button>
+          </div>
+        </div>
+        <button type="button" id="run-fivelanes-btn" class="run-fivelanes-btn">
+          Run fivelanes
+        </button>
+      </div>
+      <p class="pipeline-status" id="pipeline-status" hidden></p>
+      <p class="run-meta" id="run-meta" hidden></p>
+    </header>
+
+    <div class="app-shell">
+      <nav class="app-nav" id="app-nav" aria-label="Main">
+        <ul id="app-nav-list">
+          <li><a href="/dashboard" class="app-nav-link" data-route="dashboard">Dashboard</a></li>
+          <li><a href="/threads" class="app-nav-link" data-route="threads">Threads</a></li>
+          <li><a href="/meetings" class="app-nav-link" data-route="meetings">Meetings</a></li>
+          <li><a href="/lanes" class="app-nav-link" data-route="lanes">Lanes</a></li>
+          <li><a href="/people" class="app-nav-link" data-route="people">People</a></li>
+          <li><a href="/plans" class="app-nav-link" data-route="plans">Plans</a></li>
+          <li><a href="/texts-setup" class="app-nav-link" data-route="texts-setup">Texts</a></li>
+        </ul>
+      </nav>
+      <div class="app-body">
+        <main id="page-root" tabindex="-1"></main>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="frontend/dist/app.js"></script>
+</body>
+</html>
