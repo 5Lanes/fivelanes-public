@@ -13,6 +13,7 @@ import os
 import sqlite3
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple
 from utils.runtime_paths import data_path, infra_root
 
 from services.email.forwarding import primary_email_from_sender
