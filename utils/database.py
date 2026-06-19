@@ -1164,6 +1164,58 @@ def delete_thread_plan(db_path: str, *, plan_id: int) -> bool:
         return deleted
 
 
+def untrack_todo_plan_inbox_thread(db_path: str, *, inbox_thread_id: str) -> bool:
+    """
+    Drop tracking, timeline, and summary rows for a Todo: inbox thread.
+
+    ``thread_plans`` rows are kept — Todo emails should exist only as plans.
+    """
+    tid = _normalize_field(inbox_thread_id)
+    if not tid or tid.startswith("text:"):
+        return False
+    db_file = Path(db_path)
+    with sqlite3.connect(db_file) as conn:
+        _ensure_thread_tracking_schema(conn)
+        _ensure_timeline_schema(conn)
+        _ensure_claude_outputs_schema(conn)
+        _ensure_thread_summaries_schema(conn)
+        _ensure_thread_draft_replies_schema(conn)
+        _ensure_lanes_schema(conn)
+        _ensure_people_schema(conn)
+        conn.execute("DELETE FROM thread_tracking WHERE inbox_thread_id = ?", (tid,))
+        conn.execute(
+            "DELETE FROM timeline_entries WHERE COALESCE(thread_id, '') = ?", (tid,)
+        )
+        conn.execute(
+            "DELETE FROM claude_message_outputs WHERE COALESCE(thread_id, '') = ?",
+            (tid,),
+        )
+        conn.execute("DELETE FROM thread_summaries WHERE thread_id = ?", (tid,))
+        conn.execute("DELETE FROM thread_draft_replies WHERE thread_id = ?", (tid,))
+        conn.execute("DELETE FROM lane_threads WHERE inbox_thread_id = ?", (tid,))
+        conn.execute("DELETE FROM person_threads WHERE inbox_thread_id = ?", (tid,))
+        conn.commit()
+        return True
+
+
+def load_thread_subjects(db_path: str, thread_id: str) -> List[str]:
+    """Distinct non-empty subjects from ``claude_message_outputs`` for one thread."""
+    tid = _normalize_field(thread_id)
+    if not tid:
+        return []
+    db_file = Path(db_path)
+    with sqlite3.connect(db_file) as conn:
+        _ensure_claude_outputs_schema(conn)
+        rows = conn.execute(
+            """
+            SELECT DISTINCT subject FROM claude_message_outputs
+            WHERE COALESCE(thread_id, '') = ? AND TRIM(COALESCE(subject, '')) != ''
+            """,
+            (tid,),
+        ).fetchall()
+    return [_normalize_field(r[0]) for r in rows if _normalize_field(r[0])]
+
+
 def load_all_thread_plans(db_path: str) -> List[Dict[str, Any]]:
     """Return all user plans, newest first."""
     db_file = Path(db_path)

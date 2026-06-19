@@ -16,7 +16,13 @@ from services.email.recipients import (
     to_field_contains_address,
 )
 from services.email.subject import extract_todo_plan_action, subject_core_indicates_todo
-from utils.database import create_thread_plan, plan_exists_for_thread_action
+from utils.database import (
+    create_thread_plan,
+    fetch_thread_tracking_rows,
+    load_thread_subjects,
+    plan_exists_for_thread_action,
+    untrack_todo_plan_inbox_thread,
+)
 
 log = logging.getLogger(__name__)
 
@@ -110,6 +116,33 @@ def process_todo_plan(m: dict, db_path: str) -> None:
         return
     if plan_exists_for_thread_action(db_path, tid, action):
         log.info("Todo plan already exists for thread_id=%s action=%r", tid, action)
-        return
-    create_thread_plan(db_path, inbox_thread_id=tid, action=action)
-    log.info("Created todo plan for thread_id=%s action=%r", tid, action)
+    else:
+        create_thread_plan(db_path, inbox_thread_id=tid, action=action)
+        log.info("Created todo plan for thread_id=%s action=%r", tid, action)
+    if untrack_todo_plan_inbox_thread(db_path, inbox_thread_id=tid):
+        log.info("Removed tracking/timeline for todo-only inbox thread_id=%s", tid)
+
+
+def purge_tracked_todo_only_threads(db_path: str) -> int:
+    """
+    Untrack inbox threads that only exist because of Todo: emails.
+
+    Covers legacy rows tracked before todo routing skipped ``thread_tracking``.
+    """
+    purged = 0
+    for row in fetch_thread_tracking_rows(db_path):
+        tid = str(row.get("inbox_thread_id") or "").strip()
+        if not tid or tid.startswith("text:"):
+            continue
+        kind = str(row.get("inbox_delivery_kind") or "").strip()
+        if kind == InboxRoute.TODO_PLAN.value:
+            untrack_todo_plan_inbox_thread(db_path, inbox_thread_id=tid)
+            purged += 1
+            continue
+        subjects = load_thread_subjects(db_path, tid)
+        if subjects and all(subject_core_indicates_todo(s) for s in subjects):
+            untrack_todo_plan_inbox_thread(db_path, inbox_thread_id=tid)
+            purged += 1
+    if purged:
+        log.info("Purged tracking/timeline for %d todo-only inbox thread(s)", purged)
+    return purged

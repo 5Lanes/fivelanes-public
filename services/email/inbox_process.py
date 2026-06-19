@@ -16,6 +16,7 @@ from services.email.inbox_route import (
     InboxRoute,
     dedupe_timeline_rows_by_source_id,
     process_todo_plan,
+    purge_tracked_todo_only_threads,
     resolve_ref_id,
     route_from_tracking,
     route_inbox_message,
@@ -514,6 +515,8 @@ def process_inbox_pipeline(
         if tt_list:
             upsert_thread_tracking(db, tt_list)
             log.info("Upserted %d thread_tracking row(s)", len(tt_list))
+
+    purge_tracked_todo_only_threads(db)
 
     tracked_rows = fetch_thread_tracking_rows(db)
     tracked_rows = [
