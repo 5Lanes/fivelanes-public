@@ -50,11 +50,13 @@ def data_path(*parts: str) -> Path:
 
 @lru_cache(maxsize=1)
 def load_env() -> None:
-    path = env_file()
-    if not path.is_file():
-        return
     try:
         from dotenv import load_dotenv
     except ImportError:
         return
-    load_dotenv(path)
+    bootstrap = infra_root() / ".env"
+    if bootstrap.is_file():
+        load_dotenv(bootstrap)
+    path = env_file()
+    if path.is_file():
+        load_dotenv(path)
