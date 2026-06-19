@@ -802,7 +802,9 @@ def run_calendar_availability_pull(
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(doc, f, indent=2, ensure_ascii=False)
 
-    db_path = project_root / (os.getenv("DATABASE_NAME") or "timeline.db")
+    from utils.runtime_paths import database_path
+
+    db_path = Path(database_path())
     try:
         from utils.database import replace_meetings_from_availability_doc
 

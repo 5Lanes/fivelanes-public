@@ -27,6 +27,9 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from services.email.address import normalize_gmail_address
+from utils.runtime_paths import credentials_dir, infra_root, load_env
+
+load_env()
 
 # Scopes for Gmail read and Calendar read (same token for both; re-run add_gmail_account to add Calendar).
 # Optional: ``gmail.settings.basic.readonly`` lists send-as aliases (e.g. ``@gmail.com`` vs Workspace).
@@ -48,9 +51,9 @@ else:
 
 log = logging.getLogger(__name__)
 
-# Paths relative to project root
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CREDENTIALS_DIR = os.path.join(PROJECT_ROOT, "credentials")
+# Paths under FIVELANES_DATA_ROOT (or repo root when unset); see utils/runtime_paths.py.
+PROJECT_ROOT = str(infra_root())
+CREDENTIALS_DIR = str(credentials_dir())
 CREDENTIALS_PATH = os.path.join(CREDENTIALS_DIR, "credentials.json")
 SOURCE_OAUTH_ACCOUNT_ID = os.getenv("SOURCE_OAUTH_ACCOUNT_ID")
 TOKEN_PATH = os.path.join(CREDENTIALS_DIR, "token.json")  # legacy single-account

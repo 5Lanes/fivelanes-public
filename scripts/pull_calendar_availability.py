@@ -30,6 +30,10 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from utils.runtime_paths import data_path, load_env  # noqa: E402
+
+load_env()
+
 from services.calendar_availability_export import (  # noqa: E402
     run_calendar_availability_pull,
     write_availability_calendar_selection,
@@ -41,8 +45,8 @@ try:
 except ImportError:
     ZoneInfo = None  # type: ignore[misc, assignment]
 
-DEFAULT_RULES = ROOT / "credentials" / "calendar_scheduling_rules.json"
-DEFAULT_OUT_DIR = ROOT / "out"
+DEFAULT_RULES = data_path("credentials", "calendar_scheduling_rules.json")
+DEFAULT_OUT_DIR = data_path("out")
 
 
 def _print_calendar_catalog(rows: List[dict]) -> None:
@@ -186,7 +190,7 @@ def main() -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
     run_calendar_availability_pull(
-        ROOT,
+        data_path(),
         weeks=args.weeks,
         rules_path=rules_path,
         out_path=out_path,

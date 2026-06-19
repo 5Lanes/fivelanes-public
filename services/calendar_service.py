@@ -17,8 +17,8 @@ log = logging.getLogger(__name__)
 
 
 def get_all_calendar_services() -> List[tuple]:
-    log.info("get_all_calendar_services")
     """Return list of (account_id, calendar_service) for all connected accounts."""
+    log.info("get_all_calendar_services")
     result: List[tuple] = []
     for aid in list_connected_accounts():
         creds = _get_credentials(aid)
