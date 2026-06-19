@@ -28,6 +28,9 @@ for grouping and ``fetch_oauth_account_id`` for which token was used to fetch.
 
 **``thread_plans``** — user-defined next steps tied to an inbox thread (action, type, optional deadline).
 
+**``dismissed_todo_plans``** — todo email (thread, action) pairs the user deleted; inbox sync
+will not recreate them.
+
 Text threads use on-disk ``conversations/*.json`` plus ``thread_tracking`` rows with
 ``inbox_thread_id`` ``text:<key>`` (no separate text tables).
 """
@@ -52,6 +55,7 @@ def ensure_database_schema(db_path: str) -> None:
         _ensure_people_schema(conn)
         _ensure_person_summaries_schema(conn)
         _ensure_thread_plans_schema(conn)
+        _ensure_dismissed_todo_plans_schema(conn)
         _ensure_claude_outputs_schema(conn)
         _ensure_thread_summaries_schema(conn)
         _ensure_thread_draft_replies_schema(conn)
@@ -994,6 +998,76 @@ def _ensure_thread_plans_schema(conn: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_dismissed_todo_plans_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS dismissed_todo_plans (
+            inbox_thread_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            dismissed_at TEXT NOT NULL,
+            PRIMARY KEY (inbox_thread_id, action)
+        )
+        """
+    )
+
+
+def _record_dismissed_todo_plan(
+    conn: sqlite3.Connection,
+    inbox_thread_id: str,
+    action: str,
+    *,
+    dismissed_at: Optional[str] = None,
+) -> None:
+    tid = _normalize_field(inbox_thread_id)
+    label = _normalize_field(action)
+    if not tid or not label:
+        return
+    _ensure_dismissed_todo_plans_schema(conn)
+    when = dismissed_at or datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO dismissed_todo_plans
+            (inbox_thread_id, action, dismissed_at)
+        VALUES (?, ?, ?)
+        """,
+        (tid, label, when),
+    )
+
+
+def dismiss_todo_plan(db_path: str, *, inbox_thread_id: str, action: str) -> None:
+    """Record a todo plan the user removed so inbox sync does not recreate it."""
+    tid = _normalize_field(inbox_thread_id)
+    label = _normalize_field(action)
+    if not tid or not label:
+        return
+    db_file = Path(db_path)
+    with sqlite3.connect(db_file) as conn:
+        _record_dismissed_todo_plan(conn, tid, label)
+        conn.commit()
+
+
+def todo_plan_is_dismissed(
+    db_path: str, inbox_thread_id: str, action: str
+) -> bool:
+    """True when the user deleted this todo (thread, action) and it must not be recreated."""
+    tid = _normalize_field(inbox_thread_id)
+    label = _normalize_field(action)
+    if not tid or not label:
+        return False
+    db_file = Path(db_path)
+    with sqlite3.connect(db_file) as conn:
+        _ensure_dismissed_todo_plans_schema(conn)
+        row = conn.execute(
+            """
+            SELECT 1 FROM dismissed_todo_plans
+            WHERE inbox_thread_id = ? AND action = ?
+            LIMIT 1
+            """,
+            (tid, label),
+        ).fetchone()
+    return row is not None
+
+
 def _sync_thread_tracking_has_plan(conn: sqlite3.Connection, inbox_thread_id: str) -> None:
     """Set ``has_plan`` on ``thread_tracking`` from ``thread_plans`` row count."""
     tid = _normalize_field(inbox_thread_id)
@@ -1152,14 +1226,17 @@ def delete_thread_plan(db_path: str, *, plan_id: int) -> bool:
         _ensure_thread_plans_schema(conn)
         _ensure_thread_tracking_schema(conn)
         row = conn.execute(
-            "SELECT inbox_thread_id FROM thread_plans WHERE id = ?",
+            "SELECT inbox_thread_id, action FROM thread_plans WHERE id = ?",
             (plan_id,),
         ).fetchone()
         tid = _normalize_field(row[0]) if row else ""
+        action = _normalize_field(row[1]) if row else ""
         cur = conn.execute("DELETE FROM thread_plans WHERE id = ?", (plan_id,))
         deleted = int(cur.rowcount or 0) > 0
         if deleted and tid:
             _sync_thread_tracking_has_plan(conn, tid)
+            if action:
+                _record_dismissed_todo_plan(conn, tid, action)
         conn.commit()
         return deleted
 

@@ -21,6 +21,7 @@ from utils.database import (
     fetch_thread_tracking_rows,
     load_thread_subjects,
     plan_exists_for_thread_action,
+    todo_plan_is_dismissed,
     untrack_todo_plan_inbox_thread,
 )
 
@@ -116,6 +117,12 @@ def process_todo_plan(m: dict, db_path: str) -> None:
         return
     if plan_exists_for_thread_action(db_path, tid, action):
         log.info("Todo plan already exists for thread_id=%s action=%r", tid, action)
+    elif todo_plan_is_dismissed(db_path, tid, action):
+        log.info(
+            "Todo plan dismissed for thread_id=%s action=%r; skipping recreate",
+            tid,
+            action,
+        )
     else:
         create_thread_plan(db_path, inbox_thread_id=tid, action=action)
         log.info("Created todo plan for thread_id=%s action=%r", tid, action)
