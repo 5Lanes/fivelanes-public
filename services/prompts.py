@@ -17,10 +17,23 @@ except ImportError:  # pragma: no cover
     ZoneInfo = None  # type: ignore[misc, assignment]
 
 _PROMPTS_DIR = Path(__file__).resolve().parent
-_PROMPTS_PATH = Path(
-    os.getenv("FIVELANES_PROMPTS_PATH") or (_PROMPTS_DIR / "prompts.json")
-)
 _PROMPTS_EXAMPLE_PATH = _PROMPTS_DIR / "prompts.example.json"
+
+
+def _default_prompts_path() -> Path:
+    env_override = (os.getenv("FIVELANES_PROMPTS_PATH") or "").strip()
+    if env_override:
+        return Path(env_override)
+    try:
+        from utils.runtime_paths import data_path, load_env
+
+        load_env()
+        return data_path("prompts.json")
+    except Exception:
+        return _PROMPTS_DIR / "prompts.json"
+
+
+_PROMPTS_PATH = _default_prompts_path()
 
 EMAIL_REPLY_MAX_MESSAGES = 3
 SEGMENTATION_MAX_BODY_CHARS = int(os.getenv("SEGMENTATION_MAX_BODY_CHARS") or "12000")
@@ -45,7 +58,8 @@ class PromptMessages:
 def _prompts_missing_message() -> str:
     return (
         f"Missing prompt file at {_PROMPTS_PATH}. "
-        f"Copy {_PROMPTS_EXAMPLE_PATH.name} to prompts.json and fill in your prompts."
+        f"Copy {_PROMPTS_EXAMPLE_PATH.name} to $FIVELANES_DATA_ROOT/prompts.json "
+        f"(or set FIVELANES_PROMPTS_PATH) and fill in your prompts."
     )
 
 

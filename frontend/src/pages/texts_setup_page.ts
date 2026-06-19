@@ -15,7 +15,7 @@ const PAGE_HTML = `
   <header class="texts-setup-header">
     <h2>Text threads</h2>
     <p class="texts-setup-lead">
-      Conversations are loaded from the project <code>conversations/</code> folder (JSON export format).
+      Conversations are loaded from your data directory's <code>conversations/</code> folder (JSON export format).
       Select which threads to track; tracked threads appear on <a href="/threads">Threads</a>.
     </p>
   </header>

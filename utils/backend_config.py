@@ -8,8 +8,10 @@ from typing import Literal
 
 BackendName = Literal["claude", "llama"]
 
-_ROOT = Path(__file__).resolve().parent.parent
-_ENV_PATH = _ROOT / ".env"
+from utils.runtime_paths import env_file, load_env
+
+load_env()
+_ENV_PATH = env_file()
 
 _runtime_backend: BackendName | None = None
 
@@ -50,7 +52,7 @@ def apply_backend(backend: str) -> BackendName:
 
 
 def persist_backend_to_env(backend: str, *, env_path: Path | None = None) -> BackendName:
-    """Write FIVELANES_BACKEND to the project .env file."""
+    """Write FIVELANES_BACKEND to the data directory .env file."""
     b = _normalize_backend(backend)
     path = env_path or _ENV_PATH
     lines: list[str] = []

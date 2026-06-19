@@ -22,6 +22,10 @@ try:
 except ImportError:
     pass
 
+from utils.runtime_paths import data_path, database_path, env_file, infra_root, load_env
+
+load_env()
+
 from utils.backend_config import apply_backend, get_backend, set_backend
 
 apply_backend(os.getenv("FIVELANES_BACKEND") or "llama")
@@ -80,7 +84,7 @@ from services.texts.summarize import summarize_tracked_text_threads
 from utils.run_fivelanes_scheduler import run_fivelanes_cycle, scheduler_loop
 
 
-DB_PATH = str(PROJECT_ROOT / (os.getenv("DATABASE_NAME") or "timeline.db"))
+DB_PATH = database_path()
 
 _pipeline_lock = threading.Lock()
 _pipeline_state: Dict[str, Any] = {
@@ -149,6 +153,13 @@ def _db_cache_etag(db_path: str) -> Tuple[str, str]:
 
 
 class DashboardHandler(SimpleHTTPRequestHandler):
+    def translate_path(self, path: str) -> str:
+        clean = path.split("?", 1)[0]
+        if clean.startswith("/out/"):
+            rel = clean[len("/out/") :].lstrip("/")
+            return str(data_path("out", rel))
+        return super().translate_path(path)
+
     def _send_cache_headers(self, etag: str, last_modified: str) -> None:
         self.send_header("ETag", etag)
         self.send_header("Last-Modified", last_modified)
@@ -639,7 +650,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             )
             return
 
-        llm = get_llm_backend(env_path=str(PROJECT_ROOT / ".env"))
+        llm = get_llm_backend(env_path=str(env_file()))
         thread_ids = [str(s.get("thread_id") or "").strip() for s in summaries]
         summary_datetimes = [str(s.get("datetime") or "").strip() for s in summaries]
         fp = person_summary_fingerprint(
@@ -849,7 +860,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             )
         thread_subject = str(body.get("thread_subject") or "").strip()
         force = bool(body.get("force"))
-        llm = get_llm_backend(env_path=str(PROJECT_ROOT / ".env"))
+        llm = get_llm_backend(env_path=str(env_file()))
         msg_keys = messages_cache_keys(messages, max_messages=EMAIL_REPLY_MAX_MESSAGES)
         fp = email_reply_fingerprint(
             thread_id=thread_id,
@@ -957,7 +968,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             )
             return
         force = bool(body.get("force"))
-        llm = get_llm_backend(env_path=str(PROJECT_ROOT / ".env"))
+        llm = get_llm_backend(env_path=str(env_file()))
         dedupe_key = _meeting_dedupe_key(
             str(body.get("meeting_title") or body.get("summary") or "(No title)").strip()
             or "(No title)",
@@ -1311,7 +1322,7 @@ def _scheduler_thread_main() -> None:
 
 
 def main() -> None:
-    os.chdir(PROJECT_ROOT)
+    os.chdir(infra_root())
     log_path = configure_logging()
     log.info("Dashboard starting (pid=%d, log=%s)", os.getpid(), log_path)
     server = ThreadingHTTPServer((DASHBOARD_HOST, DASHBOARD_PORT), DashboardHandler)

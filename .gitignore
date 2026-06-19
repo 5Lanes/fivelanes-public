@@ -5,16 +5,7 @@ __pycache__/
 *.py[cod]
 .DS_Store
 
-# User data (keep example templates in git; see ! rules below)
-timeline.db
-timeline_old.db
-/out/
-/conversations/
-/logs/
-services/prompts.json
-contacts.json
-
-# OAuth and scheduling config (real files only)
+# OAuth config (real files only; examples stay tracked)
 /credentials/*
 !/credentials/credentials.example.json
 !/credentials/calendar_scheduling_rules.example.json
@@ -22,9 +13,5 @@ contacts.json
 # Dependencies
 node_modules/
 
-# Local-only fixtures and private tests
-/tests/
-services/alfred_test.json
-roadmap.txt
-availability-viewer/node_modules
-availability-viewer/dist
+# Private data
+/fivelanes-data/

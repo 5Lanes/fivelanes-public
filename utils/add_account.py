@@ -2,8 +2,10 @@
 """
 Add a Google account for Gmail + Calendar API access (OAuth).
 
-Requires credentials/credentials.json (Desktop app OAuth client) and that the
+Requires ``$FIVELANES_DATA_ROOT/credentials/credentials.json`` (Desktop app OAuth client) and that the
 redirect URI you use is listed in Google Cloud Console for that client.
+
+Set ``FIVELANES_DATA_ROOT`` in the repo bootstrap ``.env`` before running (see README.md).
 
 Examples (from repository root):
   python3 utils/add_account.py work --serve --open

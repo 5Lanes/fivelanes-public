@@ -1,8 +1,30 @@
 # Fivelanes
 
-Fivelanes pulls email, text threads, and calendar events into `timeline.db`, resolves conversation threads across connected OAuth accounts, and runs segmentation and summaries for the dashboard.
+Fivelanes pulls email, text threads, and calendar events into a private SQLite database (`timeline.db`), resolves conversation threads across connected OAuth accounts, and runs segmentation and summaries for the dashboard.
 
 Licensed under the [MIT License](LICENSE).
+
+## Code vs data
+
+This repository ships **application code only**. Your private runtime data lives in a separate directory (conventionally `fivelanes-data/` next to the clone or anywhere on disk). Point the app at it with `FIVELANES_DATA_ROOT` in a gitignored bootstrap `.env` in the repo root.
+
+Typical data-directory layout:
+
+```
+/path/to/your/fivelanes-data/
+  .env                 # SOURCE_ACCOUNT, API keys, etc.
+  prompts.json         # LLM prompts (from services/prompts.example.json)
+  timeline.db          # SQLite database (created on first run)
+  credentials/
+    credentials.json   # Google OAuth desktop client
+    tokens.json        # OAuth tokens (created by utils/add_account.py)
+    calendar_scheduling_rules.json
+  conversations/       # iMessage/SMS JSON exports
+  out/                 # pipeline outputs (calendar JSON, etc.)
+  logs/
+```
+
+Paths resolve through [`utils/runtime_paths.py`](utils/runtime_paths.py). Override individual paths in your data `.env` (`FIVELANES_PROMPTS_PATH`, `TEXTS_CONVERSATIONS_DIR`, `DATABASE_NAME`, etc.).
 
 ## Input sources
 
@@ -11,13 +33,13 @@ Fivelanes accepts data through four channels. The scheduled pipeline (`fivelanes
 | Channel | How data arrives | Where it lands | Processing |
 |---------|------------------|----------------|------------|
 | **Email** | Mail to `SOURCE_ACCOUNT` (forward, Cc/Bcc, or direct To) | Gmail API → `thread_tracking`, `timeline_entries` | Segmentation + LLM summary (same as inbox pipeline) |
-| **Text** | JSON files in `conversations/` (iMessage export shape) | `thread_tracking` (`text:` prefix) when tracked | Summary only (no email-style segmentation) |
-| **Calendar** | Google Calendar OAuth (connected accounts) | `out/availability_calendar_latest.json`, `meetings` table | Availability export; context for summaries and meeting prep |
-| **Dashboard** | HTTP POST to `/api/*` (tracking, plans, lanes, pipeline run, drafts) | `timeline.db` | User actions and on-demand LLM calls |
+| **Text** | JSON files in your data directory's `conversations/` (iMessage export shape) | `thread_tracking` (`text:` prefix) when tracked | Summary only (no email-style segmentation) |
+| **Calendar** | Google Calendar OAuth (connected accounts) | `$DATA_ROOT/out/availability_calendar_latest.json`, `meetings` table | Availability export; context for summaries and meeting prep |
+| **Dashboard** | HTTP POST to `/api/*` (tracking, plans, lanes, pipeline run, drafts) | `$DATA_ROOT/timeline.db` | User actions and on-demand LLM calls |
 
 ### Email
 
-The primary input is a dedicated Fivelanes inbox (`SOURCE_ACCOUNT`). Connected Gmail OAuth accounts (`credentials/credentials.json`, `credentials/tokens.json`) supply both the inbox pull and thread resolution across mailboxes.
+The primary input is a dedicated Fivelanes inbox (`SOURCE_ACCOUNT`). Connected Gmail OAuth accounts (`$FIVELANES_DATA_ROOT/credentials/credentials.json`, `tokens.json`) supply both the inbox pull and thread resolution across mailboxes.
 
 Mail is pulled with `(to:inbox OR cc:inbox OR bcc:inbox)` plus recipient checks. Four delivery routes are handled in [`services/email/inbox_process.py`](services/email/inbox_process.py) — see [Inbox delivery scenarios](#inbox-delivery-scenarios) below.
 
@@ -31,13 +53,13 @@ python -c "from services.email import populate_timeline; populate_timeline(lookb
 
 ### Text threads
 
-On-disk JSON under `conversations/` (override with `TEXTS_CONVERSATIONS_DIR`) holds iMessage/SMS exports — one file per thread, filename stem = conversation key (e.g. `+15551234567.json`). Each file is a list of message objects with fields like `text`, `date`, `handle`, `is_from_me`, and `guid`.
+On-disk JSON under your data directory's `conversations/` folder (override with `TEXTS_CONVERSATIONS_DIR`) holds iMessage/SMS exports — one file per thread, filename stem = conversation key (e.g. `+15551234567.json`). Each file is a list of message objects with fields like `text`, `date`, `handle`, `is_from_me`, and `guid`.
 
-Fivelanes does not sync texts from a phone automatically. Export conversations externally, drop the JSON files into `conversations/`, then open **Texts setup** (`/texts-setup`) to choose which threads to track. Tracked threads are registered in `thread_tracking` with `inbox_thread_id` `text:<key>` and merged into the Threads view. Summaries are generated via `/api/texts/summarize` or as part of `fivelanes.main`.
+Fivelanes does not sync texts from a phone automatically. Export conversations externally, drop the JSON files into `$FIVELANES_DATA_ROOT/conversations/`, then open **Texts setup** (`/texts-setup`) to choose which threads to track. Tracked threads are registered in `thread_tracking` with `inbox_thread_id` `text:<key>` and merged into the Threads view. Summaries are generated via `/api/texts/summarize` or as part of `fivelanes.main`.
 
 ### Calendar
 
-Google Calendar is read through the same OAuth tokens. After each pipeline run (unless `CALENDAR_AVAILABILITY_DISABLE=1`), events are exported to `out/availability_calendar_latest.json` and synced into the `meetings` table. Optional scheduling rules in `credentials/calendar_scheduling_rules.json` filter which calendars count and set buffers/timezone.
+Google Calendar is read through the same OAuth tokens. After each pipeline run (unless `CALENDAR_AVAILABILITY_DISABLE=1`), events are exported to `$FIVELANES_DATA_ROOT/out/availability_calendar_latest.json` and synced into the `meetings` table. Optional scheduling rules in `$FIVELANES_DATA_ROOT/credentials/calendar_scheduling_rules.json` filter which calendars count and set buffers/timezone.
 
 Run manually:
 
@@ -55,20 +77,31 @@ The background scheduler (`utils/run_fivelanes_scheduler.py`, also started with 
 
 ## Setup
 
-1. Copy [`.env.example`](.env.example) to `.env`.
-2. Copy [`services/prompts.example.json`](services/prompts.example.json) to `services/prompts.json` and fill in your LLM prompts.
-3. Configure required values in `.env`:
+1. **Bootstrap the repo** — copy [`.env.example`](.env.example) to `.env` in the repo root and set `FIVELANES_DATA_ROOT` to your private data directory (any path; e.g. `~/fivelanes-data` or `./fivelanes-data` beside the clone).
+
+2. **Create your data directory:**
+
+   ```bash
+   mkdir -p "$FIVELANES_DATA_ROOT"/{credentials,conversations,out,logs}
+   ```
+
+3. **Configure the data directory** — copy [`data.env.example`](data.env.example) to `$FIVELANES_DATA_ROOT/.env` and set:
    - `SOURCE_ACCOUNT` — Fivelanes inbox address (e.g. `you+fivelanes@example.com`)
    - `SOURCE_OAUTH_ACCOUNT_ID` — label for the Gmail OAuth account that owns that inbox
    - `OWNER_NAME` — your display name (used in summary assembly and UI heuristics)
-4. Gmail OAuth:
-   - Copy [`credentials/credentials.example.json`](credentials/credentials.example.json) to `credentials/credentials.json`
-   - Run `python utils/add_account.py you@example.com` to create `credentials/tokens.json`
-   - Optional: copy [`credentials/calendar_scheduling_rules.example.json`](credentials/calendar_scheduling_rules.example.json) to `credentials/calendar_scheduling_rules.json`
-5. Install dependencies:
-   - Python: `pip install -r requirements-linux.txt` (system package `tesseract-ocr` for image OCR)
+
+4. **Prompts** — copy [`services/prompts.example.json`](services/prompts.example.json) to `$FIVELANES_DATA_ROOT/prompts.json`. Optional: set `FIVELANES_PROMPTS_PATH` if you use a different location.
+
+5. **Gmail OAuth:**
+   - Copy [`credentials/credentials.example.json`](credentials/credentials.example.json) to `$FIVELANES_DATA_ROOT/credentials/credentials.json`
+   - From the repo root: `python utils/add_account.py you@example.com` to create `$FIVELANES_DATA_ROOT/credentials/tokens.json`
+   - Optional: copy [`credentials/calendar_scheduling_rules.example.json`](credentials/calendar_scheduling_rules.example.json) to `$FIVELANES_DATA_ROOT/credentials/calendar_scheduling_rules.json`
+
+6. **Install dependencies:**
+   - Python: `python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements-linux.txt` (system package `tesseract-ocr` for image OCR)
    - Frontend: `cd frontend && npm install && npm run build`
-6. Optional: `FIVELANES_BACKEND` (`llama` or `claude`), Ollama host/models, or `CLAUDE_API_KEY` — see `.env.example`.
+
+7. **Optional:** `FIVELANES_BACKEND` (`llama` or `claude`), Ollama host/models, or `CLAUDE_API_KEY` — see [`data.env.example`](data.env.example).
 
 ## Running
 
@@ -116,7 +149,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development notes.
 
 ## Publishing a public release
 
-The infrastructure ships without `services/prompts.json`. To publish a fresh public repo with no git history, export the cleaned tree and push to a new remote:
+The infrastructure ships without private data. To publish a fresh public repo with no git history, export the cleaned tree and push to a new remote:
 
 ```bash
 git archive HEAD | tar -x -C /tmp/fivelanes-public
@@ -126,4 +159,4 @@ git remote add origin git@github.com:YOUR_ORG/fivelanes.git
 git push -u origin main
 ```
 
-Keep your private fork (with real prompts, credentials, and data) separate.
+Keep your private data directory (and any local clone bootstrap `.env`) separate — never commit `FIVELANES_DATA_ROOT` contents.
