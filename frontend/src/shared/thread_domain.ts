@@ -1,6 +1,7 @@
 import type { LooseObj, ThreadView } from "./types.js";
 import { arr, escapeHtml, recipientsContainAddress, str } from "./utils.js";
 import { otherPartyOwesRe } from "./owner_config.js";
+import { highlightMentionsHtml } from "./availability_windows.js";
 
 export type { ThreadView };
 
@@ -298,7 +299,7 @@ export function nextStepsSectionHtml(steps: NextStep[]): string {
       const label = isFollowUp ? "Follow up needed" : "Response required";
       const typeClass = isFollowUp ? "next-step-type follow-up" : "next-step-type";
       const when = step.by_when ? ` <span class="next-step-when">(${escapeHtml(step.by_when)})</span>` : "";
-      return `<li><span class="${typeClass}">${escapeHtml(label)}</span> ${escapeHtml(step.action)}${when}</li>`;
+      return `<li><span class="${typeClass}">${escapeHtml(label)}</span> ${highlightMentionsHtml(step.action)}${when}</li>`;
     })
     .join("");
   return `<div class="section"><h4>Next steps</h4><ul class="next-steps">${rows}</ul></div>`;
@@ -345,8 +346,20 @@ export function partitionThreadsBySnooze(threads: ThreadView[]): {
 }
 
 export function listSection(title: string, items: unknown): string {
-  const rows = arr(items).map((x) => `<li>${escapeHtml(x)}</li>`).join("");
+  const rows = arr(items).map((x) => `<li>${highlightMentionsHtml(String(x ?? ""))}</li>`).join("");
   return rows ? `<div class="section"><h4>${escapeHtml(title)}</h4><ul>${rows}</ul></div>` : "";
+}
+
+export function renderMentionAwareText(text: string): string {
+  return highlightMentionsHtml(text);
+}
+
+export function threadSummaryTextFragments(thread: ThreadView): string[] {
+  const summary = threadSummaryForDisplay(thread);
+  const out: string[] = [];
+  for (const line of latestUpdatesForThread(thread)) out.push(line);
+  for (const step of ownerOwnedNextSteps(summary)) out.push(step.action);
+  return out;
 }
 
 /** True when the thread card should list per-message blocks (not only header meta). */

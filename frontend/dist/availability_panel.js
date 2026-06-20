@@ -2,23 +2,10 @@
  * Dashboard left-nav availability: loads out/availability_calendar_latest.json
  * and shows only likely-open windows for the next 7 calendar days (document TZ).
  */
+import { dayHeadingLabelShort, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdInTz } from "./shared/time_ui.js";
+import { escapeHtml } from "./shared/utils.js";
 function str(v) {
     return typeof v === "string" ? v : "";
-}
-function escapeHtml(s) {
-    return s
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
-}
-function isoToYmdInZone(iso, timeZone) {
-    return new Intl.DateTimeFormat("en-CA", {
-        timeZone,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-    }).format(new Date(iso));
 }
 function subtractDateIntervals(base, toRemove) {
     if (!base.length)
@@ -70,14 +57,7 @@ function segmentIsoIntervalForDay(isoStart, isoEnd, dayKey, tz) {
     return { start: dayStart, end: new Date(isoEnd) };
 }
 function formatDatePairInTz(a, b, timeZone) {
-    const opts = {
-        timeZone,
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-    };
-    const fmt = new Intl.DateTimeFormat("en-GB", opts);
-    return `${fmt.format(a)}–${fmt.format(b)}`;
+    return formatTimeRangeInTz(a.toISOString(), b.toISOString(), timeZone);
 }
 function parseHm(hm) {
     if (!hm || !/^\d{1,2}:\d{2}$/.test(hm))
@@ -107,36 +87,6 @@ function commitmentRangeOnDay(c, dateKey) {
     if (!(end.getTime() > start.getTime()))
         return null;
     return { start, end };
-}
-/** Today's calendar date YYYY-MM-DD in the given IANA zone. */
-function todayYmdInTz(timeZone) {
-    return new Intl.DateTimeFormat("en-CA", {
-        timeZone,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-    }).format(new Date());
-}
-/** Add whole calendar days to a YYYY-MM-DD string (Gregorian, noon UTC anchor). */
-function addDaysToYmd(ymd, deltaDays) {
-    const [Y, M, D] = ymd.split("-").map(Number);
-    if (!Y || !M || !D)
-        return null;
-    const u = Date.UTC(Y, M - 1, D + deltaDays, 12, 0, 0);
-    return new Date(u).toISOString().slice(0, 10);
-}
-function nextNDaysFromYmd(startYmd, n) {
-    const out = [];
-    for (let i = 0; i < n; i++) {
-        const d = addDaysToYmd(startYmd, i);
-        if (d)
-            out.push(d);
-    }
-    return out;
-}
-function dayHeadingLabel(ymd) {
-    const d = new Date(`${ymd}T12:00:00Z`);
-    return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 function getTimeZone(data) {
     const meta = (data.meta || {});
@@ -281,7 +231,7 @@ function renderAgendaDayHtml(dateKey, data, opts) {
             .join("");
     return `<section class="dash-avail-day" data-date="${escapeHtml(dateKey)}">
     <header class="dash-avail-day-head">
-      <div class="dash-avail-day-name">${escapeHtml(dayHeadingLabel(dateKey))}</div>
+      <div class="dash-avail-day-name">${escapeHtml(dayHeadingLabelShort(dateKey))}</div>
       <div class="dash-avail-day-ymd">${escapeHtml(dateKey)}</div>
     </header>
     <ul class="dash-avail-list">${rows}</ul>

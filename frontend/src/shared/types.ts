@@ -46,3 +46,23 @@ export type PlanView = {
   created_at: string;
   updated_at: string;
 };
+
+export type SlotMention = {
+  raw: string;
+  start: number;
+  end: number;
+  date_key: string;
+  start_minute: number;
+  end_minute: number;
+  label: string;
+};
+
+export type AvailabilityStatus = "open" | "virtual-only" | "busy" | "blocked" | "unknown";
+
+export type AvailabilityMatch = {
+  status: AvailabilityStatus;
+  date_key: string;
+  start_minute: number;
+  end_minute: number;
+  details: string;
+};

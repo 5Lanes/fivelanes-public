@@ -1,6 +1,7 @@
 import { applySavedThreadDraft, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, setBundle, } from "../shared/summaries_store.js";
 import { formatDraftReplyMarkdown, latestUpdatesForThread, listSection, ownerNextStepsForThread, messageSourceDetailsHtml, nextStepsSectionHtml, partitionThreadsBySnooze, pendingMessageCountForThread, pendingMessagePillHtml, shouldShowThreadMessageBlocks, threadIsText, threadLabel, threadMessagesForDisplay, threadMessagesForReply, threadSummaryErrorHtml, threadSummaryForDisplay, } from "../shared/thread_domain.js";
 import { escapeHtml, formatDate, formatRecipients, str, toneClass } from "../shared/utils.js";
+import { ensureAvailabilityDocLoaded } from "../shared/availability_windows.js";
 const PAGE_HTML = `
 <div class="dashboard-layout">
   <aside class="thread-nav" id="thread-nav">
@@ -301,6 +302,7 @@ export async function renderThreadsPage() {
     const data = getCurrentData();
     if (!data)
         return;
+    await ensureAvailabilityDocLoaded();
     const { active, snoozed, removed, snoozedCount, removedCount } = partitionThreadsBySnooze(getCurrentThreads());
     const bySnooze = threadViewMode === "snoozed" ? snoozed : threadViewMode === "removed" ? removed : active;
     const channelCounts = {

@@ -3,6 +3,9 @@
  * Source: ``/api/meetings`` (timeline.db meetings table), else out/availability_calendar_latest.json.
  */
 
+import { dayHeadingLabelLong, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdLocal } from "./shared/time_ui.js";
+import { escapeHtml } from "./shared/utils.js";
+
 type LooseObj = Record<string, unknown>;
 
 export const MEETINGS_LOOKAHEAD_DAYS = 14;
@@ -44,13 +47,6 @@ function parseAttendees(v: unknown): string[] {
   return out;
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
 
 function parseJsonBody(text: string): LooseObj | null {
   const trimmed = text.trim();
@@ -63,54 +59,6 @@ function parseJsonBody(text: string): LooseObj | null {
   }
 }
 
-function isoToYmdInZone(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(iso));
-}
-
-function formatTimeRangeInTz(startIso: string, endIso: string, timeZone: string): string {
-  const opts: Intl.DateTimeFormatOptions = {
-    timeZone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  };
-  const fmt = new Intl.DateTimeFormat("en-GB", opts);
-  const start = new Date(startIso);
-  const end = endIso ? new Date(endIso) : start;
-  return `${fmt.format(start)}–${fmt.format(end)}`;
-}
-
-function dayHeadingLabel(dateKey: string): string {
-  const d = new Date(`${dateKey}T12:00:00`);
-  return d.toLocaleDateString(undefined, { weekday: "long" });
-}
-
-function nextNDaysFromYmd(startYmd: string, n: number): string[] {
-  const out: string[] = [];
-  const [y, m, d] = startYmd.split("-").map(Number);
-  const cur = new Date(y, m - 1, d);
-  for (let i = 0; i < n; i += 1) {
-    const yy = cur.getFullYear();
-    const mm = String(cur.getMonth() + 1).padStart(2, "0");
-    const dd = String(cur.getDate()).padStart(2, "0");
-    out.push(`${yy}-${mm}-${dd}`);
-    cur.setDate(cur.getDate() + 1);
-  }
-  return out;
-}
-
-function todayYmdLocal(): string {
-  const now = new Date();
-  const yy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  return `${yy}-${mm}-${dd}`;
-}
 
 function mergeAttendeeLists(a: string[], b: string[]): string[] {
   const seen = new Set<string>(a);
@@ -346,7 +294,7 @@ function renderDaySection(dateKey: string, rows: MeetingRow[], tz: string): stri
   const inner = rows.map((m) => renderMeetingRow(m, tz)).join("");
   return `<section class="dash-avail-day" data-date="${escapeHtml(dateKey)}">
     <header class="dash-avail-day-head">
-      <div class="dash-avail-day-name">${escapeHtml(dayHeadingLabel(dateKey))}</div>
+      <div class="dash-avail-day-name">${escapeHtml(dayHeadingLabelLong(dateKey))}</div>
       <div class="dash-avail-day-ymd">${escapeHtml(dateKey)}</div>
     </header>
     <ul class="dash-avail-list">${inner}</ul>

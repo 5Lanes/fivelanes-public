@@ -1,5 +1,6 @@
 import { arr, escapeHtml, recipientsContainAddress, str } from "./utils.js";
 import { otherPartyOwesRe } from "./owner_config.js";
+import { highlightMentionsHtml } from "./availability_windows.js";
 let displaySourceAccount = "";
 /** Inbox address used to skip Fivelanes delivery shells when picking thread summaries. */
 export function setDisplaySourceAccount(account) {
@@ -279,7 +280,7 @@ export function nextStepsSectionHtml(steps) {
         const label = isFollowUp ? "Follow up needed" : "Response required";
         const typeClass = isFollowUp ? "next-step-type follow-up" : "next-step-type";
         const when = step.by_when ? ` <span class="next-step-when">(${escapeHtml(step.by_when)})</span>` : "";
-        return `<li><span class="${typeClass}">${escapeHtml(label)}</span> ${escapeHtml(step.action)}${when}</li>`;
+        return `<li><span class="${typeClass}">${escapeHtml(label)}</span> ${highlightMentionsHtml(step.action)}${when}</li>`;
     })
         .join("");
     return `<div class="section"><h4>Next steps</h4><ul class="next-steps">${rows}</ul></div>`;
@@ -316,8 +317,20 @@ export function partitionThreadsBySnooze(threads) {
     return { active, snoozed, removed, snoozedCount, removedCount };
 }
 export function listSection(title, items) {
-    const rows = arr(items).map((x) => `<li>${escapeHtml(x)}</li>`).join("");
+    const rows = arr(items).map((x) => `<li>${highlightMentionsHtml(String(x ?? ""))}</li>`).join("");
     return rows ? `<div class="section"><h4>${escapeHtml(title)}</h4><ul>${rows}</ul></div>` : "";
+}
+export function renderMentionAwareText(text) {
+    return highlightMentionsHtml(text);
+}
+export function threadSummaryTextFragments(thread) {
+    const summary = threadSummaryForDisplay(thread);
+    const out = [];
+    for (const line of latestUpdatesForThread(thread))
+        out.push(line);
+    for (const step of ownerOwnedNextSteps(summary))
+        out.push(step.action);
+    return out;
 }
 /** True when the thread card should list per-message blocks (not only header meta). */
 export function shouldShowThreadMessageBlocks(thread, displayMessages) {

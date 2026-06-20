@@ -5,58 +5,10 @@
 import { MEETINGS_LOOKAHEAD_DAYS, loadMeetings, meetingDedupeKey, } from "./meetings_panel.js";
 import { buildThreadMatchContexts, findMatchingThread, } from "./thread_meeting_match.js";
 import { formatPlanByWhen, sortPlansByDueDate, planExistsForStep, } from "./shared/plan_helpers.js";
-import { ownerNextStepsForThread } from "./shared/thread_domain.js";
-function escapeHtml(s) {
-    return s
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
-}
-function isoToYmdInZone(iso, timeZone) {
-    return new Intl.DateTimeFormat("en-CA", {
-        timeZone,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-    }).format(new Date(iso));
-}
-function formatTimeRangeInTz(startIso, endIso, timeZone) {
-    const opts = {
-        timeZone,
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-    };
-    const fmt = new Intl.DateTimeFormat("en-GB", opts);
-    const start = new Date(startIso);
-    const end = endIso ? new Date(endIso) : start;
-    return `${fmt.format(start)}–${fmt.format(end)}`;
-}
-function dayHeadingLabel(dateKey) {
-    const d = new Date(`${dateKey}T12:00:00`);
-    return d.toLocaleDateString(undefined, { weekday: "long" });
-}
-function todayYmdLocal() {
-    const now = new Date();
-    const yy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, "0");
-    const dd = String(now.getDate()).padStart(2, "0");
-    return `${yy}-${mm}-${dd}`;
-}
-function nextNDaysFromYmd(startYmd, n) {
-    const out = [];
-    const [y, m, d] = startYmd.split("-").map(Number);
-    const cur = new Date(y, m - 1, d);
-    for (let i = 0; i < n; i += 1) {
-        const yy = cur.getFullYear();
-        const mm = String(cur.getMonth() + 1).padStart(2, "0");
-        const dd = String(cur.getDate()).padStart(2, "0");
-        out.push(`${yy}-${mm}-${dd}`);
-        cur.setDate(cur.getDate() + 1);
-    }
-    return out;
-}
+import { ownerNextStepsForThread, renderMentionAwareText, } from "./shared/thread_domain.js";
+import { dayHeadingLabelLong, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdLocal } from "./shared/time_ui.js";
+import { ensureAvailabilityDocLoaded } from "./shared/availability_windows.js";
+import { escapeHtml } from "./shared/utils.js";
 function threadNavLabel(t, labelForThread) {
     const base = labelForThread(t);
     const snooze = Number(t.messages[0]?.summary?.snoozed || 0);
@@ -69,7 +21,7 @@ function normalizeStepType(step) {
 }
 function suggestedStepLiHtml(threadId, step) {
     return `<li class="dashboard-suggested-step" data-thread-id="${escapeHtml(threadId)}" data-step-type="${escapeHtml(normalizeStepType(step))}" data-step-action="${escapeHtml(step.action)}">
-    <span class="suggested-step-action">${escapeHtml(step.action)}</span>
+    <span class="suggested-step-action">${renderMentionAwareText(step.action)}</span>
     <span class="suggested-step-schedule">
       <input type="date" class="suggested-step-date" aria-label="Due date for plan" />
       <button type="button" class="add-suggested-plan-btn" disabled>Add plan</button>
@@ -103,7 +55,7 @@ export function renderDashboardPlans(plansEl, plans, labelForThreadId) {
         return `<li class="dashboard-plan-row" data-plan-id="${plan.id}" data-thread-id="${escapeHtml(plan.inbox_thread_id)}" data-plan-action="${escapeHtml(plan.action)}" data-plan-step-type="${escapeHtml(plan.step_type)}" data-plan-by-when="${escapeHtml(plan.by_when)}">
         <div class="dashboard-plan-view">
           <div class="dashboard-plan-main">
-            <span class="dashboard-plan-action">${escapeHtml(plan.action)}</span>
+            <span class="dashboard-plan-action">${renderMentionAwareText(plan.action)}</span>
             ${whenHtml}
           </div>
           <span class="dashboard-plan-thread">${threadLabel}</span>
@@ -334,7 +286,7 @@ function renderMatchedAgendaHtml(matched, tz, days) {
             .join("");
         sections.push(`<section class="dash-avail-day" data-date="${escapeHtml(dateKey)}">
     <header class="dash-avail-day-head">
-      <div class="dash-avail-day-name">${escapeHtml(dayHeadingLabel(dateKey))}</div>
+      <div class="dash-avail-day-name">${escapeHtml(dayHeadingLabelLong(dateKey))}</div>
       <div class="dash-avail-day-ymd">${escapeHtml(dateKey)}</div>
     </header>
     <ul class="dash-avail-list">${inner}</ul>
@@ -346,6 +298,7 @@ function renderMatchedAgendaHtml(matched, tz, days) {
     return `<div class="dash-avail-agenda">${sections.join("")}</div>`;
 }
 export async function refreshDashboard(threads, opts) {
+    await ensureAvailabilityDocLoaded();
     const tracking = threads.filter((t) => {
         const snooze = Number(t.messages[0]?.summary?.snoozed || 0);
         return snooze === 0 || snooze === 1;

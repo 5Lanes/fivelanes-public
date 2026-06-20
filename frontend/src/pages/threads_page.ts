@@ -26,6 +26,7 @@ import {
 } from "../shared/thread_domain.js";
 import type { LooseObj, ThreadView } from "../shared/types.js";
 import { escapeHtml, formatDate, formatRecipients, str, toneClass } from "../shared/utils.js";
+import { ensureAvailabilityDocLoaded } from "../shared/availability_windows.js";
 
 const PAGE_HTML = `
 <div class="dashboard-layout">
@@ -351,6 +352,7 @@ export function mountThreadsPage(root: HTMLElement): void {
 export async function renderThreadsPage(): Promise<void> {
   const data = getCurrentData();
   if (!data) return;
+  await ensureAvailabilityDocLoaded();
 
   const { active, snoozed, removed, snoozedCount, removedCount } = partitionThreadsBySnooze(getCurrentThreads());
   const bySnooze = threadViewMode === "snoozed" ? snoozed : threadViewMode === "removed" ? removed : active;

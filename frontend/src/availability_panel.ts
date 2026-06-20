@@ -3,6 +3,9 @@
  * and shows only likely-open windows for the next 7 calendar days (document TZ).
  */
 
+import { dayHeadingLabelShort, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdInTz } from "./shared/time_ui.js";
+import { escapeHtml } from "./shared/utils.js";
+
 type LooseObj = Record<string, unknown>;
 
 type Layer = "parenting" | "child_home" | "busy" | "open" | "commit";
@@ -20,22 +23,6 @@ function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function isoToYmdInZone(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(iso));
-}
 
 function subtractDateIntervals(
   base: Array<{ start: Date; end: Date }>,
@@ -89,14 +76,7 @@ function segmentIsoIntervalForDay(
 }
 
 function formatDatePairInTz(a: Date, b: Date, timeZone: string): string {
-  const opts: Intl.DateTimeFormatOptions = {
-    timeZone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  };
-  const fmt = new Intl.DateTimeFormat("en-GB", opts);
-  return `${fmt.format(a)}–${fmt.format(b)}`;
+  return formatTimeRangeInTz(a.toISOString(), b.toISOString(), timeZone);
 }
 
 function parseHm(hm: string | undefined): { h: number; m: number } | null {
@@ -135,38 +115,6 @@ function commitmentRangeOnDay(c: CommitmentRow, dateKey: string): { start: Date;
   const end = new Date(`${dateKey}T${String(em.h).padStart(2, "0")}:${String(em.m).padStart(2, "0")}:00`);
   if (!(end.getTime() > start.getTime())) return null;
   return { start, end };
-}
-
-/** Today's calendar date YYYY-MM-DD in the given IANA zone. */
-function todayYmdInTz(timeZone: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
-}
-
-/** Add whole calendar days to a YYYY-MM-DD string (Gregorian, noon UTC anchor). */
-function addDaysToYmd(ymd: string, deltaDays: number): string | null {
-  const [Y, M, D] = ymd.split("-").map(Number);
-  if (!Y || !M || !D) return null;
-  const u = Date.UTC(Y, M - 1, D + deltaDays, 12, 0, 0);
-  return new Date(u).toISOString().slice(0, 10);
-}
-
-function nextNDaysFromYmd(startYmd: string, n: number): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < n; i++) {
-    const d = addDaysToYmd(startYmd, i);
-    if (d) out.push(d);
-  }
-  return out;
-}
-
-function dayHeadingLabel(ymd: string): string {
-  const d = new Date(`${ymd}T12:00:00Z`);
-  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
 function getTimeZone(data: LooseObj): string {
@@ -319,7 +267,7 @@ function renderAgendaDayHtml(dateKey: string, data: LooseObj, opts: { openOnly: 
 
   return `<section class="dash-avail-day" data-date="${escapeHtml(dateKey)}">
     <header class="dash-avail-day-head">
-      <div class="dash-avail-day-name">${escapeHtml(dayHeadingLabel(dateKey))}</div>
+      <div class="dash-avail-day-name">${escapeHtml(dayHeadingLabelShort(dateKey))}</div>
       <div class="dash-avail-day-ymd">${escapeHtml(dateKey)}</div>
     </header>
     <ul class="dash-avail-list">${rows}</ul>

@@ -2,6 +2,8 @@
  * Meetings view: deduplicated calendar events for the next N days.
  * Source: ``/api/meetings`` (timeline.db meetings table), else out/availability_calendar_latest.json.
  */
+import { dayHeadingLabelLong, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdLocal } from "./shared/time_ui.js";
+import { escapeHtml } from "./shared/utils.js";
 export const MEETINGS_LOOKAHEAD_DAYS = 14;
 const MEETINGS_CACHE_KEY = "fivelanes_meetings_cache";
 const MEETINGS_ETAG_KEY = "fivelanes_meetings_etag";
@@ -22,13 +24,6 @@ function parseAttendees(v) {
     }
     return out;
 }
-function escapeHtml(s) {
-    return s
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
-}
 function parseJsonBody(text) {
     const trimmed = text.trim();
     if (!trimmed.startsWith("{") && !trimmed.startsWith("["))
@@ -40,50 +35,6 @@ function parseJsonBody(text) {
     catch {
         return null;
     }
-}
-function isoToYmdInZone(iso, timeZone) {
-    return new Intl.DateTimeFormat("en-CA", {
-        timeZone,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-    }).format(new Date(iso));
-}
-function formatTimeRangeInTz(startIso, endIso, timeZone) {
-    const opts = {
-        timeZone,
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-    };
-    const fmt = new Intl.DateTimeFormat("en-GB", opts);
-    const start = new Date(startIso);
-    const end = endIso ? new Date(endIso) : start;
-    return `${fmt.format(start)}–${fmt.format(end)}`;
-}
-function dayHeadingLabel(dateKey) {
-    const d = new Date(`${dateKey}T12:00:00`);
-    return d.toLocaleDateString(undefined, { weekday: "long" });
-}
-function nextNDaysFromYmd(startYmd, n) {
-    const out = [];
-    const [y, m, d] = startYmd.split("-").map(Number);
-    const cur = new Date(y, m - 1, d);
-    for (let i = 0; i < n; i += 1) {
-        const yy = cur.getFullYear();
-        const mm = String(cur.getMonth() + 1).padStart(2, "0");
-        const dd = String(cur.getDate()).padStart(2, "0");
-        out.push(`${yy}-${mm}-${dd}`);
-        cur.setDate(cur.getDate() + 1);
-    }
-    return out;
-}
-function todayYmdLocal() {
-    const now = new Date();
-    const yy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, "0");
-    const dd = String(now.getDate()).padStart(2, "0");
-    return `${yy}-${mm}-${dd}`;
 }
 function mergeAttendeeLists(a, b) {
     const seen = new Set(a);
@@ -319,7 +270,7 @@ function renderDaySection(dateKey, rows, tz) {
     const inner = rows.map((m) => renderMeetingRow(m, tz)).join("");
     return `<section class="dash-avail-day" data-date="${escapeHtml(dateKey)}">
     <header class="dash-avail-day-head">
-      <div class="dash-avail-day-name">${escapeHtml(dayHeadingLabel(dateKey))}</div>
+      <div class="dash-avail-day-name">${escapeHtml(dayHeadingLabelLong(dateKey))}</div>
       <div class="dash-avail-day-ymd">${escapeHtml(dateKey)}</div>
     </header>
     <ul class="dash-avail-list">${inner}</ul>

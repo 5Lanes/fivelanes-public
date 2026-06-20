@@ -527,6 +527,37 @@ header p.run-meta {
   min-width: 0;
 }
 
+.slot-mention {
+  display: inline-block;
+  padding: 0.02rem 0.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  line-height: 1.35;
+}
+
+.slot-mention--open {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.slot-mention--virtual-only {
+  border-color: color-mix(in srgb, var(--info) 45%, var(--border));
+  background: color-mix(in srgb, var(--info) 16%, transparent);
+}
+
+.slot-mention--busy,
+.slot-mention--blocked {
+  border-color: color-mix(in srgb, var(--warn) 42%, var(--border));
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+}
+
+.slot-mention--unknown {
+  opacity: 0.9;
+}
+
 .suggested-step-schedule {
   display: flex;
   flex-wrap: wrap;
