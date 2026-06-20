@@ -83,7 +83,32 @@ def prompt_version() -> str:
 
 
 def _prompt_template(key: str) -> Union[str, Dict[str, str]]:
-    return _load_prompts()[key]
+    prompts = _load_prompts()
+    if key in prompts:
+        return prompts[key]
+    if key == "lane_summary" and "person_summary" in prompts:
+        return _lane_summary_from_person_prompt(prompts["person_summary"])
+    raise KeyError(key)
+
+
+def _lane_summary_from_person_prompt(
+    raw: Union[str, Dict[str, str]],
+) -> Union[str, Dict[str, str]]:
+    """Derive lane_summary templates from person_summary for older prompts.json files."""
+
+    def adapt(text: str) -> str:
+        return (
+            text.replace("{person_name}", "{lane_name}")
+            .replace("person-level", "lane-level")
+            .replace("person level", "lane level")
+        )
+
+    if isinstance(raw, dict):
+        return {
+            "system": adapt(str(raw.get("system") or "")),
+            "user": adapt(str(raw.get("user") or "")),
+        }
+    return adapt(str(raw))
 
 
 def _format_prompt_pair(key: str, **kwargs: Any) -> PromptMessages:
@@ -166,29 +191,63 @@ def _segmentation_email_body(body: str) -> str:
     return text
 
 
+def _message_datetime_key(msg: Dict[str, Any]) -> str:
+    return str(msg.get("datetime") or msg.get("timestamp") or "").strip()
+
+
+def _parse_message_datetime(dt: str) -> datetime:
+    if not dt:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(str(dt).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
 def _build_thread_message_blocks(
     messages: Sequence[Dict[str, Any]],
     *,
     max_messages: int | None = None,
     message_template: str | None = None,
     sanitize: bool = False,
+    chronological: bool = False,
 ) -> Tuple[str, int]:
-    """Return (joined blocks, omitted count). Messages should be newest-first."""
+    """
+    Return (joined blocks, omitted count).
+
+    Default (``chronological=False``): newest first — index 1 is the latest message.
+    When ``chronological=True``: oldest first — index 1 is the earliest message.
+    """
     msg_list = list(messages)
+    if chronological:
+        msg_list.sort(key=lambda m: _parse_message_datetime(_message_datetime_key(m)))
+    else:
+        msg_list.sort(
+            key=lambda m: _parse_message_datetime(_message_datetime_key(m)),
+            reverse=True,
+        )
+
     omitted = 0
-    if max_messages is not None and len(msg_list) > max_messages:
+    if max_messages is not None and max_messages > 0 and len(msg_list) > max_messages:
         omitted = len(msg_list) - max_messages
-        msg_list = msg_list[:max_messages]
+        if chronological:
+            msg_list = msg_list[-max_messages:]
+        else:
+            msg_list = msg_list[:max_messages]
 
     block_tpl = message_template or _thread_message_block_template()
     blocks: List[str] = []
     if omitted:
+        order_label = "chronological" if chronological else "most recent"
         blocks.append(
-            f"--- Context ---\nOnly the {max_messages} most recent messages are shown "
+            f"--- Context ---\nOnly the {max_messages} {order_label} messages are shown "
             f"({omitted} older message(s) omitted from this prompt).\n"
         )
     for i, msg in enumerate(msg_list, start=1):
-        dt = str(msg.get("datetime") or msg.get("timestamp") or "").strip()
+        dt = _message_datetime_key(msg)
         if sanitize:
             sender = _sanitize_summary_text(msg.get("sender") or msg.get("from") or "")
             recipients = _sanitize_summary_text(msg.get("recipients") or "")
@@ -378,6 +437,55 @@ def _summary_datetime_key(summary: Dict[str, Any]) -> str:
     return str(summary.get("datetime") or "").strip()
 
 
+def _aggregate_summary_sort_datetime(summary: Dict[str, Any], db_path: str | None) -> datetime:
+    if db_path:
+        from utils.database import aggregate_thread_chronological_anchor, _parse_iso_datetime
+
+        return _parse_iso_datetime(aggregate_thread_chronological_anchor(db_path, summary))
+    return _parse_message_datetime(_summary_datetime_key(summary))
+
+
+def _cleaned_rows_to_prompt_messages(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "datetime": str(r.get("datetime") or ""),
+            "sender": str(r.get("sender") or r.get("forwarded_from") or "").strip(),
+            "recipients": str(r.get("recipients") or ""),
+            "subject": str(r.get("subject") or ""),
+            "content": str(r.get("cleaned_content") or ""),
+        }
+        for r in rows
+    ]
+
+
+def _chronological_thread_messages_block(
+    summary: Dict[str, Any],
+    *,
+    db_path: str | None,
+    max_messages: int,
+) -> str:
+    if not db_path:
+        return ""
+    tid = str(summary.get("thread_id") or "").strip()
+    if not tid:
+        return ""
+    from utils.database import load_processed_cleaned_for_thread
+
+    cleaned = load_processed_cleaned_for_thread(db_path, tid)
+    if not cleaned:
+        return ""
+    prompt_msgs = _cleaned_rows_to_prompt_messages(cleaned)
+    msg_text, _ = _build_thread_message_blocks(
+        prompt_msgs,
+        max_messages=max_messages,
+        sanitize=True,
+        chronological=True,
+    )
+    if not msg_text.strip():
+        return ""
+    return f"\n\nEmails in this thread (chronological order, oldest first):\n{msg_text}"
+
+
 def _format_thread_summary_block(
     index: int,
     summary: Dict[str, Any],
@@ -411,18 +519,26 @@ def _build_aggregate_thread_summary_blocks(
     *,
     max_threads: int | None = None,
     block_template: str | None = None,
+    db_path: str | None = None,
 ) -> str:
     """
     Format existing thread summaries for lane/person aggregate prompts.
 
-    Summaries are sorted by ``datetime`` ascending (oldest first). When over the cap,
+    Threads are sorted by earliest email datetime ascending. When over the cap,
     only the most recent threads are included, still shown in chronological order.
+    Each thread includes its emails in chronological order (oldest first).
     """
-    summaries = sorted(list(thread_summaries), key=_summary_datetime_key)
+    summaries = sorted(
+        list(thread_summaries),
+        key=lambda s: _aggregate_summary_sort_datetime(s, db_path),
+    )
     omitted = 0
     if max_threads is not None and max_threads > 0 and len(summaries) > max_threads:
         omitted = len(summaries) - max_threads
         summaries = summaries[-max_threads:]
+
+    settings = _load_settings()
+    max_messages = int(settings.get("thread_summary_max_messages") or 12)
 
     blocks: List[str] = []
     if omitted:
@@ -432,11 +548,13 @@ def _build_aggregate_thread_summary_blocks(
         )
     block_tpl = block_template or _lane_thread_summary_block_template()
     for i, summary in enumerate(summaries, start=1):
-        blocks.append(
-            _format_thread_summary_block(
-                i, summary, block_template=block_tpl, include_datetime=True
-            )
+        block = _format_thread_summary_block(
+            i, summary, block_template=block_tpl, include_datetime=True
         )
+        block += _chronological_thread_messages_block(
+            summary, db_path=db_path, max_messages=max_messages
+        )
+        blocks.append(block)
     return "\n\n".join(blocks)
 
 
@@ -446,6 +564,7 @@ def format_person_summary_prompt(
     *,
     block_template: str | None = None,
     as_of: datetime | None = None,
+    db_path: str | None = None,
 ) -> PromptMessages:
     """
     Build a person-level summary prompt from existing thread summaries (not raw email).
@@ -460,10 +579,46 @@ def format_person_summary_prompt(
         thread_summaries,
         max_threads=max_threads,
         block_template=block_template,
+        db_path=db_path,
     )
     return _format_prompt_pair(
         "person_summary",
         person_name=(person_name or "").strip() or "(unnamed person)",
+        thread_summaries=thread_summaries_text,
+        summary_datetime=summary_as_of_datetime(as_of=as_of),
+    )
+
+
+def format_lane_summary_prompt(
+    lane_name: str,
+    thread_summaries: Sequence[Dict[str, Any]],
+    *,
+    block_template: str | None = None,
+    as_of: datetime | None = None,
+    db_path: str | None = None,
+) -> PromptMessages:
+    """
+    Build a lane-level summary prompt from existing thread summaries (not raw email).
+
+    Each summary dict should include fields produced by thread summarization, such as
+    ``datetime``, ``latest_updates``, ``next_steps``, ``tone``, ``suggested_thread_label``,
+    and ``snoozed``.
+    """
+    settings = _load_settings()
+    max_threads = int(
+        settings.get("lane_summary_max_threads")
+        or settings.get("person_summary_max_threads")
+        or 10
+    )
+    thread_summaries_text = _build_aggregate_thread_summary_blocks(
+        thread_summaries,
+        max_threads=max_threads,
+        block_template=block_template,
+        db_path=db_path,
+    )
+    return _format_prompt_pair(
+        "lane_summary",
+        lane_name=(lane_name or "").strip() or "(unnamed lane)",
         thread_summaries=thread_summaries_text,
         summary_datetime=summary_as_of_datetime(as_of=as_of),
     )

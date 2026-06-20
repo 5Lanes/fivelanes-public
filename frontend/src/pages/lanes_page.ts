@@ -1,19 +1,25 @@
 import {
+  listSection,
   partitionThreadsBySnooze,
   threadEmailSubject,
 } from "../shared/thread_domain.js";
 import {
   applyLaneCreated,
+  applyLaneRemoved,
+  applyLaneSummary,
   applyLaneThreadMembership,
   getCurrentData,
   getCurrentSourceLabel,
   getCurrentThreads,
+  getLaneSummary,
   getLaneThreadIds,
   getLanes,
+  loadLatestBundle,
+  normalizeBundle,
   setBundle,
 } from "../shared/summaries_store.js";
 import { escapeHtml, str } from "../shared/utils.js";
-import type { LaneView, LooseObj } from "../shared/types.js";
+import type { LaneSummaryView, LaneView, LooseObj } from "../shared/types.js";
 
 const PAGE_HTML = `
 <div class="view-lanes">
@@ -57,7 +63,36 @@ function threadPickerHtml(laneId: number, selectedIds: Set<string>): string {
   </div>`;
 }
 
-function laneCardHtml(lane: LaneView, threadIds: string[], expanded: boolean): string {
+function laneSummaryHtml(summary: LaneSummaryView | null): string {
+  if (!summary) {
+    return `<p class="lane-summary-empty">No summary yet. Assign threads and refresh to generate one.</p>`;
+  }
+  const tone = summary.tone_overview.trim();
+  const updated = summary.updated_at.trim();
+  const metaParts: string[] = [];
+  if (tone) metaParts.push(escapeHtml(tone));
+  if (updated) metaParts.push(`Updated ${escapeHtml(updated.slice(0, 10))}`);
+  const meta = metaParts.length
+    ? `<p class="lane-summary-meta">${metaParts.join(" · ")}</p>`
+    : "";
+  const body = summary.summary.trim()
+    ? `<p class="lane-summary-text">${escapeHtml(summary.summary)}</p>`
+    : "";
+  return `<div class="lane-summary">
+    ${meta}
+    ${body}
+    ${listSection("Highlights", summary.highlights)}
+    ${listSection("Current priorities", summary.current_priorities)}
+    ${listSection("Waiting on others", summary.waiting_on_others)}
+  </div>`;
+}
+
+function laneCardHtml(
+  lane: LaneView,
+  threadIds: string[],
+  summary: LaneSummaryView | null,
+  expanded: boolean,
+): string {
   const selected = new Set(threadIds);
   const threadLabels = threadIds
     .map((tid) => {
@@ -76,11 +111,18 @@ function laneCardHtml(lane: LaneView, threadIds: string[], expanded: boolean): s
       <h2>${escapeHtml(lane.name)}</h2>
       <span class="lane-count-pill">${threadIds.length} thread${threadIds.length === 1 ? "" : "s"}</span>
     </header>
+    ${laneSummaryHtml(summary)}
     ${threadsBlock}
     ${picker}
     <div class="user-lane-actions">
+      <button type="button" class="lane-refresh-summary-btn" data-lane-id="${lane.id}"${threadIds.length ? "" : " disabled"}>
+        Refresh summary
+      </button>
       <button type="button" class="lane-edit-threads-btn" data-lane-id="${lane.id}">
         ${expanded ? "Done" : threadIds.length ? "Edit threads" : "Add threads"}
+      </button>
+      <button type="button" class="lane-delete-btn" data-lane-id="${lane.id}" data-lane-name="${escapeHtml(lane.name)}">
+        Delete lane
       </button>
     </div>
   </article>`;
@@ -100,8 +142,9 @@ function renderLanesList(): void {
   listEl.innerHTML = lanes
     .map((lane) => {
       const threadIds = getLaneThreadIds(data, lane.id);
+      const summary = getLaneSummary(data, lane.id);
       const expanded = assignLaneId === lane.id;
-      return laneCardHtml(lane, threadIds, expanded);
+      return laneCardHtml(lane, threadIds, summary, expanded);
     })
     .join("");
 }
@@ -132,6 +175,27 @@ async function persistLaneThread(laneId: number, threadId: string, inLane: boole
   });
   const body = (await res.json().catch(() => ({}))) as LooseObj;
   if (!res.ok) throw new Error(str(body.error) || `Lane update failed (${res.status})`);
+}
+
+async function persistLaneSummary(laneId: number, force = false): Promise<LooseObj> {
+  const res = await fetch("/api/lanes/summary", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lane_id: laneId, force }),
+  });
+  const body = (await res.json().catch(() => ({}))) as LooseObj;
+  if (!res.ok) throw new Error(str(body.error) || `Lane summary failed (${res.status})`);
+  return body;
+}
+
+async function persistLaneDelete(laneId: number): Promise<void> {
+  const res = await fetch("/api/lanes/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lane_id: laneId }),
+  });
+  const body = (await res.json().catch(() => ({}))) as LooseObj;
+  if (!res.ok) throw new Error(str(body.error) || `Delete lane failed (${res.status})`);
 }
 
 function reloadFromStore(): void {
@@ -185,6 +249,54 @@ export function bindLanesInteractions(): void {
       const laneId = Number(editBtn.dataset.laneId) || 0;
       assignLaneId = assignLaneId === laneId ? null : laneId;
       renderLanesList();
+      return;
+    }
+
+    const refreshBtn = target.closest(".lane-refresh-summary-btn") as HTMLButtonElement | null;
+    if (refreshBtn && !refreshBtn.disabled) {
+      const laneId = Number(refreshBtn.dataset.laneId) || 0;
+      if (!laneId) return;
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = "Refreshing…";
+      void (async () => {
+        try {
+          const body = await persistLaneSummary(laneId, true);
+          applyLaneSummary(laneId, body);
+          reloadFromStore();
+        } catch (err) {
+          console.error(err);
+          refreshBtn.disabled = false;
+          refreshBtn.textContent = "Refresh summary";
+        }
+      })();
+      return;
+    }
+
+    const deleteBtn = target.closest(".lane-delete-btn") as HTMLButtonElement | null;
+    if (deleteBtn) {
+      const laneId = Number(deleteBtn.dataset.laneId) || 0;
+      const laneName = str(deleteBtn.dataset.laneName) || "this lane";
+      if (!laneId) return;
+      if (!window.confirm(`Delete lane "${laneName}"? This cannot be undone.`)) return;
+      deleteBtn.disabled = true;
+      void (async () => {
+        applyLaneRemoved(laneId);
+        if (assignLaneId === laneId) assignLaneId = null;
+        renderLanesList();
+        try {
+          await persistLaneDelete(laneId);
+          reloadFromStore();
+        } catch (err) {
+          console.error(err);
+          try {
+            const { data, label } = await loadLatestBundle();
+            setBundle(normalizeBundle(data), label);
+            void renderLanesPage();
+          } catch {
+            /* keep optimistic state cleared; user can refresh */
+          }
+        }
+      })();
       return;
     }
   });

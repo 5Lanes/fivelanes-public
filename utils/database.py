@@ -22,6 +22,8 @@ for grouping and ``fetch_oauth_account_id`` for which token was used to fetch.
 
 **``lanes``** / **``lane_threads``** — user-defined lanes and inbox thread membership.
 
+**``lane_summaries``** — LLM roll-up briefs for all threads assigned to a lane.
+
 **``people``** / **``person_threads``** — user-defined people and inbox thread assignment.
 
 **``person_summaries``** — LLM roll-up briefs for all threads assigned to a person.
@@ -52,6 +54,7 @@ def ensure_database_schema(db_path: str) -> None:
         _ensure_meetings_schema(conn)
         _ensure_meeting_preps_schema(conn)
         _ensure_lanes_schema(conn)
+        _ensure_lane_summaries_schema(conn)
         _ensure_people_schema(conn)
         _ensure_person_summaries_schema(conn)
         _ensure_thread_plans_schema(conn)
@@ -574,6 +577,24 @@ def remove_thread_from_lane(db_path: str, *, lane_id: int, inbox_thread_id: str)
     return True
 
 
+def delete_lane(db_path: str, *, lane_id: int) -> bool:
+    """Delete a lane and its thread memberships and summary. Returns False if lane missing."""
+    if lane_id <= 0:
+        return False
+    db_file = Path(db_path)
+    with sqlite3.connect(db_file) as conn:
+        _ensure_lanes_schema(conn)
+        _ensure_lane_summaries_schema(conn)
+        row = conn.execute("SELECT id FROM lanes WHERE id = ?", (lane_id,)).fetchone()
+        if not row:
+            return False
+        conn.execute("DELETE FROM lane_threads WHERE lane_id = ?", (lane_id,))
+        conn.execute("DELETE FROM lane_summaries WHERE lane_id = ?", (lane_id,))
+        conn.execute("DELETE FROM lanes WHERE id = ?", (lane_id,))
+        conn.commit()
+    return True
+
+
 def load_all_lanes(db_path: str) -> List[Dict[str, Any]]:
     """Return all lanes ordered by name."""
     db_file = Path(db_path)
@@ -656,8 +677,142 @@ def load_lane_thread_summaries(
         row = by_tid.get(tid)
         if row:
             summaries.append(row)
-    summaries.sort(key=lambda s: _normalize_field(s.get("datetime")))
+    summaries.sort(key=lambda s: _parse_iso_datetime(aggregate_thread_chronological_anchor(db_path, s)))
     return lane, summaries
+
+
+_AGGREGATE_SUMMARY_FIELDS = (
+    "summary",
+    "highlights",
+    "current_priorities",
+    "waiting_on_others",
+    "tone_overview",
+)
+
+
+def normalize_lane_summary_payload(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract storable lane-summary fields from an API/LLM response."""
+    out: Dict[str, Any] = {}
+    for key in _AGGREGATE_SUMMARY_FIELDS:
+        val = raw.get(key)
+        if key in ("highlights", "current_priorities", "waiting_on_others"):
+            if isinstance(val, list):
+                out[key] = [str(x).strip() for x in val if str(x).strip()]
+            else:
+                out[key] = []
+        else:
+            out[key] = _normalize_field(val)
+    return out
+
+
+def _ensure_lane_summaries_schema(conn: sqlite3.Connection) -> None:
+    _ensure_lanes_schema(conn)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS lane_summaries (
+            lane_id INTEGER PRIMARY KEY,
+            summary_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (lane_id) REFERENCES lanes(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lane_summaries_updated_at "
+        "ON lane_summaries(updated_at)"
+    )
+
+
+def save_lane_summary(
+    db_path: str,
+    *,
+    lane_id: int,
+    summary: Dict[str, Any],
+) -> str:
+    """
+    Persist a roll-up summary for one lane.
+
+    Returns ``updated_at`` (UTC ISO).
+    """
+    if lane_id <= 0:
+        raise ValueError("lane_id is required")
+    updated_at = datetime.now(timezone.utc).isoformat()
+    raw = summary if isinstance(summary, dict) else {}
+    payload = normalize_lane_summary_payload(raw)
+    fp = _normalize_field(raw.get("input_fingerprint"))
+    if fp:
+        payload["input_fingerprint"] = fp
+    db_file = Path(db_path)
+    with sqlite3.connect(db_file) as conn:
+        _ensure_lane_summaries_schema(conn)
+        row = conn.execute("SELECT id FROM lanes WHERE id = ?", (lane_id,)).fetchone()
+        if not row:
+            raise ValueError("lane_not_found")
+        conn.execute(
+            """
+            INSERT INTO lane_summaries (lane_id, summary_json, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(lane_id) DO UPDATE SET
+                summary_json = excluded.summary_json,
+                updated_at = excluded.updated_at
+            """,
+            (lane_id, json.dumps(payload, ensure_ascii=False), updated_at),
+        )
+        conn.execute(
+            "UPDATE lanes SET updated_at = ? WHERE id = ?",
+            (updated_at, lane_id),
+        )
+        conn.commit()
+    return updated_at
+
+
+def load_lane_summary(db_path: str, *, lane_id: int) -> Optional[Dict[str, Any]]:
+    """Return parsed lane summary JSON, or ``None``."""
+    if lane_id <= 0:
+        return None
+    db_file = Path(db_path)
+    with sqlite3.connect(db_file) as conn:
+        _ensure_lane_summaries_schema(conn)
+        row = conn.execute(
+            "SELECT summary_json, updated_at FROM lane_summaries WHERE lane_id = ?",
+            (lane_id,),
+        ).fetchone()
+    if not row or not row[0]:
+        return None
+    try:
+        loaded = json.loads(row[0])
+        out = normalize_lane_summary_payload(loaded) if isinstance(loaded, dict) else {}
+        out["updated_at"] = _normalize_field(row[1])
+        if isinstance(loaded, dict) and loaded.get("input_fingerprint"):
+            out["input_fingerprint"] = _normalize_field(loaded.get("input_fingerprint"))
+        return out
+    except json.JSONDecodeError:
+        return None
+
+
+def load_all_lane_summaries(db_path: str) -> Dict[str, Dict[str, Any]]:
+    """Return ``lane_id`` → summary payload (includes ``updated_at``)."""
+    db_file = Path(db_path)
+    out: Dict[str, Dict[str, Any]] = {}
+    with sqlite3.connect(db_file) as conn:
+        _ensure_lane_summaries_schema(conn)
+        rows = conn.execute(
+            "SELECT lane_id, summary_json, updated_at FROM lane_summaries ORDER BY updated_at DESC"
+        ).fetchall()
+    for lane_id, summary_json, updated_at in rows:
+        key = str(int(lane_id))
+        loaded: Dict[str, Any] = {}
+        try:
+            parsed = json.loads(summary_json or "{}")
+            loaded = parsed if isinstance(parsed, dict) else {}
+            payload = normalize_lane_summary_payload(loaded)
+        except json.JSONDecodeError:
+            payload = {}
+        payload["updated_at"] = _normalize_field(updated_at)
+        if loaded.get("input_fingerprint"):
+            payload["input_fingerprint"] = _normalize_field(loaded.get("input_fingerprint"))
+        out[key] = payload
+    return out
 
 
 def _ensure_people_schema(conn: sqlite3.Connection) -> None:
@@ -840,23 +995,14 @@ def load_person_thread_summaries(
         row = by_tid.get(tid)
         if row:
             summaries.append(row)
-    summaries.sort(key=lambda s: _normalize_field(s.get("datetime")))
+    summaries.sort(key=lambda s: _parse_iso_datetime(aggregate_thread_chronological_anchor(db_path, s)))
     return person, summaries
-
-
-_PERSON_SUMMARY_FIELDS = (
-    "summary",
-    "highlights",
-    "current_priorities",
-    "waiting_on_others",
-    "tone_overview",
-)
 
 
 def normalize_person_summary_payload(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Extract storable person-summary fields from an API/LLM response."""
     out: Dict[str, Any] = {}
-    for key in _PERSON_SUMMARY_FIELDS:
+    for key in _AGGREGATE_SUMMARY_FIELDS:
         val = raw.get(key)
         if key in ("highlights", "current_priorities", "waiting_on_others"):
             if isinstance(val, list):
@@ -2094,6 +2240,16 @@ def load_processed_cleaned_for_thread(
     return out
 
 
+def aggregate_thread_chronological_anchor(db_path: str, summary: Dict[str, Any]) -> str:
+    """Earliest email datetime in a thread, used to order threads for lane/person summaries."""
+    tid = _normalize_field(summary.get("thread_id"))
+    if tid:
+        cleaned = load_processed_cleaned_for_thread(db_path, tid)
+        if cleaned:
+            return _normalize_field(cleaned[0].get("datetime"))
+    return _normalize_field(summary.get("datetime"))
+
+
 def _parse_iso_datetime(dt: str) -> datetime:
     if not dt:
         return datetime.min.replace(tzinfo=timezone.utc)
@@ -2555,6 +2711,7 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
         "meeting_preps": load_all_meeting_preps(db_path),
         "lanes": load_all_lanes(db_path),
         "lane_threads": load_lane_thread_memberships(db_path),
+        "lane_summaries": load_all_lane_summaries(db_path),
         "people": load_all_people(db_path),
         "person_threads": load_person_thread_memberships(db_path),
         "person_summaries": load_all_person_summaries(db_path),

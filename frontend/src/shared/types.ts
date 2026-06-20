@@ -21,6 +21,15 @@ export type LaneView = {
   updated_at: string;
 };
 
+export type LaneSummaryView = {
+  summary: string;
+  highlights: string[];
+  current_priorities: string[];
+  waiting_on_others: string[];
+  tone_overview: string;
+  updated_at: string;
+};
+
 export type PersonView = {
   id: number;
   name: string;

@@ -24,6 +24,10 @@
       "system": "<your system prompt for producing a person-level summary across threads; must include {person_name}; output summary, highlights, current_priorities, waiting_on_others, tone_overview JSON>",
       "user": "<your user prompt; must include {summary_datetime} and {thread_summaries} placeholders>"
     },
+    "lane_summary": {
+      "system": "<your system prompt for producing a lane-level summary across threads; must include {lane_name}; output summary, highlights, current_priorities, waiting_on_others, tone_overview JSON>",
+      "user": "<your user prompt; must include {summary_datetime} and {thread_summaries} placeholders>"
+    },
     "meeting_prep": {
       "system": "<your system prompt for generating meeting prep from matched email thread; output prep_summary, talking_points, open_loops, suggested_opener, open_questions JSON>",
       "user": "<your user prompt; must include {meeting_title}, {meeting_start}, {meeting_end}, {meeting_location}, {meeting_attendees}, {thread_label}, and {thread_messages} placeholders>"
@@ -38,6 +42,7 @@
     "thread_summary_max_messages": 12,
     "meeting_prep_max_messages": 10,
     "calendar_summary_max_events": 100,
-    "person_summary_max_threads": 10
+    "person_summary_max_threads": 10,
+    "lane_summary_max_threads": 10
   }
 }

@@ -1042,7 +1042,8 @@ header p.run-meta {
   font-family: system-ui, sans-serif;
 }
 
-.person-summary {
+.person-summary,
+.lane-summary {
   margin: 0 0 0.85rem;
   padding: 0.75rem 0.85rem;
   border: 1px solid var(--border);
@@ -1050,31 +1051,36 @@ header p.run-meta {
   background: rgba(255, 255, 255, 0.02);
 }
 
-.person-summary-meta {
+.person-summary-meta,
+.lane-summary-meta {
   margin: 0 0 0.45rem;
   font-size: 0.78rem;
   color: var(--muted);
   font-family: system-ui, sans-serif;
 }
 
-.person-summary-text {
+.person-summary-text,
+.lane-summary-text {
   margin: 0 0 0.65rem;
   font-size: 0.92rem;
   line-height: 1.45;
 }
 
-.person-summary-empty {
+.person-summary-empty,
+.lane-summary-empty {
   margin: 0 0 0.85rem;
   font-size: 0.88rem;
   color: var(--muted);
   font-family: system-ui, sans-serif;
 }
 
-.person-summary .section {
+.person-summary .section,
+.lane-summary .section {
   margin-top: 0.55rem;
 }
 
-.person-summary .section h4 {
+.person-summary .section h4,
+.lane-summary .section h4 {
   margin: 0 0 0.35rem;
   font-size: 0.78rem;
   text-transform: uppercase;
@@ -1083,17 +1089,20 @@ header p.run-meta {
   font-weight: 600;
 }
 
-.person-summary .section ul {
+.person-summary .section ul,
+.lane-summary .section ul {
   margin: 0;
   padding-left: 1.1rem;
   font-size: 0.9rem;
 }
 
-.person-summary .section li {
+.person-summary .section li,
+.lane-summary .section li {
   margin-bottom: 0.3rem;
 }
 
-.person-refresh-summary-btn {
+.person-refresh-summary-btn,
+.lane-refresh-summary-btn {
   margin-right: 0.5rem;
 }
 

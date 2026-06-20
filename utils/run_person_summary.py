@@ -32,6 +32,7 @@ from utils.database import (
     load_person_summary,
     load_person_thread_summaries,
     normalize_person_summary_payload,
+    aggregate_thread_chronological_anchor,
     save_person_summary,
 )
 
@@ -90,7 +91,7 @@ def main() -> None:
         print("No thread summaries for this person.", file=sys.stderr)
         sys.exit(1)
 
-    prompt = format_person_summary_prompt(name, summaries)
+    prompt = format_person_summary_prompt(name, summaries, db_path=args.db)
     if args.dry_run:
         print("\n--- prompt ---\n")
         print(prompt.as_single_prompt())
@@ -98,7 +99,9 @@ def main() -> None:
 
     llm = get_llm_backend(env_path=str(_ROOT / ".env"))
     thread_ids = [str(s.get("thread_id") or "").strip() for s in summaries]
-    summary_datetimes = [str(s.get("datetime") or "").strip() for s in summaries]
+    summary_datetimes = [
+        aggregate_thread_chronological_anchor(args.db, s) for s in summaries
+    ]
     fp = person_summary_fingerprint(
         person_id=pid,
         thread_ids=thread_ids,

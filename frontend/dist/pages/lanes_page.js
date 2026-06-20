@@ -1,5 +1,5 @@
-import { partitionThreadsBySnooze, threadEmailSubject, } from "../shared/thread_domain.js";
-import { applyLaneCreated, applyLaneThreadMembership, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getLaneThreadIds, getLanes, setBundle, } from "../shared/summaries_store.js";
+import { listSection, partitionThreadsBySnooze, threadEmailSubject, } from "../shared/thread_domain.js";
+import { applyLaneCreated, applyLaneRemoved, applyLaneSummary, applyLaneThreadMembership, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getLaneSummary, getLaneThreadIds, getLanes, loadLatestBundle, normalizeBundle, setBundle, } from "../shared/summaries_store.js";
 import { escapeHtml, str } from "../shared/utils.js";
 const PAGE_HTML = `
 <div class="view-lanes">
@@ -39,7 +39,32 @@ function threadPickerHtml(laneId, selectedIds) {
     <div class="lane-thread-options">${rows}</div>
   </div>`;
 }
-function laneCardHtml(lane, threadIds, expanded) {
+function laneSummaryHtml(summary) {
+    if (!summary) {
+        return `<p class="lane-summary-empty">No summary yet. Assign threads and refresh to generate one.</p>`;
+    }
+    const tone = summary.tone_overview.trim();
+    const updated = summary.updated_at.trim();
+    const metaParts = [];
+    if (tone)
+        metaParts.push(escapeHtml(tone));
+    if (updated)
+        metaParts.push(`Updated ${escapeHtml(updated.slice(0, 10))}`);
+    const meta = metaParts.length
+        ? `<p class="lane-summary-meta">${metaParts.join(" · ")}</p>`
+        : "";
+    const body = summary.summary.trim()
+        ? `<p class="lane-summary-text">${escapeHtml(summary.summary)}</p>`
+        : "";
+    return `<div class="lane-summary">
+    ${meta}
+    ${body}
+    ${listSection("Highlights", summary.highlights)}
+    ${listSection("Current priorities", summary.current_priorities)}
+    ${listSection("Waiting on others", summary.waiting_on_others)}
+  </div>`;
+}
+function laneCardHtml(lane, threadIds, summary, expanded) {
     const selected = new Set(threadIds);
     const threadLabels = threadIds
         .map((tid) => {
@@ -59,11 +84,18 @@ function laneCardHtml(lane, threadIds, expanded) {
       <h2>${escapeHtml(lane.name)}</h2>
       <span class="lane-count-pill">${threadIds.length} thread${threadIds.length === 1 ? "" : "s"}</span>
     </header>
+    ${laneSummaryHtml(summary)}
     ${threadsBlock}
     ${picker}
     <div class="user-lane-actions">
+      <button type="button" class="lane-refresh-summary-btn" data-lane-id="${lane.id}"${threadIds.length ? "" : " disabled"}>
+        Refresh summary
+      </button>
       <button type="button" class="lane-edit-threads-btn" data-lane-id="${lane.id}">
         ${expanded ? "Done" : threadIds.length ? "Edit threads" : "Add threads"}
+      </button>
+      <button type="button" class="lane-delete-btn" data-lane-id="${lane.id}" data-lane-name="${escapeHtml(lane.name)}">
+        Delete lane
       </button>
     </div>
   </article>`;
@@ -81,8 +113,9 @@ function renderLanesList() {
     listEl.innerHTML = lanes
         .map((lane) => {
         const threadIds = getLaneThreadIds(data, lane.id);
+        const summary = getLaneSummary(data, lane.id);
         const expanded = assignLaneId === lane.id;
-        return laneCardHtml(lane, threadIds, expanded);
+        return laneCardHtml(lane, threadIds, summary, expanded);
     })
         .join("");
 }
@@ -113,6 +146,27 @@ async function persistLaneThread(laneId, threadId, inLane) {
     const body = (await res.json().catch(() => ({})));
     if (!res.ok)
         throw new Error(str(body.error) || `Lane update failed (${res.status})`);
+}
+async function persistLaneSummary(laneId, force = false) {
+    const res = await fetch("/api/lanes/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lane_id: laneId, force }),
+    });
+    const body = (await res.json().catch(() => ({})));
+    if (!res.ok)
+        throw new Error(str(body.error) || `Lane summary failed (${res.status})`);
+    return body;
+}
+async function persistLaneDelete(laneId) {
+    const res = await fetch("/api/lanes/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lane_id: laneId }),
+    });
+    const body = (await res.json().catch(() => ({})));
+    if (!res.ok)
+        throw new Error(str(body.error) || `Delete lane failed (${res.status})`);
 }
 function reloadFromStore() {
     const data = getCurrentData();
@@ -161,6 +215,59 @@ export function bindLanesInteractions() {
             const laneId = Number(editBtn.dataset.laneId) || 0;
             assignLaneId = assignLaneId === laneId ? null : laneId;
             renderLanesList();
+            return;
+        }
+        const refreshBtn = target.closest(".lane-refresh-summary-btn");
+        if (refreshBtn && !refreshBtn.disabled) {
+            const laneId = Number(refreshBtn.dataset.laneId) || 0;
+            if (!laneId)
+                return;
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = "Refreshing…";
+            void (async () => {
+                try {
+                    const body = await persistLaneSummary(laneId, true);
+                    applyLaneSummary(laneId, body);
+                    reloadFromStore();
+                }
+                catch (err) {
+                    console.error(err);
+                    refreshBtn.disabled = false;
+                    refreshBtn.textContent = "Refresh summary";
+                }
+            })();
+            return;
+        }
+        const deleteBtn = target.closest(".lane-delete-btn");
+        if (deleteBtn) {
+            const laneId = Number(deleteBtn.dataset.laneId) || 0;
+            const laneName = str(deleteBtn.dataset.laneName) || "this lane";
+            if (!laneId)
+                return;
+            if (!window.confirm(`Delete lane "${laneName}"? This cannot be undone.`))
+                return;
+            deleteBtn.disabled = true;
+            void (async () => {
+                applyLaneRemoved(laneId);
+                if (assignLaneId === laneId)
+                    assignLaneId = null;
+                renderLanesList();
+                try {
+                    await persistLaneDelete(laneId);
+                    reloadFromStore();
+                }
+                catch (err) {
+                    console.error(err);
+                    try {
+                        const { data, label } = await loadLatestBundle();
+                        setBundle(normalizeBundle(data), label);
+                        void renderLanesPage();
+                    }
+                    catch {
+                        /* keep optimistic state cleared; user can refresh */
+                    }
+                }
+            })();
             return;
         }
     });

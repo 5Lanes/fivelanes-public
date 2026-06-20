@@ -29,6 +29,8 @@ export function normalizeBundle(data) {
         data.lanes = [];
     if (!data.lane_threads || typeof data.lane_threads !== "object")
         data.lane_threads = {};
+    if (!data.lane_summaries || typeof data.lane_summaries !== "object")
+        data.lane_summaries = {};
     if (!Array.isArray(data.people))
         data.people = [];
     if (!data.person_threads || typeof data.person_threads !== "object")
@@ -94,6 +96,66 @@ export function applyLaneThreadMembership(laneId, threadId, inLane) {
         return;
     }
     memberships[key] = existing;
+}
+export function getLaneSummary(data, laneId) {
+    if (!data || !data.lane_summaries || typeof data.lane_summaries !== "object")
+        return null;
+    const raw = data.lane_summaries[String(laneId)];
+    if (!raw || typeof raw !== "object")
+        return null;
+    const row = raw;
+    const summary = str(row.summary);
+    const highlights = Array.isArray(row.highlights)
+        ? row.highlights.map((x) => str(x)).filter(Boolean)
+        : [];
+    const current_priorities = Array.isArray(row.current_priorities)
+        ? row.current_priorities.map((x) => str(x)).filter(Boolean)
+        : [];
+    const waiting_on_others = Array.isArray(row.waiting_on_others)
+        ? row.waiting_on_others.map((x) => str(x)).filter(Boolean)
+        : [];
+    const tone_overview = str(row.tone_overview);
+    const updated_at = str(row.updated_at);
+    if (!summary && !highlights.length && !current_priorities.length && !waiting_on_others.length) {
+        return null;
+    }
+    return {
+        summary,
+        highlights,
+        current_priorities,
+        waiting_on_others,
+        tone_overview,
+        updated_at,
+    };
+}
+export function applyLaneSummary(laneId, payload) {
+    if (!currentData)
+        return;
+    const bucket = (currentData.lane_summaries || (currentData.lane_summaries = {}));
+    bucket[String(laneId)] = {
+        summary: str(payload.summary),
+        highlights: Array.isArray(payload.highlights) ? payload.highlights : [],
+        current_priorities: Array.isArray(payload.current_priorities)
+            ? payload.current_priorities
+            : [],
+        waiting_on_others: Array.isArray(payload.waiting_on_others) ? payload.waiting_on_others : [],
+        tone_overview: str(payload.tone_overview),
+        updated_at: str(payload.summary_updated_at) || str(payload.updated_at),
+    };
+}
+export function applyLaneRemoved(laneId) {
+    if (!currentData)
+        return;
+    const key = String(laneId);
+    if (Array.isArray(currentData.lanes)) {
+        currentData.lanes = currentData.lanes.filter((row) => Number(row.id) !== laneId);
+    }
+    const memberships = currentData.lane_threads;
+    if (memberships && key in memberships)
+        delete memberships[key];
+    const summaries = currentData.lane_summaries;
+    if (summaries && key in summaries)
+        delete summaries[key];
 }
 export function getPeople(data) {
     if (!data || !Array.isArray(data.people))

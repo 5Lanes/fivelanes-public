@@ -37,6 +37,7 @@ DASHBOARD_PORT = int((os.getenv("DASHBOARD_PORT") or "8000").strip() or "8000")
 from services.llm_service import get_llm_backend
 from services.pipeline.fingerprint import (
     email_reply_fingerprint,
+    lane_summary_fingerprint,
     meeting_prep_fingerprint,
     messages_cache_keys,
     person_summary_fingerprint,
@@ -44,6 +45,7 @@ from services.pipeline.fingerprint import (
 from services.prompts import (
     EMAIL_REPLY_MAX_MESSAGES,
     format_email_reply_prompt,
+    format_lane_summary_prompt,
     format_meeting_prep_prompt,
     format_person_summary_prompt,
 )
@@ -51,22 +53,28 @@ from utils.database import (
     _meeting_dedupe_key,
     add_thread_to_lane,
     add_thread_to_person,
+    aggregate_thread_chronological_anchor,
     build_summaries_bundle,
     build_thread_draft_payload,
     create_lane,
     create_person,
     create_thread_plan,
+    delete_lane,
     delete_thread_plan,
     update_thread_plan,
     fetch_meetings_rows,
+    load_lane_summary,
+    load_lane_thread_summaries,
     load_meeting_prep,
     load_person_summary,
     load_person_thread_summaries,
     load_thread_draft_reply,
+    normalize_lane_summary_payload,
     normalize_meeting_prep_payload,
     normalize_person_summary_payload,
     remove_thread_from_lane,
     remove_thread_from_person,
+    save_lane_summary,
     save_meeting_prep,
     save_person_summary,
     save_thread_draft_reply,
@@ -545,6 +553,115 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             {"ok": True, "lane_id": lane_id, "inbox_thread_id": thread_id},
         )
 
+    def _post_lane_delete(self, body: Dict[str, Any]) -> None:
+        try:
+            lane_id = int(body.get("lane_id") or 0)
+        except (TypeError, ValueError):
+            lane_id = 0
+        if lane_id <= 0:
+            self._json_response(
+                HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_lane_id"}
+            )
+            return
+        ok = delete_lane(DB_PATH, lane_id=lane_id)
+        if not ok:
+            self._json_response(
+                HTTPStatus.NOT_FOUND, {"ok": False, "error": "lane_not_found"}
+            )
+            return
+        self._json_response(HTTPStatus.OK, {"ok": True, "lane_id": lane_id})
+
+    def _post_lane_summary(self, body: Dict[str, Any]) -> None:
+        try:
+            lane_id = int(body.get("lane_id") or 0)
+        except (TypeError, ValueError):
+            lane_id = 0
+        lane_name = str(body.get("lane_name") or "").strip()
+        force = bool(body.get("force"))
+
+        lane, summaries = load_lane_thread_summaries(
+            DB_PATH,
+            lane_name=lane_name or None,
+            lane_id=lane_id if lane_id > 0 else None,
+        )
+        if not lane:
+            self._json_response(
+                HTTPStatus.NOT_FOUND, {"ok": False, "error": "lane_not_found"}
+            )
+            return
+        lid = int(lane.get("id") or 0)
+        name = str(lane.get("name") or "").strip()
+        if not summaries:
+            self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"ok": False, "error": "no_thread_summaries", "lane_id": lid},
+            )
+            return
+
+        llm = get_llm_backend(env_path=str(env_file()))
+        thread_ids = [str(s.get("thread_id") or "").strip() for s in summaries]
+        summary_datetimes = [
+            aggregate_thread_chronological_anchor(DB_PATH, s) for s in summaries
+        ]
+        fp = lane_summary_fingerprint(
+            lane_id=lid,
+            thread_ids=thread_ids,
+            summary_datetimes=summary_datetimes,
+            backend=llm.name,
+        )
+        if not force:
+            cached = load_lane_summary(DB_PATH, lane_id=lid)
+            if cached and str(cached.get("input_fingerprint") or "") == fp:
+                out: Dict[str, Any] = {
+                    "ok": True,
+                    "lane_id": lid,
+                    "lane_name": name,
+                    "cached": True,
+                    "summary_updated_at": cached.get("updated_at"),
+                }
+                out.update({k: v for k, v in cached.items() if k != "input_fingerprint"})
+                self._json_response(HTTPStatus.OK, out)
+                return
+
+        try:
+            prompt = format_lane_summary_prompt(name, summaries, db_path=DB_PATH)
+            result = llm.submit_person_summary(prompt)
+        except ValueError as exc:
+            self._json_response(
+                HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc) or "bad_request"}
+            )
+            return
+        except RuntimeError as exc:
+            self._json_response(
+                HTTPStatus.BAD_GATEWAY, {"ok": False, "error": str(exc)}
+            )
+            return
+        except Exception as exc:
+            log.exception("lane summary failed")
+            self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": str(exc)}
+            )
+            return
+
+        summary = normalize_lane_summary_payload(result) if isinstance(result, dict) else {}
+        summary["input_fingerprint"] = fp
+        try:
+            updated_at = save_lane_summary(DB_PATH, lane_id=lid, summary=summary)
+        except ValueError as exc:
+            self._json_response(
+                HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc) or "bad_request"}
+            )
+            return
+        out = {
+            "ok": True,
+            "lane_id": lid,
+            "lane_name": name,
+            "cached": False,
+            "summary_updated_at": updated_at,
+        }
+        out.update(summary)
+        self._json_response(HTTPStatus.OK, out)
+
     def _post_person_create(self, body: Dict[str, Any]) -> None:
         name = str(body.get("name") or "").strip()
         if not name:
@@ -652,7 +769,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
         llm = get_llm_backend(env_path=str(env_file()))
         thread_ids = [str(s.get("thread_id") or "").strip() for s in summaries]
-        summary_datetimes = [str(s.get("datetime") or "").strip() for s in summaries]
+        summary_datetimes = [
+            aggregate_thread_chronological_anchor(DB_PATH, s) for s in summaries
+        ]
         fp = person_summary_fingerprint(
             person_id=pid,
             thread_ids=thread_ids,
@@ -674,7 +793,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 return
 
         try:
-            prompt = format_person_summary_prompt(name, summaries)
+            prompt = format_person_summary_prompt(name, summaries, db_path=DB_PATH)
             result = llm.submit_person_summary(prompt)
         except ValueError as exc:
             self._json_response(
@@ -1249,6 +1368,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._post_lane_add_thread(body)
         elif path == "/api/lanes/remove-thread":
             self._post_lane_remove_thread(body)
+        elif path == "/api/lanes/delete":
+            self._post_lane_delete(body)
+        elif path == "/api/lanes/summary":
+            self._post_lane_summary(body)
         elif path == "/api/people/create":
             self._post_person_create(body)
         elif path == "/api/people/add-thread":
