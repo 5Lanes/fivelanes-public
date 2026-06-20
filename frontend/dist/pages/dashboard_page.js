@@ -1,22 +1,35 @@
 import { refreshDashboard } from "../dashboard_panel.js";
+import { renderLanesList } from "./lanes_page.js";
 import { partitionThreadsBySnooze, threadLabel } from "../shared/thread_domain.js";
-import { dashboardPlanEditFormHtml, persistPlanCreate, persistPlanDelete, persistPlanUpdate, } from "../shared/plan_helpers.js";
-import { applyPlanCreated, applyPlanDeleted, applyPlanUpdated, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getThreadPlans, setBundle, } from "../shared/summaries_store.js";
+import { dashboardPlanEditFormHtml, persistPlanDelete, persistPlanUpdate, } from "../shared/plan_helpers.js";
+import { applyPlanDeleted, applyPlanUpdated, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getThreadPlans, setBundle, } from "../shared/summaries_store.js";
 import { str } from "../shared/utils.js";
 const PAGE_HTML = `
 <div class="view-dashboard">
   <div class="dashboard-top-row">
     <section class="dashboard-plans-section" aria-labelledby="dashboard-plans-heading">
-      <h2 id="dashboard-plans-heading" class="dashboard-section-title">Action plans</h2>
+      <h2 id="dashboard-plans-heading" class="dashboard-section-title">Plans</h2>
       <div id="dashboard-plans-list" class="dashboard-plans-list"></div>
     </section>
-    <div id="dashboard-response-lane" class="dashboard-response-lane" hidden></div>
+    <section class="dashboard-meetings-section" aria-labelledby="dashboard-meetings-heading">
+      <h2 id="dashboard-meetings-heading" class="dashboard-section-title">Upcoming meetings</h2>
+      <p class="dashboard-meetings-meta" id="dashboard-meetings-meta">Loading meetings…</p>
+      <div id="dashboard-meetings-agenda" class="meetings-agenda"></div>
+    </section>
   </div>
-  <div id="dashboard-followup-lane" class="dashboard-followup-lane" hidden></div>
-  <section class="dashboard-meetings-section" aria-labelledby="dashboard-meetings-heading">
-    <h2 id="dashboard-meetings-heading" class="dashboard-section-title">Upcoming meetings · thread contacts</h2>
-    <p class="dashboard-meetings-meta" id="dashboard-meetings-meta">Loading meetings…</p>
-    <div id="dashboard-meetings-agenda" class="meetings-agenda"></div>
+  <section class="dashboard-lanes-section" aria-labelledby="dashboard-lanes-heading">
+    <div class="dashboard-lanes-header">
+      <h2 id="dashboard-lanes-heading" class="dashboard-section-title">Lanes</h2>
+      <div class="lanes-toolbar dashboard-lanes-toolbar">
+        <button type="button" class="create-lane-btn" id="create-lane-btn">Create lane</button>
+      </div>
+    </div>
+    <form class="create-lane-form" id="create-lane-form" hidden>
+      <input type="text" name="lane-name" id="lane-name-input" placeholder="Lane name" required />
+      <button type="submit">Create</button>
+      <button type="button" class="create-lane-cancel" id="create-lane-cancel">Cancel</button>
+    </form>
+    <div id="lanes-list" class="lanes-list dashboard-lanes-list"></div>
   </section>
 </div>`;
 let interactionsBound = false;
@@ -28,11 +41,9 @@ export async function renderDashboardPage() {
     if (!data)
         return;
     const plansEl = document.getElementById("dashboard-plans-list");
-    const responseLaneEl = document.getElementById("dashboard-response-lane");
-    const followUpLaneEl = document.getElementById("dashboard-followup-lane");
     const meetingsMetaEl = document.getElementById("dashboard-meetings-meta");
     const meetingsAgendaEl = document.getElementById("dashboard-meetings-agenda");
-    if (!plansEl || !responseLaneEl || !followUpLaneEl || !meetingsMetaEl || !meetingsAgendaEl)
+    if (!plansEl || !meetingsMetaEl || !meetingsAgendaEl)
         return;
     const { active, snoozed } = partitionThreadsBySnooze(getCurrentThreads());
     const trackingThreads = [...active, ...snoozed];
@@ -40,8 +51,6 @@ export async function renderDashboardPage() {
     const plans = getThreadPlans(data);
     await refreshDashboard(trackingThreads, {
         plansEl,
-        responseLaneEl,
-        followUpLaneEl,
         meetingsMetaEl,
         meetingsAgendaEl,
         threadLabel,
@@ -55,6 +64,7 @@ export async function renderDashboardPage() {
             bucket[cacheKey] = prep;
         },
     });
+    renderLanesList();
 }
 function closeDashboardPlanEdit(row) {
     row.querySelector(".dashboard-plan-edit-form")?.remove();
@@ -92,43 +102,10 @@ export function bindDashboardInteractions() {
     if (interactionsBound)
         return;
     interactionsBound = true;
-    document.addEventListener("change", (ev) => {
-        const input = ev.target?.closest(".suggested-step-date");
-        if (!input || !input.closest(".view-dashboard"))
-            return;
-        const row = input.closest(".dashboard-suggested-step");
-        const btn = row?.querySelector(".add-suggested-plan-btn");
-        if (btn)
-            btn.disabled = !input.value.trim();
-    });
     document.addEventListener("click", (ev) => {
         const target = ev.target;
         if (!target?.closest(".view-dashboard"))
             return;
-        const addBtn = target.closest(".add-suggested-plan-btn");
-        if (addBtn) {
-            const row = addBtn.closest(".dashboard-suggested-step");
-            const threadId = str(row?.getAttribute("data-thread-id"));
-            const action = str(row?.getAttribute("data-step-action"));
-            const stepType = str(row?.getAttribute("data-step-type")) || "follow up needed";
-            const dateInput = row?.querySelector(".suggested-step-date");
-            const byWhen = dateInput?.value.trim() ?? "";
-            if (!threadId || !action || !byWhen)
-                return;
-            addBtn.disabled = true;
-            void (async () => {
-                try {
-                    const plan = await persistPlanCreate(threadId, action, stepType, byWhen);
-                    applyPlanCreated(plan);
-                    reloadDashboard();
-                }
-                catch (err) {
-                    console.error(err);
-                    addBtn.disabled = false;
-                }
-            })();
-            return;
-        }
         const editBtn = target.closest(".dashboard-plan-edit-btn");
         if (editBtn) {
             const row = editBtn.closest(".dashboard-plan-row");

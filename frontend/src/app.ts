@@ -58,6 +58,7 @@ async function renderPage(route: AppRoute): Promise<void> {
   if (route === "dashboard") {
     mountDashboardPage(pageRoot);
     bindDashboardInteractions();
+    bindLanesInteractions();
     await renderDashboardPage();
     return;
   }

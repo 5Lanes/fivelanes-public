@@ -1,6 +1,5 @@
 /**
- * Dashboard: response required, follow-ups (active + snoozed threads), and
- * upcoming meetings that match those threads by attendee email overlap.
+ * Dashboard: action plans, upcoming meetings matched to threads, and user lanes.
  */
 
 import {
@@ -17,14 +16,10 @@ import {
 import {
   formatPlanByWhen,
   sortPlansByDueDate,
-  planExistsForStep,
 } from "./shared/plan_helpers.js";
 import type { PlanView } from "./shared/types.js";
 import {
-  ownerNextStepsForThread,
   renderMentionAwareText,
-  type NextStep,
-  type ThreadView as DomainThreadView,
 } from "./shared/thread_domain.js";
 import { dayHeadingLabelLong, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdLocal } from "./shared/time_ui.js";
 import { ensureAvailabilityDocLoaded } from "./shared/availability_windows.js";
@@ -42,48 +37,6 @@ export interface MatchedMeeting {
   thread: ThreadMatchContext;
 }
 
-function threadNavLabel(t: ThreadView, labelForThread: (t: ThreadView) => string): string {
-  const base = labelForThread(t);
-  const snooze = Number(t.messages[0]?.summary?.snoozed || 0);
-  if (snooze === 1) return `${base} (snoozed)`;
-  return base;
-}
-
-function normalizeStepType(step: NextStep): string {
-  return step.type === "follow up needed" ? "follow up needed" : "response required";
-}
-
-function suggestedStepLiHtml(threadId: string, step: NextStep): string {
-  return `<li class="dashboard-suggested-step" data-thread-id="${escapeHtml(threadId)}" data-step-type="${escapeHtml(normalizeStepType(step))}" data-step-action="${escapeHtml(step.action)}">
-    <span class="suggested-step-action">${renderMentionAwareText(step.action)}</span>
-    <span class="suggested-step-schedule">
-      <input type="date" class="suggested-step-date" aria-label="Due date for plan" />
-      <button type="button" class="add-suggested-plan-btn" disabled>Add plan</button>
-    </span>
-  </li>`;
-}
-
-function laneSuggestedStepsHtml(
-  threads: ThreadView[],
-  stepsForThread: (t: ThreadView) => NextStep[],
-  existingPlans: PlanView[],
-  labelForThread: (t: ThreadView) => string,
-): string {
-  const chunks: string[] = [];
-  for (const t of threads) {
-    const steps = stepsForThread(t).filter(
-      (step) => !planExistsForStep(existingPlans, t.id, step.action),
-    );
-    if (!steps.length) continue;
-    const title = escapeHtml(threadNavLabel(t, labelForThread));
-    const inner = steps.map((step) => suggestedStepLiHtml(t.id, step)).join("");
-    chunks.push(
-      `<li class="lane-thread-group"><details class="lane-thread-details" open><summary class="lane-thread-title">${title}</summary><ul class="lane-thread-items lane-thread-items--suggested">${inner}</ul></details></li>`,
-    );
-  }
-  return chunks.length ? `<ul class="lane-threads">${chunks.join("")}</ul>` : "";
-}
-
 export function renderDashboardPlans(
   plansEl: HTMLElement,
   plans: PlanView[],
@@ -92,7 +45,7 @@ export function renderDashboardPlans(
   plansEl.hidden = false;
   if (!plans.length) {
     plansEl.innerHTML =
-      '<p class="dashboard-plans-empty">No action plans yet. Choose a due date on a suggested step below, then click <strong>Add plan</strong>.</p>';
+      '<p class="dashboard-plans-empty">No action plans yet. Add plans from the Plans page.</p>';
     return;
   }
   const sorted = sortPlansByDueDate(plans, (p) => p.by_when, (p) => p.action);
@@ -117,54 +70,6 @@ export function renderDashboardPlans(
   };
 
   plansEl.innerHTML = `<ul class="dashboard-plans-column-list">${sorted.map((p) => rowHtml(p)).join("")}</ul>`;
-}
-
-const SUGGESTED_STEPS_EMPTY =
-  "No suggested next steps on active or snoozed threads (or they are already action plans).";
-
-export function renderDashboardLanes(
-  responseLaneEl: HTMLElement,
-  followUpLaneEl: HTMLElement,
-  threads: ThreadView[],
-  opts: {
-    threadLabel: (t: ThreadView) => string;
-    plans: PlanView[];
-  },
-): void {
-  responseLaneEl.innerHTML = "";
-  followUpLaneEl.innerHTML = "";
-
-  const responseSteps = (t: ThreadView) =>
-    ownerNextStepsForThread(t as DomainThreadView).filter((step) => step.type !== "follow up needed");
-  const followUpSteps = (t: ThreadView) =>
-    ownerNextStepsForThread(t as DomainThreadView).filter((step) => step.type === "follow up needed");
-
-  const todosHtml = laneSuggestedStepsHtml(threads, responseSteps, opts.plans, opts.threadLabel);
-  const followUpsHtml = laneSuggestedStepsHtml(threads, followUpSteps, opts.plans, opts.threadLabel);
-
-  if (todosHtml) {
-    responseLaneEl.hidden = false;
-    responseLaneEl.innerHTML = `<div class="lane to-do">
-      <h2>Response required</h2>
-      ${todosHtml}
-    </div>`;
-  } else {
-    responseLaneEl.hidden = false;
-    responseLaneEl.innerHTML = `<div class="lane to-do">
-      <h2>Response required</h2>
-      <p class="empty-state">${SUGGESTED_STEPS_EMPTY}</p>
-    </div>`;
-  }
-
-  if (followUpsHtml) {
-    followUpLaneEl.hidden = false;
-    followUpLaneEl.innerHTML = `<div class="lane follow-up">
-      <h2>Follow up needed</h2>
-      ${followUpsHtml}
-    </div>`;
-  } else {
-    followUpLaneEl.hidden = true;
-  }
 }
 
 export function matchMeetingsToThreads(
@@ -393,8 +298,6 @@ export async function refreshDashboard(
   threads: ThreadView[],
   opts: {
     plansEl: HTMLElement;
-    responseLaneEl: HTMLElement;
-    followUpLaneEl: HTMLElement;
     meetingsMetaEl: HTMLElement;
     meetingsAgendaEl: HTMLElement;
     threadLabel: (t: ThreadView) => string;
@@ -412,11 +315,6 @@ export async function refreshDashboard(
   renderDashboardPlans(opts.plansEl, opts.plans, (threadId) => {
     const thread = tracking.find((t) => t.id === threadId);
     return thread ? opts.threadLabel(thread) : "(Unknown thread)";
-  });
-
-  renderDashboardLanes(opts.responseLaneEl, opts.followUpLaneEl, tracking, {
-    threadLabel: opts.threadLabel,
-    plans: opts.plans,
   });
 
   opts.meetingsMetaEl.textContent = "Loading meetings…";

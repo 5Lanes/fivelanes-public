@@ -15,6 +15,10 @@ const PAGE_HTML = `
 </div>`;
 let interactionsBound = false;
 let assignLaneId = null;
+let activeLaneTabId = null;
+function isDashboardLanesList(listEl) {
+    return !!listEl.closest(".view-dashboard");
+}
 function trackingThreads() {
     const { active, snoozed } = partitionThreadsBySnooze(getCurrentThreads());
     return [...active, ...snoozed];
@@ -64,7 +68,7 @@ function laneSummaryHtml(summary) {
     ${listSection("Waiting on others", summary.waiting_on_others)}
   </div>`;
 }
-function laneCardHtml(lane, threadIds, summary, expanded) {
+function laneCardHtml(lane, threadIds, summary, expanded, opts = {}) {
     const selected = new Set(threadIds);
     const threadLabels = threadIds
         .map((tid) => {
@@ -79,11 +83,16 @@ function laneCardHtml(lane, threadIds, summary, expanded) {
         ? `<ul class="lane-assigned-threads">${threadLabels}</ul>`
         : `<p class="lane-empty-threads">No threads yet.</p>`;
     const picker = expanded ? threadPickerHtml(lane.id, selected) : "";
-    return `<article class="user-lane-card" data-lane-id="${lane.id}">
-    <header class="user-lane-header">
+    const header = opts.tabbed
+        ? ""
+        : `<header class="user-lane-header">
       <h2>${escapeHtml(lane.name)}</h2>
       <span class="lane-count-pill">${threadIds.length} thread${threadIds.length === 1 ? "" : "s"}</span>
-    </header>
+    </header>`;
+    const tag = opts.tabbed ? "div" : "article";
+    const className = opts.tabbed ? "user-lane-panel" : "user-lane-card";
+    return `<${tag} class="${className}" data-lane-id="${lane.id}">
+    ${header}
     ${laneSummaryHtml(summary)}
     ${threadsBlock}
     ${picker}
@@ -98,7 +107,38 @@ function laneCardHtml(lane, threadIds, summary, expanded) {
         Delete lane
       </button>
     </div>
-  </article>`;
+  </${tag}>`;
+}
+function renderDashboardLanesTabs(listEl, lanes, data) {
+    const laneIds = new Set(lanes.map((lane) => lane.id));
+    if (activeLaneTabId == null || !laneIds.has(activeLaneTabId)) {
+        activeLaneTabId = lanes[0]?.id ?? null;
+    }
+    const tabButtons = lanes
+        .map((lane) => {
+        const threadIds = getLaneThreadIds(data, lane.id);
+        const active = lane.id === activeLaneTabId;
+        return `<button type="button" class="lane-tab${active ? " is-active" : ""}" role="tab" aria-selected="${active ? "true" : "false"}" id="lane-tab-${lane.id}" aria-controls="lane-panel-${lane.id}" data-lane-id="${lane.id}">
+        <span class="lane-tab-label">${escapeHtml(lane.name)}</span>
+        <span class="lane-tab-count">${threadIds.length}</span>
+      </button>`;
+    })
+        .join("");
+    const panels = lanes
+        .map((lane) => {
+        const threadIds = getLaneThreadIds(data, lane.id);
+        const summary = getLaneSummary(data, lane.id);
+        const expanded = assignLaneId === lane.id;
+        const active = lane.id === activeLaneTabId;
+        return `<div class="lanes-tab-panel${active ? " is-active" : ""}" role="tabpanel" id="lane-panel-${lane.id}" aria-labelledby="lane-tab-${lane.id}" data-lane-id="${lane.id}"${active ? "" : " hidden"}>
+        ${laneCardHtml(lane, threadIds, summary, expanded, { tabbed: true })}
+      </div>`;
+    })
+        .join("");
+    listEl.innerHTML = `<div class="lanes-tabs">
+    <div class="lanes-tab-bar" role="tablist" aria-label="Lanes">${tabButtons}</div>
+    <div class="lanes-tab-panels">${panels}</div>
+  </div>`;
 }
 function renderLanesList() {
     const listEl = document.getElementById("lanes-list");
@@ -108,6 +148,11 @@ function renderLanesList() {
     const lanes = getLanes(data);
     if (!lanes.length) {
         listEl.innerHTML = `<p class="lanes-empty">No lanes yet. Create one to group threads.</p>`;
+        activeLaneTabId = null;
+        return;
+    }
+    if (isDashboardLanesList(listEl)) {
+        renderDashboardLanesTabs(listEl, lanes, data);
         return;
     }
     listEl.innerHTML = lanes
@@ -119,6 +164,7 @@ function renderLanesList() {
     })
         .join("");
 }
+export { renderLanesList };
 async function persistLaneCreate(name) {
     const res = await fetch("/api/lanes/create", {
         method: "POST",
@@ -172,7 +218,7 @@ function reloadFromStore() {
     const data = getCurrentData();
     if (data) {
         setBundle(data, getCurrentSourceLabel());
-        void renderLanesPage();
+        renderLanesList();
     }
 }
 export function mountLanesPage(root) {
@@ -208,6 +254,16 @@ export function bindLanesInteractions() {
             form?.reset();
             form?.setAttribute("hidden", "");
             btn?.removeAttribute("hidden");
+            return;
+        }
+        const tabBtn = target.closest(".lane-tab");
+        if (tabBtn) {
+            const laneId = Number(tabBtn.dataset.laneId) || 0;
+            if (!laneId || laneId === activeLaneTabId)
+                return;
+            activeLaneTabId = laneId;
+            assignLaneId = null;
+            renderLanesList();
             return;
         }
         const editBtn = target.closest(".lane-edit-threads-btn");
@@ -251,6 +307,8 @@ export function bindLanesInteractions() {
                 applyLaneRemoved(laneId);
                 if (assignLaneId === laneId)
                     assignLaneId = null;
+                if (activeLaneTabId === laneId)
+                    activeLaneTabId = null;
                 renderLanesList();
                 try {
                     await persistLaneDelete(laneId);
@@ -261,7 +319,7 @@ export function bindLanesInteractions() {
                     try {
                         const { data, label } = await loadLatestBundle();
                         setBundle(normalizeBundle(data), label);
-                        void renderLanesPage();
+                        renderLanesList();
                     }
                     catch {
                         /* keep optimistic state cleared; user can refresh */
@@ -285,6 +343,7 @@ export function bindLanesInteractions() {
                 const lane = await persistLaneCreate(name);
                 applyLaneCreated(lane);
                 assignLaneId = lane.id;
+                activeLaneTabId = lane.id;
                 form.setAttribute("hidden", "");
                 document.getElementById("create-lane-btn")?.removeAttribute("hidden");
                 form.reset();

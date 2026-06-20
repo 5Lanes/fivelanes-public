@@ -49,6 +49,7 @@ async function renderPage(route) {
     if (route === "dashboard") {
         mountDashboardPage(pageRoot);
         bindDashboardInteractions();
+        bindLanesInteractions();
         await renderDashboardPage();
         return;
     }

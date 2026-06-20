@@ -16,4 +16,4 @@ node_modules/
 # Private data
 /fivelanes-data/
 timeline.db
-/user-service/
+/fivelanes-premium/

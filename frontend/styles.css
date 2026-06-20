@@ -294,7 +294,8 @@ header p.run-meta {
 .view-dashboard {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1.25rem;
+  min-height: calc(100dvh - 11rem);
   min-width: 0;
 }
 
@@ -306,18 +307,125 @@ header p.run-meta {
   min-width: 0;
 }
 
-.dashboard-response-lane,
-.dashboard-followup-lane {
+.dashboard-plans-section,
+.dashboard-meetings-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.15rem 1.1rem;
+  max-height: min(38vh, 24rem);
+  overflow-y: auto;
   min-width: 0;
 }
 
-.dashboard-followup-lane .lane {
-  margin-bottom: 0;
+.dashboard-lanes-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.15rem 1.25rem;
 }
 
-.dashboard-response-lane .lane {
-  height: 100%;
-  box-sizing: border-box;
+.dashboard-lanes-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.65rem;
+}
+
+.dashboard-lanes-header .dashboard-section-title {
+  margin: 0;
+}
+
+.dashboard-lanes-toolbar {
+  margin: 0;
+}
+
+.dashboard-lanes-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-lanes-list .lanes-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lanes-tabs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 0.85rem;
+}
+
+.lanes-tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding-bottom: 0.15rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.lane-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.88rem;
+  font-family: system-ui, sans-serif;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid transparent;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.lane-tab:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.lane-tab.is-active {
+  color: var(--text);
+  background: var(--elevated);
+  border-color: var(--border);
+  border-bottom-color: var(--elevated);
+  margin-bottom: -1px;
+  font-weight: 600;
+}
+
+.lane-tab-count {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.lanes-tab-panels {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.lanes-tab-panel {
+  min-width: 0;
+}
+
+.user-lane-panel {
+  min-width: 0;
 }
 
 .dashboard-section-title {
@@ -2071,6 +2179,15 @@ details.body-detail summary {
 
   .dashboard-top-row {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-plans-section,
+  .dashboard-meetings-section {
+    max-height: none;
+  }
+
+  .view-dashboard {
+    min-height: auto;
   }
 
   .dashboard-plan-view {
