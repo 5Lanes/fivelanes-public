@@ -5,11 +5,11 @@
       "user": "<your user prompt; must include {email_body} placeholder>"
     },
     "email_thread_summary": {
-      "system": "<your system prompt for summarizing a full email thread into latest_updates, next_steps, tone, parties, and suggested_thread_label JSON; must handle {summary_routing_aliases}>",
+      "system": "<your system prompt for summarizing a full email thread into JSON with: latest_updates (string[]), next_steps ({type, action, by_when}[]), last_sender, tone, suggested_thread_label, parties ({active_speakers, audience}), and counterparty_availability ({date: YYYY-MM-DD, start: HH:MM, end: HH:MM, party?, label?}[] — windows the counterparty offered for scheduling, in {calendar_timezone}; omit when none). Must handle {summary_routing_aliases}>",
       "user": "<your user prompt; must include {summary_datetime}, {calendar_timezone}, {calendar_events_block}, and {thread_messages} placeholders>"
     },
     "email_thread_summary_incremental": {
-      "system": "<your system prompt for merging new messages into an existing thread summary JSON; must handle {summary_routing_aliases}>",
+      "system": "<your system prompt for merging new messages into an existing thread summary JSON; preserve or update counterparty_availability when the counterparty proposes new times; must handle {summary_routing_aliases}>",
       "user": "<your user prompt; must include {summary_datetime}, {prior_summary_json}, {new_thread_messages}, {calendar_timezone}, and {calendar_events_block} placeholders>"
     },
     "email_reply_voice": {
@@ -37,7 +37,7 @@
     "lane_thread_summary_block": "<template string for rendering one lane thread summary block; must include {index}, {label}, {datetime}, {status}, {tone}, {last_sender}, {latest_updates_block}, {next_steps_block} placeholders>"
   },
   "settings": {
-    "prompt_version": "2",
+    "prompt_version": "3",
     "email_reply_max_messages": 3,
     "thread_summary_max_messages": 12,
     "meeting_prep_max_messages": 10,

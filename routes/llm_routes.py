@@ -26,7 +26,6 @@ from services.email.segmentation import (
     segmentation_content_from_quoted_tail_only,
 )
 from services.image_description import (
-    fetch_prior_cleaned_content,
     process_timeline_message_segmentation,
     should_reprocess_image_only_row,
 )
@@ -34,6 +33,7 @@ from services.llm_service import get_llm_backend
 from services.pipeline.summary import compute_summary_fingerprint, resolve_thread_summary
 from services.prompts import parse_emails
 from utils.database import (
+    load_prior_cleaned_content_by_pair,
     load_processed_cleaned_for_thread,
     load_processed_thread_source_pairs,
     save_claude_run_outputs,
@@ -193,6 +193,7 @@ def run_fivelanes_llm_pipeline(
         return [], []
 
     processed_thread_source_pairs = load_processed_thread_source_pairs(db)
+    prior_cleaned_by_pair = load_prior_cleaned_content_by_pair(db)
     seg_cache: _SegmentationCache = {}
     cleaned_all: List[Dict[str, Any]] = []
     per_message: List[Dict[str, Any]] = []
@@ -213,7 +214,7 @@ def run_fivelanes_llm_pipeline(
             pair = (str(thread_id or "").strip(), source_id)
             process_body = timeline_row_process_body(row)
             if source_id and pair in processed_thread_source_pairs:
-                prior_cleaned = fetch_prior_cleaned_content(db, thread_id, source_id)
+                prior_cleaned = prior_cleaned_by_pair.get(pair, "")
                 if not should_reprocess_image_only_row(
                     process_body,
                     prior_cleaned,

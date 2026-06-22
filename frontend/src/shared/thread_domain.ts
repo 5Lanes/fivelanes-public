@@ -6,6 +6,7 @@ import {
   highlightMentionsHtml,
 } from "./availability_windows.js";
 import { formatCounterpartySlotLabel } from "./structured_slot_mentions.js";
+import { counterpartySlotsFromText } from "./slot_mentions.js";
 
 export type { ThreadView };
 
@@ -295,7 +296,11 @@ export function followUpNeededForThread(t: ThreadView): string[] {
     .map(formatNextStepLine);
 }
 
-export function counterpartyAvailabilityForSummary(summary: LooseObj): CounterpartySlot[] {
+function counterpartySlotKey(slot: CounterpartySlot): string {
+  return `${slot.date}|${slot.start}|${slot.end}`;
+}
+
+function counterpartySlotsFromSummaryField(summary: LooseObj): CounterpartySlot[] {
   const out: CounterpartySlot[] = [];
   for (const raw of arr(summary.counterparty_availability)) {
     if (!raw || typeof raw !== "object") continue;
@@ -310,6 +315,27 @@ export function counterpartyAvailabilityForSummary(summary: LooseObj): Counterpa
     if (party) slot.party = party;
     if (label) slot.label = label;
     out.push(slot);
+  }
+  return out;
+}
+
+export function counterpartyAvailabilityForSummary(summary: LooseObj): CounterpartySlot[] {
+  const out = counterpartySlotsFromSummaryField(summary);
+  const seen = new Set(out.map(counterpartySlotKey));
+  const proseSources = [
+    ...arr(summary.latest_updates).map(String),
+    ...arr(summary.next_steps).flatMap((raw) => {
+      if (raw && typeof raw === "object") return [str((raw as LooseObj).action)];
+      return [String(raw ?? "")];
+    }),
+  ];
+  for (const line of proseSources) {
+    for (const inferred of counterpartySlotsFromText(line)) {
+      const key = counterpartySlotKey(inferred);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(inferred);
+    }
   }
   return out;
 }

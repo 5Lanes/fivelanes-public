@@ -13,9 +13,9 @@ from services.texts.format import (
     load_messages_for_key,
     tracked_thread_cleaned_rows,
 )
+from services.thread_snooze import maybe_unsnooze_text_thread
 from services.texts.tracking import (
     fetch_tracked_conversation_keys,
-    maybe_clear_snooze_for_text_thread,
     text_inbox_thread_id,
 )
 from utils.thread_summary_normalize import finalize_thread_summary
@@ -122,7 +122,7 @@ def summarize_one_text_thread(
     if not file_cleaned:
         return {"ok": False, "error": "no_message_ids", "conversation_key": key}
 
-    maybe_clear_snooze_for_text_thread(db_path, key)
+    maybe_unsnooze_text_thread(db_path, key)
 
     if not thread_needs_summary(db_path, thread_id, file_cleaned, force=force):
         return {"ok": True, "skipped": True, "conversation_key": key, "thread_id": thread_id}

@@ -75,11 +75,21 @@ function mergeMentions(mentions: SlotMention[]): SlotMention[] {
   const sorted = [...mentions].sort((a, b) => a.start - b.start || a.end - b.end);
   const out: SlotMention[] = [];
   for (const mention of sorted) {
-    const prev = out[out.length - 1];
-    if (prev && mention.start < prev.end) continue;
-    out.push(mention);
+    const overlapIdx = out.findIndex((prev) => mention.start < prev.end && prev.start < mention.end);
+    if (overlapIdx < 0) {
+      out.push(mention);
+      continue;
+    }
+    const prev = out[overlapIdx];
+    if (mention.end - mention.start < prev.end - prev.start) {
+      out[overlapIdx] = mention;
+    }
   }
-  return out;
+  return out.sort((a, b) => a.start - b.start);
+}
+
+export function mergeMentionLists(...lists: SlotMention[][]): SlotMention[] {
+  return mergeMentions(lists.flat());
 }
 
 export function findStructuredMentionsInText(text: string, slots: CounterpartySlot[]): SlotMention[] {

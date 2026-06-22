@@ -25,22 +25,17 @@ def main() -> None:
     from utils.resummary_active_threads import force_resummary_active_threads
 
     os.chdir(ROOT)
-    try:
-        from dotenv import load_dotenv
+    from utils.runtime_paths import load_env
 
-        load_dotenv(ROOT / ".env")
-    except ImportError:
-        pass
+    load_env()
 
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="Re-summarize active inbox threads")
-    parser.add_argument("--lookback-days", type=int, default=14)
     parser.add_argument("--db", default=None, help="SQLite path (default: DATABASE_NAME or timeline.db)")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--thread-id", default=None, help="Only this inbox thread id")
     args = parser.parse_args()
     force_resummary_active_threads(
-        lookback_days=args.lookback_days,
         db_path=args.db,
         dry_run=args.dry_run,
         thread_id=args.thread_id,

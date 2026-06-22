@@ -2712,6 +2712,9 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
         fetch_tracked_conversation_keys,
         text_inbox_thread_id as _text_inbox_thread_id,
     )
+    from services.thread_snooze import refresh_text_threads_auto_unsnooze, snooze_map
+
+    refresh_text_threads_auto_unsnooze(db_path)
     from utils.thread_summary_normalize import finalize_thread_summary
 
     tracked_text_thread_ids = {
@@ -2777,9 +2780,9 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
 
     tt_rows = fetch_thread_tracking_rows(db_path)
     tt_snooze_map = {
-        _normalize_field(r.get("inbox_thread_id")): int(r.get("snoozed") or 0)
-        for r in tt_rows
-        if _normalize_field(r.get("inbox_thread_id"))
+        _normalize_field(tid): state
+        for tid, state in snooze_map(db_path).items()
+        if _normalize_field(tid)
     }
     tt_plan_map = {
         _normalize_field(r.get("inbox_thread_id")): int(r.get("has_plan") or 0)

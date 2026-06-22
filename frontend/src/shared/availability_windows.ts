@@ -1,6 +1,6 @@
 import { escapeHtml } from "./utils.js";
 import { extractSlotMentions } from "./slot_mentions.js";
-import { findStructuredMentionsInText } from "./structured_slot_mentions.js";
+import { findStructuredMentionsInText, mergeMentionLists } from "./structured_slot_mentions.js";
 import type { AvailabilityMatch, AvailabilityStatus, CounterpartySlot, LooseObj, SlotMention } from "./types.js";
 
 type MinuteRange = { start: number; end: number };
@@ -320,9 +320,11 @@ export function counterpartySlotHighlightHtml(slot: CounterpartySlot, displayLab
 }
 
 export function highlightMentionsHtml(text: string, structuredSlots?: CounterpartySlot[]): string {
-  const mentions = structuredSlots?.length
-    ? findStructuredMentionsInText(text, structuredSlots)
-    : extractSlotMentions(text);
+  const structuredMentions = structuredSlots?.length ? findStructuredMentionsInText(text, structuredSlots) : [];
+  const regexMentions = extractSlotMentions(text);
+  const mentions = structuredMentions.length
+    ? mergeMentionLists(structuredMentions, regexMentions)
+    : regexMentions;
   if (!mentions.length) return escapeHtml(text);
   let out = "";
   let cursor = 0;

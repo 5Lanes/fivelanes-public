@@ -183,12 +183,30 @@ function mergeMentions(mentions) {
     const sorted = [...mentions].sort((a, b) => a.start - b.start || a.end - b.end);
     const out = [];
     for (const mention of sorted) {
-        const prev = out[out.length - 1];
-        if (prev && mention.start < prev.end)
+        const overlapIdx = out.findIndex((prev) => mention.start < prev.end && prev.start < mention.end);
+        if (overlapIdx < 0) {
+            out.push(mention);
             continue;
-        out.push(mention);
+        }
+        const prev = out[overlapIdx];
+        if (mention.end - mention.start < prev.end - prev.start) {
+            out[overlapIdx] = mention;
+        }
     }
-    return out;
+    return out.sort((a, b) => a.start - b.start);
+}
+function minuteToHm(minute) {
+    const h = Math.floor(minute / 60);
+    const m = minute % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+export function counterpartySlotsFromText(text, asOf = new Date()) {
+    const mentions = extractColonSeparatedSlots(text, asOf);
+    return mentions.map((m) => ({
+        date: m.date_key,
+        start: minuteToHm(m.start_minute),
+        end: minuteToHm(m.end_minute),
+    }));
 }
 export function extractSlotMentions(text, asOf = new Date()) {
     const out = [];
@@ -240,5 +258,6 @@ export function extractSlotMentions(text, asOf = new Date()) {
             label: `${dateKey} ${timePhrase}`,
         });
     }
+    out.push(...extractColonSeparatedSlots(text, asOf));
     return mergeMentions(out);
 }

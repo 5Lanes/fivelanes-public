@@ -41,7 +41,6 @@ from services.email.recipients import (
 from services.email.thread_resolve import (
     bind_timeline_rows_to_inbox_thread,
     collect_thread_expansion_candidates,
-    existing_source_ids_for_candidates,
     new_sent_source_ids,
     peek_timeline_source_ids_for_thread,
     pick_best_thread_expansion,
@@ -53,8 +52,12 @@ from services.gmail_client import (
     oauth_account_id_for_email,
     profile_email_to_account_id_map,
 )
+from services.thread_snooze import (
+    is_removed,
+    known_source_ids_for_thread,
+    maybe_unsnooze_email_thread,
+)
 from utils.database import (
-    clear_snooze_only_for_threads,
     collapse_thread_tracking_duplicates_by_inner_rfc,
     fetch_removed_inbox_thread_ids,
     fetch_thread_tracking_rows,
@@ -751,7 +754,7 @@ def process_inbox_pipeline(
     tracked_rows = [
         r
         for r in tracked_rows
-        if int(r.get("snoozed") or 0) != 2
+        if not is_removed(r.get("snoozed"))
         and not str(r.get("inbox_thread_id") or "").strip().startswith("text:")
     ]
     if not tracked_rows:
@@ -798,10 +801,9 @@ def process_inbox_pipeline(
             for x in expanded
             if str(x.get("source_id") or "").strip()
         }
-        existing_ids = existing_source_ids_for_candidates(db, pulled_ids)
-        new_ids = pulled_ids - existing_ids
-        prior_in_timeline = bool(existing_ids)
         fetch_key = str(fetch_oauth_used or "").strip()
+        known_ids = known_source_ids_for_thread(db, inbox_thread_id, pulled_ids)
+        new_ids = pulled_ids - known_ids
         new_sent_ids = new_sent_source_ids(expanded, new_ids, fetch_key)
         log.info(
             "Thread refresh result: inbox_thread_id=%r fetch_oauth_account_id=%r "
@@ -812,13 +814,10 @@ def process_inbox_pipeline(
             len(new_ids),
             len(new_sent_ids),
         )
-        should_clear_snooze = int(row.get("snoozed") or 0) == 1 and (
-            (new_ids and prior_in_timeline) or new_sent_ids
-        )
-        if should_clear_snooze:
-            clear_snooze_only_for_threads(db, [inbox_thread_id])
+        if maybe_unsnooze_email_thread(
+            db, row, expanded, fetch_oauth_account_id=fetch_key
+        ):
             row["snoozed"] = 0
-            log.info("Cleared snooze for inbox_thread_id=%r", inbox_thread_id)
 
         all_timeline.extend(expanded)
         fwd = (row.get("source_email") or "").strip()

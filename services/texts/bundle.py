@@ -11,6 +11,7 @@ from services.texts.format import (
     rows_for_thread,
 )
 from services.texts.tracking import fetch_tracked_conversation_keys, text_inbox_thread_id
+from services.thread_snooze import snooze_map
 
 
 def _bundle_fingerprint(
@@ -49,12 +50,7 @@ def append_unsynced_text_threads_to_bundle(db_path: str, bundle: Dict[str, Any])
     if not keys:
         return
 
-    from utils.database import fetch_thread_tracking_rows
-
-    snooze_map = {
-        str(r.get("inbox_thread_id") or ""): int(r.get("snoozed") or 0)
-        for r in fetch_thread_tracking_rows(db_path)
-    }
+    snooze_by_thread = snooze_map(db_path)
 
     cleaned: List[Dict[str, Any]] = list(bundle.get("cleaned") or [])
     summary: List[Dict[str, Any]] = list(bundle.get("summary") or [])
@@ -71,7 +67,7 @@ def append_unsynced_text_threads_to_bundle(db_path: str, bundle: Dict[str, Any])
         if not new_in_file:
             continue
 
-        snoozed = snooze_map.get(thread_id, 0)
+        snoozed = snooze_by_thread.get(thread_id, 0)
         c_rows, s_rows = rows_for_thread(
             thread_id, key, messages, snoozed=snoozed
         )

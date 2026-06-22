@@ -1,6 +1,6 @@
 import { escapeHtml } from "./utils.js";
 import { extractSlotMentions } from "./slot_mentions.js";
-import { findStructuredMentionsInText } from "./structured_slot_mentions.js";
+import { findStructuredMentionsInText, mergeMentionLists } from "./structured_slot_mentions.js";
 let currentDoc = null;
 let availabilityPromise = null;
 function parseMinuteInZone(iso, timeZone) {
@@ -286,9 +286,11 @@ export function counterpartySlotHighlightHtml(slot, displayLabel) {
     return `<span class="slot-mention slot-mention--${escapeHtml(match.status)}" title="${escapeHtml(tooltipForMatch(match))}">${escapeHtml(displayLabel)}</span>`;
 }
 export function highlightMentionsHtml(text, structuredSlots) {
-    const mentions = structuredSlots?.length
-        ? findStructuredMentionsInText(text, structuredSlots)
-        : extractSlotMentions(text);
+    const structuredMentions = structuredSlots?.length ? findStructuredMentionsInText(text, structuredSlots) : [];
+    const regexMentions = extractSlotMentions(text);
+    const mentions = structuredMentions.length
+        ? mergeMentionLists(structuredMentions, regexMentions)
+        : regexMentions;
     if (!mentions.length)
         return escapeHtml(text);
     let out = "";

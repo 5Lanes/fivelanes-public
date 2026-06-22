@@ -213,11 +213,36 @@ function mergeMentions(mentions: SlotMention[]): SlotMention[] {
   const sorted = [...mentions].sort((a, b) => a.start - b.start || a.end - b.end);
   const out: SlotMention[] = [];
   for (const mention of sorted) {
-    const prev = out[out.length - 1];
-    if (prev && mention.start < prev.end) continue;
-    out.push(mention);
+    const overlapIdx = out.findIndex((prev) => mention.start < prev.end && prev.start < mention.end);
+    if (overlapIdx < 0) {
+      out.push(mention);
+      continue;
+    }
+    const prev = out[overlapIdx];
+    if (mention.end - mention.start < prev.end - prev.start) {
+      out[overlapIdx] = mention;
+    }
   }
-  return out;
+  return out.sort((a, b) => a.start - b.start);
+}
+
+function minuteToHm(minute: number): string {
+  const h = Math.floor(minute / 60);
+  const m = minute % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+export function counterpartySlotsFromText(text: string, asOf: Date = new Date()): Array<{
+  date: string;
+  start: string;
+  end: string;
+}> {
+  const mentions = extractColonSeparatedSlots(text, asOf);
+  return mentions.map((m) => ({
+    date: m.date_key,
+    start: minuteToHm(m.start_minute),
+    end: minuteToHm(m.end_minute),
+  }));
 }
 
 export function extractSlotMentions(text: string, asOf: Date = new Date()): SlotMention[] {
@@ -267,5 +292,6 @@ export function extractSlotMentions(text: string, asOf: Date = new Date()): Slot
     });
   }
 
+  out.push(...extractColonSeparatedSlots(text, asOf));
   return mergeMentions(out);
 }

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -121,17 +120,15 @@ def write_fivelanes_bundle_from_db(
 
 def force_resummary_active_threads(
     *,
-    lookback_days: int = 14,
     db_path: str | None = None,
     dry_run: bool = False,
     thread_id: str | None = None,
 ) -> int:
-    """Re-summarize active threads using full summary mode when inputs changed."""
+    """Re-summarize threads shown as Active in the dashboard."""
     from services.llm_service import get_llm_backend
     from services.pipeline.summary import (
         compute_summary_fingerprint,
         summarize_thread,
-        thread_needs_summary,
     )
     from utils.api_error_detection import thread_summary_is_valid
     from utils.database import (
@@ -140,17 +137,17 @@ def force_resummary_active_threads(
         load_processed_cleaned_for_thread,
         save_thread_summary_cache,
     )
+    from utils.runtime_paths import database_path
 
-    db = db_path or os.getenv("DATABASE_NAME") or "timeline.db"
+    db = db_path or database_path()
     llm = get_llm_backend()
-    thread_ids = list_active_thread_ids_for_resummary(db, lookback_days=lookback_days)
+    thread_ids = list_active_thread_ids_for_resummary(db)
     if thread_id:
         tid = thread_id.strip()
         thread_ids = [tid] if tid else []
     log.info(
-        "Force resummary: %d active thread(s), lookback=%d days, backend=%s, db=%s",
+        "Force resummary: %d active thread(s), backend=%s, db=%s",
         len(thread_ids),
-        lookback_days,
         llm.name,
         db,
     )
@@ -164,10 +161,7 @@ def force_resummary_active_threads(
     for i, tid in enumerate(thread_ids, start=1):
         cleaned = load_processed_cleaned_for_thread(db, tid)
         if not cleaned:
-            log.warning("Skip %s: no cleaned messages", tid)
-            continue
-        if not thread_needs_summary(db, tid, cleaned, backend=llm.name):
-            log.info("[%d/%d] Skip %s: summary cache valid", i, len(thread_ids), tid)
+            log.warning("[%d/%d] Skip %s: no cleaned messages", i, len(thread_ids), tid)
             continue
         log.info(
             "[%d/%d] Full resummary for thread %s (%d messages)",
@@ -209,5 +203,8 @@ def force_resummary_active_threads(
             run_stamp=run_stamp,
             generated_at=generated_at,
         )
-    log.info("Updated %d thread(s); bundle written to out/fivelanes_summary.json", updated)
+    if updated:
+        log.info("Updated %d thread(s); bundle written to out/fivelanes_summary.json", updated)
+    else:
+        log.info("Updated 0 thread(s)")
     return updated

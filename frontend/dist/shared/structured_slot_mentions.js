@@ -75,12 +75,20 @@ function mergeMentions(mentions) {
     const sorted = [...mentions].sort((a, b) => a.start - b.start || a.end - b.end);
     const out = [];
     for (const mention of sorted) {
-        const prev = out[out.length - 1];
-        if (prev && mention.start < prev.end)
+        const overlapIdx = out.findIndex((prev) => mention.start < prev.end && prev.start < mention.end);
+        if (overlapIdx < 0) {
+            out.push(mention);
             continue;
-        out.push(mention);
+        }
+        const prev = out[overlapIdx];
+        if (mention.end - mention.start < prev.end - prev.start) {
+            out[overlapIdx] = mention;
+        }
     }
-    return out;
+    return out.sort((a, b) => a.start - b.start);
+}
+export function mergeMentionLists(...lists) {
+    return mergeMentions(lists.flat());
 }
 export function findStructuredMentionsInText(text, slots) {
     const out = [];

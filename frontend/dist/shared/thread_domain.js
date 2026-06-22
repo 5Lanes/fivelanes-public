@@ -2,6 +2,7 @@ import { arr, escapeHtml, recipientsContainAddress, str } from "./utils.js";
 import { otherPartyOwesRe } from "./owner_config.js";
 import { counterpartySlotHighlightHtml, highlightMentionsHtml, } from "./availability_windows.js";
 import { formatCounterpartySlotLabel } from "./structured_slot_mentions.js";
+import { counterpartySlotsFromText } from "./slot_mentions.js";
 let displaySourceAccount = "";
 /** Inbox address used to skip Fivelanes delivery shells when picking thread summaries. */
 export function setDisplaySourceAccount(account) {
@@ -272,7 +273,10 @@ export function followUpNeededForThread(t) {
         .filter((step) => step.type === "follow up needed")
         .map(formatNextStepLine);
 }
-export function counterpartyAvailabilityForSummary(summary) {
+function counterpartySlotKey(slot) {
+    return `${slot.date}|${slot.start}|${slot.end}`;
+}
+function counterpartySlotsFromSummaryField(summary) {
     const out = [];
     for (const raw of arr(summary.counterparty_availability)) {
         if (!raw || typeof raw !== "object")
@@ -291,6 +295,28 @@ export function counterpartyAvailabilityForSummary(summary) {
         if (label)
             slot.label = label;
         out.push(slot);
+    }
+    return out;
+}
+export function counterpartyAvailabilityForSummary(summary) {
+    const out = counterpartySlotsFromSummaryField(summary);
+    const seen = new Set(out.map(counterpartySlotKey));
+    const proseSources = [
+        ...arr(summary.latest_updates).map(String),
+        ...arr(summary.next_steps).flatMap((raw) => {
+            if (raw && typeof raw === "object")
+                return [str(raw.action)];
+            return [String(raw ?? "")];
+        }),
+    ];
+    for (const line of proseSources) {
+        for (const inferred of counterpartySlotsFromText(line)) {
+            const key = counterpartySlotKey(inferred);
+            if (seen.has(key))
+                continue;
+            seen.add(key);
+            out.push(inferred);
+        }
     }
     return out;
 }

@@ -78,9 +78,8 @@ from utils.database import (
     save_meeting_prep,
     save_person_summary,
     save_thread_draft_reply,
-    set_claude_outputs_thread_snoozed,
-    set_thread_tracking_snoozed,
 )
+from services.thread_snooze import remove_thread_tracking, set_thread_snooze
 from utils.logging import configure_logging
 from services.texts import (
     CONVERSATIONS_DIR,
@@ -431,13 +430,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_thread_id"}
             )
             return
-        ok_tracking = set_thread_tracking_snoozed(
-            DB_PATH, inbox_thread_id=thread_id, snoozed=snoozed
-        )
-        ok_claude = set_claude_outputs_thread_snoozed(
-            DB_PATH, thread_id=thread_id, snoozed=snoozed
-        )
-        if not (ok_tracking or ok_claude):
+        if not set_thread_snooze(DB_PATH, thread_id, snoozed):
             self._json_response(
                 HTTPStatus.NOT_FOUND,
                 {"ok": False, "error": "thread_not_found", "inbox_thread_id": thread_id},
@@ -452,19 +445,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_thread_id"}
             )
             return
-        ok_tracking = set_thread_tracking_snoozed(
-            DB_PATH, inbox_thread_id=thread_id, snoozed=2
-        )
-        if thread_id.startswith("text:"):
-            from utils.database import delete_claude_outputs_for_thread
-
-            deleted = delete_claude_outputs_for_thread(DB_PATH, thread_id)
-            ok_claude = deleted > 0 or ok_tracking
-        else:
-            ok_claude = set_claude_outputs_thread_snoozed(
-                DB_PATH, thread_id=thread_id, snoozed=2
-            )
-        if not (ok_tracking or ok_claude):
+        if not remove_thread_tracking(DB_PATH, thread_id):
             self._json_response(
                 HTTPStatus.NOT_FOUND,
                 {"ok": False, "error": "thread_not_found", "inbox_thread_id": thread_id},
