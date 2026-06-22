@@ -2,7 +2,7 @@
 """
 Run the fivelanes email + LLM pipeline on a fixed interval, with nightly quiet hours.
 
-Active window defaults to 06:00–24:00 local time (no runs from midnight through 05:59).
+Active window defaults to 06:00–19:00 local time (no runs from 19:00 through 05:59).
 Between runs the process sleeps; during quiet hours it sleeps until the next active window.
 
   python3 utils/run_fivelanes_scheduler.py
@@ -15,7 +15,7 @@ Environment (same names as dashboard_server where applicable):
 
   FIVELANES_INTERVAL_SEC       seconds between runs (default 900 = 15 minutes)
   FIVELANES_LOOKBACK_DAYS      passed to fivelanes.main (default 14)
-  FIVELANES_QUIET_START_HOUR   inclusive start of quiet period, 0–23 (default 0)
+  FIVELANES_QUIET_START_HOUR   inclusive start of quiet period, 0–23 (default 19)
   FIVELANES_QUIET_END_HOUR     exclusive end of quiet period, 0–24 (default 6)
   FIVELANES_SCHEDULER_TZ       IANA timezone for quiet hours (default: system local)
   CALENDAR_AVAILABILITY_DISABLE, CALENDAR_AVAILABILITY_WEEKS — same as dashboard_server
@@ -42,7 +42,7 @@ log = logging.getLogger(__name__)
 
 FIVELANES_INTERVAL_SEC = int(os.getenv("FIVELANES_INTERVAL_SEC", "900"))
 FIVELANES_LOOKBACK_DAYS = int(os.getenv("FIVELANES_LOOKBACK_DAYS", "14"))
-FIVELANES_QUIET_START_HOUR = int(os.getenv("FIVELANES_QUIET_START_HOUR", "0"))
+FIVELANES_QUIET_START_HOUR = int(os.getenv("FIVELANES_QUIET_START_HOUR", "19"))
 FIVELANES_QUIET_END_HOUR = int(os.getenv("FIVELANES_QUIET_END_HOUR", "6"))
 
 CALENDAR_AVAILABILITY_DISABLE = (os.getenv("CALENDAR_AVAILABILITY_DISABLE") or "").strip().lower() in (

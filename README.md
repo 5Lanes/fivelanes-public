@@ -71,7 +71,7 @@ python scripts/pull_calendar_availability.py
 
 `dashboard_server.py` serves the UI and JSON API. Besides text-thread selection, the dashboard accepts snooze/remove on threads, lane and plan edits, meeting-prep and email-reply prompts (user intent → LLM), and manual pipeline runs (`POST /api/pipeline/run`).
 
-The background scheduler (`utils/run_fivelanes_scheduler.py`, also started with the dashboard) runs the full cycle every `FIVELANES_INTERVAL_SEC` (default 15 minutes), skipping quiet hours (`FIVELANES_QUIET_START_HOUR`–`FIVELANES_QUIET_END_HOUR` in `FIVELANES_SCHEDULER_TZ`).
+The background scheduler (`utils/run_fivelanes_scheduler.py`, also started with the dashboard) runs the full cycle every `FIVELANES_INTERVAL_SEC` (default 15 minutes) during the active window (default 06:00–19:00 local; quiet hours 19:00–06:00 via `FIVELANES_QUIET_START_HOUR` / `FIVELANES_QUIET_END_HOUR` in `FIVELANES_SCHEDULER_TZ`).
 
 **Security note:** The dashboard has no authentication and exposes `/timeline.db`. It is intended for trusted LAN use only. See [SECURITY.md](SECURITY.md).
 
@@ -138,7 +138,7 @@ Mail to/cc/bcc `SOURCE_ACCOUNT` is routed in [`services/email/inbox_process.py`]
 
 | How you send it | What Fivelanes does |
 |-----------------|---------------------|
-| **To** `SOURCE_ACCOUNT` with subject `todo:` | Creates a **Plan** from the remainder of the subject. No `thread_tracking` or `timeline_entries`. |
+| **To** `SOURCE_ACCOUNT` with subject `todo:` | Creates a standalone **Plan** (synthetic `todo:` id, not linked to a tracked thread). Marks the inbox Gmail thread removed; deleting the plan does not affect other threads. |
 | **Forward** to `SOURCE_ACCOUNT` | Tracks via inner RFC `Message-ID`, resolves the real thread in connected mailboxes, **drops** the forward-to-inbox shell from the timeline. |
 | **Cc/Bcc** `SOURCE_ACCOUNT` (inbox not in To) | Tracks via envelope RFC id, resolves the source mailbox thread, **keeps** the Cc/Bcc copy in the Fivelanes inbox in the timeline. |
 | **To** `SOURCE_ACCOUNT` directly (e.g. screenshot) | Pulls the inbox Gmail thread as the capture; OCR/vision on images; **subject line included** in prompts. |

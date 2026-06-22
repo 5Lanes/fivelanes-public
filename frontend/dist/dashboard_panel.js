@@ -3,7 +3,7 @@
  */
 import { MEETINGS_LOOKAHEAD_DAYS, loadMeetings, meetingDedupeKey, } from "./meetings_panel.js";
 import { buildThreadMatchContexts, findMatchingThread, } from "./thread_meeting_match.js";
-import { formatPlanByWhen, sortPlansByDueDate, } from "./shared/plan_helpers.js";
+import { formatPlanByWhen, sortPlansByDueDate, planLinkedThreadLabel, } from "./shared/plan_helpers.js";
 import { renderMentionAwareText, } from "./shared/thread_domain.js";
 import { dayHeadingLabelLong, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdLocal } from "./shared/time_ui.js";
 import { ensureAvailabilityDocLoaded } from "./shared/availability_windows.js";
@@ -19,7 +19,7 @@ export function renderDashboardPlans(plansEl, plans, labelForThreadId) {
     const rowHtml = (plan) => {
         const when = formatPlanByWhen(plan.by_when);
         const whenHtml = when ? `<span class="dashboard-plan-when">by ${escapeHtml(when)}</span>` : "";
-        const threadLabel = escapeHtml(labelForThreadId(plan.inbox_thread_id));
+        const threadLabel = escapeHtml(planLinkedThreadLabel(plan.inbox_thread_id, labelForThreadId));
         return `<li class="dashboard-plan-row" data-plan-id="${plan.id}" data-thread-id="${escapeHtml(plan.inbox_thread_id)}" data-plan-action="${escapeHtml(plan.action)}" data-plan-step-type="${escapeHtml(plan.step_type)}" data-plan-by-when="${escapeHtml(plan.by_when)}">
         <div class="dashboard-plan-view">
           <div class="dashboard-plan-main">

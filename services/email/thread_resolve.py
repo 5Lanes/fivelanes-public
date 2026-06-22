@@ -36,6 +36,96 @@ from services.gmail_client import (
 log = logging.getLogger(__name__)
 
 
+def existing_source_ids_for_inbox_thread(
+    db_path: str, inbox_thread_id: str
+) -> set[str]:
+    """Gmail ``source_id`` values already stored for a Fivelanes ``thread_id``."""
+    tid = (inbox_thread_id or "").strip()
+    if not tid:
+        return set()
+    try:
+        with sqlite3.connect(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT source_id FROM timeline_entries
+                WHERE thread_id = ?
+                  AND COALESCE(TRIM(source_id), '') != ''
+                """,
+                (tid,),
+            ).fetchall()
+    except sqlite3.Error as exc:
+        log.warning(
+            "Could not read timeline source_ids for thread %s: %s",
+            tid,
+            exc,
+        )
+        return set()
+    return {str(r[0]).strip() for r in rows if r and str(r[0]).strip()}
+
+
+def thread_timeline_is_current(
+    db_path: str,
+    timeline_thread_id: str,
+    remote_source_ids: Optional[set[str]],
+) -> bool:
+    """True when every remote message id is already in ``timeline_entries``."""
+    if remote_source_ids is None:
+        return False
+    if not remote_source_ids:
+        return not existing_source_ids_for_inbox_thread(db_path, timeline_thread_id)
+    db_ids = existing_source_ids_for_inbox_thread(db_path, timeline_thread_id)
+    return not (remote_source_ids - db_ids)
+
+
+def peek_timeline_source_ids_for_thread(
+    service: Any,
+    gmail_thread_id: str,
+    *,
+    inbox_shell_skip: str = "none",
+    inbox_lower: str = "",
+) -> Optional[set[str]]:
+    """
+    Gmail message ids that would be emitted by ``pull_timeline_messages_for_threads``
+    (metadata-only; no bodies).
+    """
+    tid = (gmail_thread_id or "").strip()
+    if not tid:
+        return set()
+    try:
+        thr = (
+            service.users()
+            .threads()
+            .get(
+                userId="me",
+                id=tid,
+                format="metadata",
+                metadataHeaders=["To", "Cc", "Bcc"],
+            )
+            .execute()
+        )
+    except HttpError as exc:
+        log.warning("threads.get (metadata) failed for thread_id=%s: %s", tid, exc)
+        return None
+
+    out: set[str] = set()
+    for msg in sorted(thr.get("messages") or [], key=internal_date_ms):
+        if gmail_message_is_draft(msg):
+            continue
+        if inbox_shell_skip != "none" and inbox_lower:
+            hdrs = (msg.get("payload") or {}).get("headers") or []
+            to_h = get_header(hdrs, "To")
+            cc_h = get_header(hdrs, "Cc")
+            bcc_h = get_header(hdrs, "Bcc")
+            if _should_skip_inbox_shell(
+                to_h, cc_h, bcc_h, inbox_lower, inbox_shell_skip
+            ):
+                continue
+        mid = str(msg.get("id") or "").strip()
+        if mid:
+            out.add(mid)
+    return out
+
+
 def existing_source_ids_for_candidates(
     db_path: str, source_ids: set[str]
 ) -> set[str]:
@@ -455,6 +545,9 @@ def pull_timeline_messages_for_threads(
     include_body: bool = True,
     fetch_oauth_account_id: str = "",
     inbox_shell_skip: str = "none",
+    db_path: Optional[str] = None,
+    timeline_thread_id: Optional[str] = None,
+    force_full_refresh: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     For each Gmail thread id, emit one ``timeline_entries`` row per message.
@@ -485,6 +578,29 @@ def pull_timeline_messages_for_threads(
             account_id,
             tid,
         )
+        timeline_tid = (timeline_thread_id or "").strip()
+        if (
+            db_path
+            and timeline_tid
+            and not force_full_refresh
+            and thread_timeline_is_current(
+                db_path,
+                timeline_tid,
+                peek_timeline_source_ids_for_thread(
+                    service,
+                    tid,
+                    inbox_shell_skip=inbox_shell_skip,
+                    inbox_lower=fivelanes_inbox,
+                ),
+            )
+        ):
+            log.info(
+                "Thread unchanged (metadata peek): account_id=%s thread_id=%s timeline_thread_id=%s",
+                account_id,
+                tid,
+                timeline_tid,
+            )
+            continue
         try:
             thr = (
                 service.users()

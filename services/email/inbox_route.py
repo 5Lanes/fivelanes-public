@@ -17,11 +17,13 @@ from services.email.recipients import (
 )
 from services.email.subject import extract_todo_plan_action, subject_core_indicates_todo
 from utils.database import (
-    create_thread_plan,
+    create_todo_thread_plan,
+    fetch_removed_inbox_thread_ids,
     fetch_thread_tracking_rows,
     load_thread_subjects,
     plan_exists_for_thread_action,
     todo_plan_is_dismissed,
+    todo_plan_thread_id,
     untrack_todo_plan_inbox_thread,
 )
 
@@ -115,7 +117,13 @@ def process_todo_plan(m: dict, db_path: str) -> None:
     if not tid:
         log.warning("Todo email missing thread_id; skipping plan")
         return
-    if plan_exists_for_thread_action(db_path, tid, action):
+    if tid in fetch_removed_inbox_thread_ids(db_path):
+        log.info(
+            "Todo inbox thread_id=%s already removed; skipping plan recreate",
+            tid,
+        )
+        return
+    if plan_exists_for_thread_action(db_path, todo_plan_thread_id(tid), action):
         log.info("Todo plan already exists for thread_id=%s action=%r", tid, action)
     elif todo_plan_is_dismissed(db_path, tid, action):
         log.info(
@@ -124,10 +132,10 @@ def process_todo_plan(m: dict, db_path: str) -> None:
             action,
         )
     else:
-        create_thread_plan(db_path, inbox_thread_id=tid, action=action)
+        create_todo_thread_plan(db_path, gmail_inbox_thread_id=tid, action=action)
         log.info("Created todo plan for thread_id=%s action=%r", tid, action)
     if untrack_todo_plan_inbox_thread(db_path, inbox_thread_id=tid):
-        log.info("Removed tracking/timeline for todo-only inbox thread_id=%s", tid)
+        log.info("Marked todo inbox thread_id=%s removed (snoozed=2)", tid)
 
 
 def purge_tracked_todo_only_threads(db_path: str) -> int:

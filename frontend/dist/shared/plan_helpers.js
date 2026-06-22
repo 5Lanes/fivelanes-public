@@ -1,4 +1,13 @@
 import { escapeHtml, str } from "./utils.js";
+export const TODO_PLAN_THREAD_PREFIX = "todo:";
+export function isTodoPlanThreadId(threadId) {
+    return threadId.startsWith(TODO_PLAN_THREAD_PREFIX);
+}
+export function planLinkedThreadLabel(threadId, resolveThreadLabel) {
+    if (isTodoPlanThreadId(threadId))
+        return "Inbox todo";
+    return resolveThreadLabel(threadId);
+}
 export function planActionKey(threadId, action) {
     return `${threadId}::${action.trim().toLowerCase()}`;
 }

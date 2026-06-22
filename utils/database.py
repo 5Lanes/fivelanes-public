@@ -1124,6 +1124,53 @@ def load_all_person_summaries(db_path: str) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+TODO_PLAN_THREAD_PREFIX = "todo:"
+
+
+def todo_plan_thread_id(gmail_inbox_thread_id: str) -> str:
+    """Synthetic plan thread id — not a tracked inbox/source thread."""
+    tid = _normalize_field(gmail_inbox_thread_id)
+    if not tid:
+        return ""
+    if tid.startswith(TODO_PLAN_THREAD_PREFIX):
+        return tid
+    return f"{TODO_PLAN_THREAD_PREFIX}{tid}"
+
+
+def is_todo_plan_thread_id(inbox_thread_id: str) -> bool:
+    return _normalize_field(inbox_thread_id).startswith(TODO_PLAN_THREAD_PREFIX)
+
+
+def gmail_inbox_thread_id_from_todo_plan(inbox_thread_id: str) -> str:
+    tid = _normalize_field(inbox_thread_id)
+    if tid.startswith(TODO_PLAN_THREAD_PREFIX):
+        return tid[len(TODO_PLAN_THREAD_PREFIX) :]
+    return ""
+
+
+def _migrate_legacy_todo_plan_thread_ids(conn: sqlite3.Connection) -> None:
+    """Point todo-origin plans at synthetic ``todo:`` ids, not inbox Gmail thread ids."""
+    _ensure_thread_tracking_schema(conn)
+    rows = conn.execute(
+        """
+        SELECT p.id, p.inbox_thread_id
+        FROM thread_plans p
+        WHERE p.inbox_thread_id NOT LIKE ?
+          AND p.inbox_thread_id NOT LIKE 'text:%'
+          AND p.inbox_thread_id IN (
+            SELECT inbox_thread_id FROM thread_tracking
+            WHERE inbox_delivery_kind = 'todo_plan'
+          )
+        """,
+        (f"{TODO_PLAN_THREAD_PREFIX}%",),
+    ).fetchall()
+    for plan_id, tid in rows:
+        conn.execute(
+            "UPDATE thread_plans SET inbox_thread_id = ? WHERE id = ?",
+            (todo_plan_thread_id(_normalize_field(tid)), int(plan_id)),
+        )
+
+
 def _ensure_thread_plans_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -1141,6 +1188,25 @@ def _ensure_thread_plans_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_thread_plans_inbox_thread_id "
         "ON thread_plans(inbox_thread_id)"
+    )
+    _migrate_legacy_todo_plan_thread_ids(conn)
+
+
+def create_todo_thread_plan(
+    db_path: str,
+    *,
+    gmail_inbox_thread_id: str,
+    action: str,
+    step_type: str = "follow up needed",
+    by_when: str = "",
+) -> Dict[str, Any]:
+    """Create a plan from a Todo: inbox email (not linked to a tracked thread)."""
+    return create_thread_plan(
+        db_path,
+        inbox_thread_id=todo_plan_thread_id(gmail_inbox_thread_id),
+        action=action,
+        step_type=step_type,
+        by_when=by_when,
     )
 
 
@@ -1217,7 +1283,7 @@ def todo_plan_is_dismissed(
 def _sync_thread_tracking_has_plan(conn: sqlite3.Connection, inbox_thread_id: str) -> None:
     """Set ``has_plan`` on ``thread_tracking`` from ``thread_plans`` row count."""
     tid = _normalize_field(inbox_thread_id)
-    if not tid:
+    if not tid or is_todo_plan_thread_id(tid):
         return
     _ensure_thread_plans_schema(conn)
     _ensure_thread_tracking_schema(conn)
@@ -1380,22 +1446,26 @@ def delete_thread_plan(db_path: str, *, plan_id: int) -> bool:
         cur = conn.execute("DELETE FROM thread_plans WHERE id = ?", (plan_id,))
         deleted = int(cur.rowcount or 0) > 0
         if deleted and tid:
-            _sync_thread_tracking_has_plan(conn, tid)
-            if action:
-                _record_dismissed_todo_plan(conn, tid, action)
+            if is_todo_plan_thread_id(tid):
+                gmail_tid = gmail_inbox_thread_id_from_todo_plan(tid)
+                if action and gmail_tid:
+                    _record_dismissed_todo_plan(conn, gmail_tid, action)
+            else:
+                _sync_thread_tracking_has_plan(conn, tid)
         conn.commit()
         return deleted
 
 
 def untrack_todo_plan_inbox_thread(db_path: str, *, inbox_thread_id: str) -> bool:
     """
-    Drop tracking, timeline, and summary rows for a Todo: inbox thread.
+    Consume a Todo: inbox thread: drop timeline/summary rows and mark tracking removed.
 
     ``thread_plans`` rows are kept — Todo emails should exist only as plans.
     """
     tid = _normalize_field(inbox_thread_id)
     if not tid or tid.startswith("text:"):
         return False
+    now = datetime.now(timezone.utc).isoformat()
     db_file = Path(db_path)
     with sqlite3.connect(db_file) as conn:
         _ensure_thread_tracking_schema(conn)
@@ -1405,7 +1475,6 @@ def untrack_todo_plan_inbox_thread(db_path: str, *, inbox_thread_id: str) -> boo
         _ensure_thread_draft_replies_schema(conn)
         _ensure_lanes_schema(conn)
         _ensure_people_schema(conn)
-        conn.execute("DELETE FROM thread_tracking WHERE inbox_thread_id = ?", (tid,))
         conn.execute(
             "DELETE FROM timeline_entries WHERE COALESCE(thread_id, '') = ?", (tid,)
         )
@@ -1417,6 +1486,25 @@ def untrack_todo_plan_inbox_thread(db_path: str, *, inbox_thread_id: str) -> boo
         conn.execute("DELETE FROM thread_draft_replies WHERE thread_id = ?", (tid,))
         conn.execute("DELETE FROM lane_threads WHERE inbox_thread_id = ?", (tid,))
         conn.execute("DELETE FROM person_threads WHERE inbox_thread_id = ?", (tid,))
+        conn.execute(
+            """
+            INSERT INTO thread_tracking (
+                inbox_thread_id, source_email, snoozed, inner_rfc_message_id,
+                resolved_oauth_account_id, resolution_error, inbox_delivery_kind,
+                created_at, updated_at
+            )
+            VALUES (?, '', 2, '', '', '', 'todo_plan', ?, ?)
+            ON CONFLICT(inbox_thread_id) DO UPDATE SET
+                snoozed = 2,
+                inbox_delivery_kind = COALESCE(
+                    NULLIF(excluded.inbox_delivery_kind, ''),
+                    thread_tracking.inbox_delivery_kind
+                ),
+                updated_at = excluded.updated_at
+            """,
+            (tid, now, now),
+        )
+        _sync_thread_tracking_has_plan(conn, tid)
         conn.commit()
         return True
 
@@ -2262,62 +2350,65 @@ def _parse_iso_datetime(dt: str) -> datetime:
         return datetime.min.replace(tzinfo=timezone.utc)
 
 
-def list_active_thread_ids_for_resummary(
-    db_path: str, *, lookback_days: int = 14
-) -> List[str]:
-    """
-    Inbox thread ids with successful cleaned output, not snoozed/removed, recent activity.
+def _merge_bundle_threads(bundle: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    """Group bundle cleaned/summary rows by thread_id (same as frontend ``mergeRows``)."""
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for c in bundle.get("cleaned") or []:
+        sid = _normalize_field(c.get("source_id"))
+        if sid:
+            by_id[sid] = {"cleaned": c, "summary": None}
+    for s in bundle.get("summary") or []:
+        sid = _normalize_field(s.get("source_id"))
+        if not sid:
+            continue
+        row = by_id.get(sid) or {"cleaned": None, "summary": None}
+        row["summary"] = s
+        by_id[sid] = row
 
-    Snooze uses ``thread_tracking`` when present, else ``claude_message_outputs.snoozed``.
-    """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, lookback_days))
-    cutoff_iso = cutoff.isoformat()
-    tracking_snooze: Dict[str, int] = {}
-    try:
-        for row in fetch_thread_tracking_rows(db_path):
-            tid = _normalize_field(row.get("inbox_thread_id"))
-            if tid:
-                tracking_snooze[tid] = int(row.get("snoozed") or 0)
-    except sqlite3.Error:
-        pass
+    by_thread: Dict[str, List[Dict[str, Any]]] = {}
+    for sid, row in by_id.items():
+        tid = _normalize_field((row.get("cleaned") or {}).get("thread_id")) or _normalize_field(
+            (row.get("summary") or {}).get("thread_id")
+        )
+        key = tid or f"_orphan_{sid}"
+        by_thread.setdefault(key, []).append(row)
+    return by_thread
 
-    by_thread: Dict[str, Dict[str, Any]] = {}
+
+def list_active_thread_ids_for_resummary(db_path: str) -> List[str]:
+    """
+    Thread ids shown as Active in the dashboard.
+
+    Matches frontend ``mergeRows`` + ``partitionThreadsBySnooze`` (newest message
+    ``snoozed`` = 0), not every ``thread_tracking`` row with ``snoozed`` = 0.
+    """
     try:
-        with sqlite3.connect(db_path) as conn:
-            _ensure_claude_outputs_schema(conn)
-            rows = conn.execute(
-                """
-                SELECT thread_id, datetime, COALESCE(snoozed, 0) AS snoozed
-                FROM claude_message_outputs
-                WHERE COALESCE(TRIM(thread_id), '') != ''
-                  AND COALESCE(TRIM(api_error), '') = ''
-                  AND COALESCE(TRIM(cleaned_content), '') != ''
-                """
-            ).fetchall()
-    except sqlite3.Error:
+        bundle = build_summaries_bundle(db_path)
+    except Exception:
         return []
 
-    for thread_id, dt, row_snooze in rows:
-        tid = _normalize_field(thread_id)
-        if not tid:
+    by_thread = _merge_bundle_threads(bundle)
+    active: List[tuple[datetime, str]] = []
+    for tid, rows in by_thread.items():
+        if tid.startswith("_orphan_"):
             continue
-        snooze = tracking_snooze.get(tid, int(row_snooze or 0))
-        if snooze != 0:
+        rows.sort(
+            key=lambda r: _normalize_field(
+                (r.get("summary") or r.get("cleaned") or {}).get("datetime")
+            ),
+            reverse=True,
+        )
+        summary = rows[0].get("summary") or {}
+        if int(summary.get("snoozed") or 0) != 0:
             continue
-        parsed_dt = _parse_iso_datetime(str(dt or ""))
-        rec = by_thread.get(tid)
-        if rec is None:
-            by_thread[tid] = {"max_dt": parsed_dt}
-        elif parsed_dt > rec["max_dt"]:
-            rec["max_dt"] = parsed_dt
-
-    active = [
-        tid
-        for tid, rec in by_thread.items()
-        if rec["max_dt"] >= cutoff
-    ]
-    active.sort(key=lambda t: by_thread[t]["max_dt"], reverse=True)
-    return active
+        newest = _parse_iso_datetime(
+            _normalize_field(
+                (rows[0].get("summary") or rows[0].get("cleaned") or {}).get("datetime")
+            )
+        )
+        active.append((newest, tid))
+    active.sort(key=lambda item: item[0], reverse=True)
+    return [tid for _, tid in active]
 
 
 def _ensure_thread_summaries_schema(conn: sqlite3.Connection) -> None:
@@ -2752,6 +2843,16 @@ def load_processed_thread_source_pairs(db_path: str) -> Set[Tuple[str, str]]:
             return _claude_outputs_successful_thread_source_pairs(conn)
     except sqlite3.Error:
         return set()
+
+
+def load_prior_cleaned_content_by_pair(db_path: str) -> Dict[Tuple[str, str], str]:
+    """Latest successful ``cleaned_content`` per ``(thread_id, source_id)``."""
+    try:
+        with sqlite3.connect(db_path) as conn:
+            _ensure_claude_outputs_schema(conn)
+            return _claude_outputs_latest_success_content_by_pair(conn)
+    except sqlite3.Error:
+        return {}
 
 
 def save_claude_run_outputs(

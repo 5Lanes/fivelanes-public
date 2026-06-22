@@ -1,4 +1,5 @@
 import { mergeRows, setDisplaySourceAccount } from "./thread_domain.js";
+import { isTodoPlanThreadId } from "./plan_helpers.js";
 import type { LaneSummaryView, LaneView, LooseObj, PersonSummaryView, PersonView, ThreadView, PlanView } from "./types.js";
 import { str } from "./utils.js";
 
@@ -262,7 +263,7 @@ export function getThreadPlans(data: LooseObj | null): PlanView[] {
 }
 
 function setThreadHasPlanInBundle(threadId: string, hasPlan: boolean): void {
-  if (!currentData || !Array.isArray(currentData.summary)) return;
+  if (isTodoPlanThreadId(threadId) || !currentData || !Array.isArray(currentData.summary)) return;
   for (const row of currentData.summary as LooseObj[]) {
     if (str(row.thread_id) === threadId) {
       row.has_plan = hasPlan ? 1 : 0;

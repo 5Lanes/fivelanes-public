@@ -1,4 +1,5 @@
 import { mergeRows, setDisplaySourceAccount } from "./thread_domain.js";
+import { isTodoPlanThreadId } from "./plan_helpers.js";
 import { str } from "./utils.js";
 export const SUMMARIES_BUNDLE_URL = "/api/summaries/bundle";
 const SUMMARIES_CACHE_KEY = "fivelanes_summaries_bundle_v3";
@@ -270,7 +271,7 @@ export function getThreadPlans(data) {
         .filter((plan) => plan.id > 0 && plan.inbox_thread_id && plan.action);
 }
 function setThreadHasPlanInBundle(threadId, hasPlan) {
-    if (!currentData || !Array.isArray(currentData.summary))
+    if (isTodoPlanThreadId(threadId) || !currentData || !Array.isArray(currentData.summary))
         return;
     for (const row of currentData.summary) {
         if (str(row.thread_id) === threadId) {

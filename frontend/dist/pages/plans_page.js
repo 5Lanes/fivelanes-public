@@ -1,4 +1,4 @@
-import { formatPlanByWhen, sortPlansByDueDate, persistPlanCreate, persistPlanDelete, persistPlanUpdate, planEditFormHtml, } from "../shared/plan_helpers.js";
+import { formatPlanByWhen, sortPlansByDueDate, isTodoPlanThreadId, persistPlanCreate, persistPlanDelete, persistPlanUpdate, planEditFormHtml, } from "../shared/plan_helpers.js";
 import { applyPlanCreated, applyPlanDeleted, applyPlanUpdated, applySavedThreadDraft, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getThreadPlans, setBundle, } from "../shared/summaries_store.js";
 import { formatDraftReplyMarkdown, partitionThreadsBySnooze, threadLabel, threadMessagesForReply, } from "../shared/thread_domain.js";
 import { escapeHtml, str } from "../shared/utils.js";
@@ -75,13 +75,20 @@ function savedDraftForThread(threadId) {
 }
 function planCardHtml(item) {
     const thread = getCurrentThreads().find((t) => t.id === item.threadId);
-    const label = thread ? threadLabel(thread) : "(Unknown thread)";
+    const label = isTodoPlanThreadId(item.threadId)
+        ? "Inbox todo"
+        : thread
+            ? threadLabel(thread)
+            : "(Unknown thread)";
     const whenLabel = formatPlanByWhen(item.byWhen);
     const when = whenLabel ? ` <span class="next-step-when">by ${escapeHtml(whenLabel)}</span>` : "";
     const savedDraft = savedDraftForThread(item.threadId);
     const savedIntent = savedDraft ? str(savedDraft.response_intent) : item.action;
     const savedMd = savedDraft ? str(savedDraft.markdown) : "";
     const showSavedOut = Boolean(savedMd);
+    const draftBtn = isTodoPlanThreadId(item.threadId)
+        ? ""
+        : `<button type="button" class="plan-draft-btn" data-plan-key="${escapeHtml(item.key)}">Draft email</button>`;
     return `<article class="plan-card" data-plan-key="${escapeHtml(item.key)}" data-plan-id="${item.planId}" data-thread-id="${escapeHtml(item.threadId)}">
     <div class="plan-card-view">
       <header class="plan-card-header">
@@ -95,7 +102,7 @@ function planCardHtml(item) {
       </header>
       <div class="plan-card-actions">
         <button type="button" class="plan-edit-btn" data-plan-id="${item.planId}">Edit</button>
-        <button type="button" class="plan-draft-btn" data-plan-key="${escapeHtml(item.key)}">Draft email</button>
+        ${draftBtn}
         <button type="button" class="plan-delete-btn" data-plan-id="${item.planId}">Remove</button>
       </div>
     </div>
