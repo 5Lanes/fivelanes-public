@@ -1,6 +1,7 @@
 import { escapeHtml } from "./utils.js";
 import { extractSlotMentions } from "./slot_mentions.js";
-import type { AvailabilityMatch, AvailabilityStatus, LooseObj, SlotMention } from "./types.js";
+import { findStructuredMentionsInText } from "./structured_slot_mentions.js";
+import type { AvailabilityMatch, AvailabilityStatus, CounterpartySlot, LooseObj, SlotMention } from "./types.js";
 
 type MinuteRange = { start: number; end: number };
 type LabeledMinuteRange = MinuteRange & { label: string };
@@ -194,31 +195,45 @@ function blockedDetails(doc: AvailabilityDoc, mention: SlotMention, target: Minu
   return "Blocked by parenting constraints.";
 }
 
-function statusForMention(mention: SlotMention, doc: AvailabilityDoc | null): AvailabilityMatch {
+function statusForRange(
+  dateKey: string,
+  startMinute: number,
+  endMinute: number,
+  doc: AvailabilityDoc | null,
+): AvailabilityMatch {
   if (!doc) {
     return {
       status: "unknown",
-      date_key: mention.date_key,
-      start_minute: mention.start_minute,
-      end_minute: mention.end_minute,
+      date_key: dateKey,
+      start_minute: startMinute,
+      end_minute: endMinute,
       details: "Availability unknown (calendar export not loaded).",
     };
   }
-  const target = { start: mention.start_minute, end: mention.end_minute };
-  const open = (doc.openByDate.get(mention.date_key) || []).some((r) => intersects(target, r));
-  const virtualOnly = (doc.virtualOnlyByDate.get(mention.date_key) || []).some((r) => intersects(target, r));
-  const busy = (doc.busyByDate.get(mention.date_key) || []).some((r) => intersects(target, r));
-  const blocked = (doc.blockedByDate.get(mention.date_key) || []).some((r) => intersects(target, r));
+  const target = { start: startMinute, end: endMinute };
+  const open = (doc.openByDate.get(dateKey) || []).some((r) => intersects(target, r));
+  const virtualOnly = (doc.virtualOnlyByDate.get(dateKey) || []).some((r) => intersects(target, r));
+  const busy = (doc.busyByDate.get(dateKey) || []).some((r) => intersects(target, r));
+  const blocked = (doc.blockedByDate.get(dateKey) || []).some((r) => intersects(target, r));
   let status: AvailabilityStatus = "unknown";
   if (open) status = "open";
   else if (virtualOnly) status = "virtual-only";
   else if (busy) status = "busy";
   else if (blocked) status = "blocked";
+  const mention: SlotMention = {
+    raw: "",
+    start: 0,
+    end: 0,
+    date_key: dateKey,
+    start_minute: startMinute,
+    end_minute: endMinute,
+    label: "",
+  };
   return {
     status,
-    date_key: mention.date_key,
-    start_minute: mention.start_minute,
-    end_minute: mention.end_minute,
+    date_key: dateKey,
+    start_minute: startMinute,
+    end_minute: endMinute,
     details:
       status === "open"
         ? "Open slot available."
@@ -230,6 +245,45 @@ function statusForMention(mention: SlotMention, doc: AvailabilityDoc | null): Av
               ? blockedDetails(doc, mention, target)
               : "No matching availability window found.",
   };
+}
+
+function statusForMention(mention: SlotMention, doc: AvailabilityDoc | null): AvailabilityMatch {
+  return statusForRange(mention.date_key, mention.start_minute, mention.end_minute, doc);
+}
+
+export function statusForCounterpartySlot(slot: CounterpartySlot, doc: AvailabilityDoc | null): AvailabilityMatch {
+  const startMinute = parseHmToMinutes(slot.start);
+  const endMinute = parseHmToMinutes(slot.end);
+  if (startMinute === null || endMinute === null) {
+    return {
+      status: "unknown",
+      date_key: slot.date,
+      start_minute: 0,
+      end_minute: 0,
+      details: "Invalid time slot.",
+    };
+  }
+  return statusForRange(slot.date, startMinute, endMinute, doc);
+}
+
+function parseHmToMinutes(hm: string): number | null {
+  const trimmed = hm.trim();
+  const m24 = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+  if (m24) {
+    const hour = Number(m24[1]);
+    const minute = Number(m24[2]);
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+    return hour * 60 + minute;
+  }
+  const m12 = trimmed.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i);
+  if (!m12) return null;
+  let hour = Number(m12[1]);
+  const minute = Number(m12[2] || 0);
+  const mer = m12[3].toLowerCase();
+  if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return null;
+  if (hour === 12) hour = 0;
+  if (mer === "pm") hour += 12;
+  return hour * 60 + minute;
 }
 
 function tooltipForMatch(match: AvailabilityMatch): string {
@@ -260,8 +314,15 @@ export async function ensureAvailabilityDocLoaded(): Promise<void> {
   currentDoc = await availabilityPromise;
 }
 
-export function highlightMentionsHtml(text: string): string {
-  const mentions = extractSlotMentions(text);
+export function counterpartySlotHighlightHtml(slot: CounterpartySlot, displayLabel: string): string {
+  const match = statusForCounterpartySlot(slot, currentDoc);
+  return `<span class="slot-mention slot-mention--${escapeHtml(match.status)}" title="${escapeHtml(tooltipForMatch(match))}">${escapeHtml(displayLabel)}</span>`;
+}
+
+export function highlightMentionsHtml(text: string, structuredSlots?: CounterpartySlot[]): string {
+  const mentions = structuredSlots?.length
+    ? findStructuredMentionsInText(text, structuredSlots)
+    : extractSlotMentions(text);
   if (!mentions.length) return escapeHtml(text);
   let out = "";
   let cursor = 0;

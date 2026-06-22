@@ -1,5 +1,5 @@
 import { applySavedThreadDraft, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, setBundle, } from "../shared/summaries_store.js";
-import { formatDraftReplyMarkdown, latestUpdatesForThread, listSection, ownerNextStepsForThread, messageSourceDetailsHtml, nextStepsSectionHtml, partitionThreadsBySnooze, pendingMessageCountForThread, pendingMessagePillHtml, shouldShowThreadMessageBlocks, threadIsText, threadLabel, threadMessagesForDisplay, threadMessagesForReply, threadSummaryErrorHtml, threadSummaryForDisplay, } from "../shared/thread_domain.js";
+import { counterpartyAvailabilityForSummary, counterpartyAvailabilitySectionHtml, formatDraftReplyMarkdown, latestUpdatesForThread, listSection, ownerNextStepsForThread, messageSourceDetailsHtml, nextStepsSectionHtml, partitionThreadsBySnooze, pendingMessageCountForThread, pendingMessagePillHtml, shouldShowThreadMessageBlocks, threadIsText, threadLabel, threadMessagesForDisplay, threadMessagesForReply, threadSummaryErrorHtml, threadSummaryForDisplay, } from "../shared/thread_domain.js";
 import { escapeHtml, formatDate, formatRecipients, str, toneClass } from "../shared/utils.js";
 import { ensureAvailabilityDocLoaded } from "../shared/availability_windows.js";
 const PAGE_HTML = `
@@ -88,6 +88,7 @@ function renderCards(threads) {
         const isText = threadIsText(thread);
         const updates = latestUpdatesForThread(thread);
         const nextSteps = ownerNextStepsForThread(thread);
+        const counterpartySlots = counterpartyAvailabilityForSummary(s);
         const showMessageBlocks = shouldShowThreadMessageBlocks(thread, displayMessages);
         const messagesHtml = showMessageBlocks
             ? `<div class="thread-messages">${displayMessages
@@ -136,8 +137,9 @@ function renderCards(threads) {
                     ? `<div class="meta"><strong>${nMsg > 1 ? "Latest from" : "From"}</strong> ${escapeHtml(str(cLatest.sender))}</div>`
                     : "") +
                 threadSummaryErrorHtml(s) +
-                listSection("Latest updates", updates.length ? updates : s.latest_updates) +
-                nextStepsSectionHtml(nextSteps) +
+                listSection("Latest updates", updates.length ? updates : s.latest_updates, counterpartySlots) +
+                counterpartyAvailabilitySectionHtml(counterpartySlots) +
+                nextStepsSectionHtml(nextSteps, counterpartySlots) +
                 messagesHtml;
         el.appendChild(art);
     }

@@ -9,6 +9,7 @@ from utils.api_error_detection import (
     thread_summary_is_valid,
     update_looks_like_verbatim_email,
 )
+from utils.counterparty_availability_normalize import normalize_counterparty_availability
 from utils.next_step_normalize import normalize_next_steps
 
 
@@ -211,6 +212,14 @@ def normalize_thread_summary(
 
     next_steps, passive_updates = normalize_next_steps(out.get("next_steps"))
     out["next_steps"] = next_steps
+
+    if "counterparty_availability" in out:
+        slots = normalize_counterparty_availability(out.get("counterparty_availability"))
+        if slots:
+            out["counterparty_availability"] = slots
+        else:
+            out.pop("counterparty_availability", None)
+
     if passive_updates:
         if not updates:
             updates = [str(item) for item in (out.get("latest_updates") or []) if str(item).strip()]

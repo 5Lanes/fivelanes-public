@@ -52,7 +52,6 @@ def run_llm_pipeline(
 
 
 def run_force_resummary_active_threads(
-    lookback_days: int = 14,
     *,
     db_path: Optional[str] = None,
     dry_run: bool = False,
@@ -61,7 +60,6 @@ def run_force_resummary_active_threads(
     from utils.resummary_active_threads import force_resummary_active_threads
 
     n = force_resummary_active_threads(
-        lookback_days=lookback_days,
         db_path=db_path or DATABASE_NAME,
         dry_run=dry_run,
     )
@@ -72,7 +70,6 @@ def main(
     lookback_days: int = 180,
     *,
     force_resummary: bool = False,
-    resummary_lookback_days: int = 14,
     dry_run: bool = False,
 ) -> None:
     from utils.logging import configure_logging
@@ -80,7 +77,6 @@ def main(
     configure_logging()
     if force_resummary:
         run_force_resummary_active_threads(
-            lookback_days=resummary_lookback_days,
             dry_run=dry_run,
         )
         return
@@ -127,12 +123,6 @@ if __name__ == "__main__":
         help="Re-run summaries for active threads (uses existing cleaned bodies in DB)",
     )
     parser.add_argument(
-        "--resummary-lookback-days",
-        type=int,
-        default=14,
-        help="Only threads with activity in the last N days (default: 14)",
-    )
-    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="List active threads without calling the LLM",
@@ -147,6 +137,5 @@ if __name__ == "__main__":
     main(
         lookback_days=args.lookback_days,
         force_resummary=args.force_resummary,
-        resummary_lookback_days=args.resummary_lookback_days,
         dry_run=args.dry_run,
     )

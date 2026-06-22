@@ -1,7 +1,11 @@
-import type { LooseObj, ThreadView } from "./types.js";
+import type { LooseObj, ThreadView, CounterpartySlot } from "./types.js";
 import { arr, escapeHtml, recipientsContainAddress, str } from "./utils.js";
 import { otherPartyOwesRe } from "./owner_config.js";
-import { highlightMentionsHtml } from "./availability_windows.js";
+import {
+  counterpartySlotHighlightHtml,
+  highlightMentionsHtml,
+} from "./availability_windows.js";
+import { formatCounterpartySlotLabel } from "./structured_slot_mentions.js";
 
 export type { ThreadView };
 
@@ -291,7 +295,39 @@ export function followUpNeededForThread(t: ThreadView): string[] {
     .map(formatNextStepLine);
 }
 
-export function nextStepsSectionHtml(steps: NextStep[]): string {
+export function counterpartyAvailabilityForSummary(summary: LooseObj): CounterpartySlot[] {
+  const out: CounterpartySlot[] = [];
+  for (const raw of arr(summary.counterparty_availability)) {
+    if (!raw || typeof raw !== "object") continue;
+    const row = raw as LooseObj;
+    const date = str(row.date).trim();
+    const start = str(row.start).trim();
+    const end = str(row.end).trim();
+    if (!date || !start || !end) continue;
+    const slot: CounterpartySlot = { date, start, end };
+    const party = str(row.party).trim();
+    const label = str(row.label).trim();
+    if (party) slot.party = party;
+    if (label) slot.label = label;
+    out.push(slot);
+  }
+  return out;
+}
+
+export function counterpartyAvailabilitySectionHtml(slots: CounterpartySlot[]): string {
+  if (!slots.length) return "";
+  const rows = slots
+    .map((slot) => {
+      const display = formatCounterpartySlotLabel(slot);
+      const party = slot.party ? ` <span class="counterparty-slot-party">${escapeHtml(slot.party)}</span>` : "";
+      const note = slot.label ? ` <span class="counterparty-slot-note">${escapeHtml(slot.label)}</span>` : "";
+      return `<li>${counterpartySlotHighlightHtml(slot, display)}${party}${note}</li>`;
+    })
+    .join("");
+  return `<div class="section"><h4>Their availability</h4><ul class="counterparty-slots">${rows}</ul></div>`;
+}
+
+export function nextStepsSectionHtml(steps: NextStep[], structuredSlots: CounterpartySlot[] = []): string {
   if (!steps.length) return "";
   const rows = steps
     .map((step) => {
@@ -299,7 +335,7 @@ export function nextStepsSectionHtml(steps: NextStep[]): string {
       const label = isFollowUp ? "Follow up needed" : "Response required";
       const typeClass = isFollowUp ? "next-step-type follow-up" : "next-step-type";
       const when = step.by_when ? ` <span class="next-step-when">(${escapeHtml(step.by_when)})</span>` : "";
-      return `<li><span class="${typeClass}">${escapeHtml(label)}</span> ${highlightMentionsHtml(step.action)}${when}</li>`;
+      return `<li><span class="${typeClass}">${escapeHtml(label)}</span> ${highlightMentionsHtml(step.action, structuredSlots)}${when}</li>`;
     })
     .join("");
   return `<div class="section"><h4>Next steps</h4><ul class="next-steps">${rows}</ul></div>`;
@@ -345,13 +381,15 @@ export function partitionThreadsBySnooze(threads: ThreadView[]): {
   return { active, snoozed, removed, snoozedCount, removedCount };
 }
 
-export function listSection(title: string, items: unknown): string {
-  const rows = arr(items).map((x) => `<li>${highlightMentionsHtml(String(x ?? ""))}</li>`).join("");
+export function listSection(title: string, items: unknown, structuredSlots: CounterpartySlot[] = []): string {
+  const rows = arr(items)
+    .map((x) => `<li>${highlightMentionsHtml(String(x ?? ""), structuredSlots)}</li>`)
+    .join("");
   return rows ? `<div class="section"><h4>${escapeHtml(title)}</h4><ul>${rows}</ul></div>` : "";
 }
 
-export function renderMentionAwareText(text: string): string {
-  return highlightMentionsHtml(text);
+export function renderMentionAwareText(text: string, structuredSlots: CounterpartySlot[] = []): string {
+  return highlightMentionsHtml(text, structuredSlots);
 }
 
 export function threadSummaryTextFragments(thread: ThreadView): string[] {

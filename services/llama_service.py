@@ -191,6 +191,19 @@ THREAD_SUMMARY_RESPONSE_FORMAT: Dict[str, Any] = {
                 "audience": {"type": "array", "items": {"type": "string"}},
             },
         },
+        "counterparty_availability": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string"},
+                    "start": {"type": "string"},
+                    "end": {"type": "string"},
+                    "party": {"type": "string"},
+                    "label": {"type": "string"},
+                },
+            },
+        },
     },
     "required": ["latest_updates"],
 }

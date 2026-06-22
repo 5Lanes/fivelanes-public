@@ -1,8 +1,8 @@
 """
 Calendar context for the thread-summary prompt (scheduling availability next_step).
 
-Detection and phrasing are handled by the LLM in ``email_thread_summary``; this module
-only loads and formats events for the prompt.
+The LLM extracts counterparty-proposed windows into ``counterparty_availability`` on the
+thread summary JSON; this module only loads and formats the owner's calendar for the prompt.
 """
 
 from __future__ import annotations

@@ -56,6 +56,14 @@ export type PlanView = {
   updated_at: string;
 };
 
+export type CounterpartySlot = {
+  date: string;
+  start: string;
+  end: string;
+  party?: string;
+  label?: string;
+};
+
 export type SlotMention = {
   raw: string;
   start: number;

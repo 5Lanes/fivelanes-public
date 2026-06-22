@@ -666,6 +666,26 @@ header p.run-meta {
   opacity: 0.9;
 }
 
+.counterparty-slots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.counterparty-slots li {
+  margin: 0.35rem 0;
+}
+
+.counterparty-slot-party,
+.counterparty-slot-note {
+  font-size: 0.88em;
+  color: var(--muted);
+}
+
+.counterparty-slot-party::before {
+  content: " · ";
+}
+
 .suggested-step-schedule {
   display: flex;
   flex-wrap: wrap;

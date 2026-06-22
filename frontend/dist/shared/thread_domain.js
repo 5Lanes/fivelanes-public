@@ -1,6 +1,7 @@
 import { arr, escapeHtml, recipientsContainAddress, str } from "./utils.js";
 import { otherPartyOwesRe } from "./owner_config.js";
-import { highlightMentionsHtml } from "./availability_windows.js";
+import { counterpartySlotHighlightHtml, highlightMentionsHtml, } from "./availability_windows.js";
+import { formatCounterpartySlotLabel } from "./structured_slot_mentions.js";
 let displaySourceAccount = "";
 /** Inbox address used to skip Fivelanes delivery shells when picking thread summaries. */
 export function setDisplaySourceAccount(account) {
@@ -271,7 +272,42 @@ export function followUpNeededForThread(t) {
         .filter((step) => step.type === "follow up needed")
         .map(formatNextStepLine);
 }
-export function nextStepsSectionHtml(steps) {
+export function counterpartyAvailabilityForSummary(summary) {
+    const out = [];
+    for (const raw of arr(summary.counterparty_availability)) {
+        if (!raw || typeof raw !== "object")
+            continue;
+        const row = raw;
+        const date = str(row.date).trim();
+        const start = str(row.start).trim();
+        const end = str(row.end).trim();
+        if (!date || !start || !end)
+            continue;
+        const slot = { date, start, end };
+        const party = str(row.party).trim();
+        const label = str(row.label).trim();
+        if (party)
+            slot.party = party;
+        if (label)
+            slot.label = label;
+        out.push(slot);
+    }
+    return out;
+}
+export function counterpartyAvailabilitySectionHtml(slots) {
+    if (!slots.length)
+        return "";
+    const rows = slots
+        .map((slot) => {
+        const display = formatCounterpartySlotLabel(slot);
+        const party = slot.party ? ` <span class="counterparty-slot-party">${escapeHtml(slot.party)}</span>` : "";
+        const note = slot.label ? ` <span class="counterparty-slot-note">${escapeHtml(slot.label)}</span>` : "";
+        return `<li>${counterpartySlotHighlightHtml(slot, display)}${party}${note}</li>`;
+    })
+        .join("");
+    return `<div class="section"><h4>Their availability</h4><ul class="counterparty-slots">${rows}</ul></div>`;
+}
+export function nextStepsSectionHtml(steps, structuredSlots = []) {
     if (!steps.length)
         return "";
     const rows = steps
@@ -280,7 +316,7 @@ export function nextStepsSectionHtml(steps) {
         const label = isFollowUp ? "Follow up needed" : "Response required";
         const typeClass = isFollowUp ? "next-step-type follow-up" : "next-step-type";
         const when = step.by_when ? ` <span class="next-step-when">(${escapeHtml(step.by_when)})</span>` : "";
-        return `<li><span class="${typeClass}">${escapeHtml(label)}</span> ${highlightMentionsHtml(step.action)}${when}</li>`;
+        return `<li><span class="${typeClass}">${escapeHtml(label)}</span> ${highlightMentionsHtml(step.action, structuredSlots)}${when}</li>`;
     })
         .join("");
     return `<div class="section"><h4>Next steps</h4><ul class="next-steps">${rows}</ul></div>`;
@@ -316,12 +352,14 @@ export function partitionThreadsBySnooze(threads) {
     }
     return { active, snoozed, removed, snoozedCount, removedCount };
 }
-export function listSection(title, items) {
-    const rows = arr(items).map((x) => `<li>${highlightMentionsHtml(String(x ?? ""))}</li>`).join("");
+export function listSection(title, items, structuredSlots = []) {
+    const rows = arr(items)
+        .map((x) => `<li>${highlightMentionsHtml(String(x ?? ""), structuredSlots)}</li>`)
+        .join("");
     return rows ? `<div class="section"><h4>${escapeHtml(title)}</h4><ul>${rows}</ul></div>` : "";
 }
-export function renderMentionAwareText(text) {
-    return highlightMentionsHtml(text);
+export function renderMentionAwareText(text, structuredSlots = []) {
+    return highlightMentionsHtml(text, structuredSlots);
 }
 export function threadSummaryTextFragments(thread) {
     const summary = threadSummaryForDisplay(thread);

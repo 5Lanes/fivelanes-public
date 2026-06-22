@@ -43,8 +43,10 @@ from services.email.thread_resolve import (
     collect_thread_expansion_candidates,
     existing_source_ids_for_candidates,
     new_sent_source_ids,
+    peek_timeline_source_ids_for_thread,
     pick_best_thread_expansion,
     pull_timeline_messages_for_threads,
+    thread_timeline_is_current,
 )
 from services.gmail_client import (
     get_gmail_services_for_account_id,
@@ -217,6 +219,48 @@ def build_tracking_row(
     }
 
 
+def peek_cc_bcc_inbox_source_ids(
+    service: Any,
+    inbox_thread_id: str,
+    inbox_lower: str,
+) -> Optional[set[str]]:
+    """Gmail message ids for cc/bcc-only inbox deliveries (metadata-only)."""
+    if not inbox_thread_id or not inbox_lower:
+        return set()
+    try:
+        thr = (
+            service.users()
+            .threads()
+            .get(
+                userId="me",
+                id=inbox_thread_id,
+                format="metadata",
+                metadataHeaders=["To", "Cc", "Bcc"],
+            )
+            .execute()
+        )
+    except HttpError as exc:
+        log.warning(
+            "Cc/Bcc inbox peek failed for thread_id=%s: %s", inbox_thread_id, exc
+        )
+        return None
+
+    out: set[str] = set()
+    for msg in sorted(thr.get("messages") or [], key=internal_date_ms):
+        if gmail_message_is_draft(msg):
+            continue
+        hdrs = (msg.get("payload") or {}).get("headers") or []
+        to_h = get_header(hdrs, "To")
+        cc_h = get_header(hdrs, "Cc")
+        bcc_h = get_header(hdrs, "Bcc")
+        if not is_cc_bcc_only_recipient(to_h, cc_h, bcc_h, inbox_lower):
+            continue
+        mid = str(msg.get("id") or "").strip()
+        if mid:
+            out.add(mid)
+    return out
+
+
 def pull_messages_where_cc_bcc_only(
     service: Any,
     account_id: str,
@@ -318,6 +362,117 @@ def _envelope_ref_from_inbox_cc_thread(
     return ""
 
 
+    return ""
+
+
+def _try_expand_via_pinned_account(
+    row: Dict[str, Any],
+    *,
+    inner_rfc: str,
+    inbox_tid: str,
+    route: InboxRoute,
+    inbox_lower: str,
+    source_service: Any,
+    source_oauth_id: str,
+    db_path: str,
+    include_body: bool,
+    force_full_refresh: bool,
+) -> Optional[Tuple[List[Dict[str, Any]], Optional[str]]]:
+    """
+    Resolve inner RFC on the last successful OAuth account only.
+
+    Returns ``None`` to fall back to multi-account candidate collection.
+    """
+    if force_full_refresh:
+        return None
+    pinned = (row.get("resolved_oauth_account_id") or "").strip()
+    if not pinned:
+        return None
+
+    pairs = get_gmail_services_for_account_id(pinned)
+    if not pairs:
+        return None
+    pinned_id, pinned_svc = pairs[0]
+
+    from services.gmail_client import find_thread_id_by_rfc_message_id
+
+    remote_tid = find_thread_id_by_rfc_message_id(pinned_svc, inner_rfc)
+    if not remote_tid:
+        log.info(
+            "Pinned RFC resolve miss on account=%s inbox_thread_id=%s; full resolve",
+            pinned_id,
+            inbox_tid,
+        )
+        return None
+
+    remote_peek = peek_timeline_source_ids_for_thread(
+        pinned_svc,
+        remote_tid,
+        inbox_shell_skip="none",
+    )
+    if remote_peek is None:
+        return None
+    peek_ids = set(remote_peek)
+    if route == InboxRoute.CC_BCC and inbox_lower:
+        inbox_peek = peek_cc_bcc_inbox_source_ids(
+            source_service, inbox_tid, inbox_lower
+        )
+        if inbox_peek is None:
+            return None
+        peek_ids |= inbox_peek
+
+    if thread_timeline_is_current(db_path, inbox_tid, peek_ids):
+        log.info(
+            "Thread unchanged (pinned metadata peek): inbox_thread_id=%s account=%s",
+            inbox_tid,
+            pinned_id,
+        )
+        return [], pinned_id
+
+    remote_rows = bind_timeline_rows_to_inbox_thread(
+        pull_timeline_messages_for_threads(
+            pinned_svc,
+            pinned_id,
+            [remote_tid],
+            include_body=include_body,
+            fetch_oauth_account_id=pinned_id,
+            inbox_shell_skip="none",
+            db_path=db_path,
+            timeline_thread_id=inbox_tid,
+            force_full_refresh=True,
+        ),
+        inbox_tid,
+    )
+    for r in remote_rows:
+        r["inbox_delivery_kind"] = route.value
+
+    if route == InboxRoute.CC_BCC and inbox_lower:
+        inbox_cc_rows = pull_messages_where_cc_bcc_only(
+            source_service,
+            source_oauth_id,
+            inbox_tid,
+            inbox_lower,
+            include_body=include_body,
+            fetch_oauth_account_id=source_oauth_id,
+        )
+        merged = dedupe_timeline_rows_by_source_id(remote_rows + inbox_cc_rows)
+        log.info(
+            "Thread expand cc_bcc (pinned): remote=%d inbox_cc=%d merged=%d",
+            len(remote_rows),
+            len(inbox_cc_rows),
+            len(merged),
+        )
+        return merged, pinned_id
+
+    log.info(
+        "Thread expand (pinned): inbox_thread_id=%s account=%s messages=%d",
+        inbox_tid,
+        pinned_id,
+        len(remote_rows),
+    )
+    return remote_rows, pinned_id
+
+
 def expand_thread(
     row: Dict[str, Any],
     *,
@@ -325,6 +480,8 @@ def expand_thread(
     source_oauth_id: str,
     inbox_lower: str,
     include_body: bool = True,
+    db_path: Optional[str] = None,
+    force_full_refresh: bool = False,
 ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """Expand one tracked thread into timeline_entries rows."""
     inbox_tid = (row.get("inbox_thread_id") or "").strip()
@@ -344,6 +501,21 @@ def expand_thread(
         return [], None
 
     if route == InboxRoute.DIRECT_TO:
+        if (
+            db_path
+            and not force_full_refresh
+            and thread_timeline_is_current(
+                db_path,
+                inbox_tid,
+                peek_timeline_source_ids_for_thread(
+                    source_service,
+                    inbox_tid,
+                    inbox_shell_skip="none",
+                ),
+            )
+        ):
+            log.info("Thread unchanged (metadata peek): inbox_thread_id=%s", inbox_tid)
+            return [], source_oauth_id
         rows = pull_timeline_messages_for_threads(
             source_service,
             source_oauth_id,
@@ -351,6 +523,9 @@ def expand_thread(
             include_body=include_body,
             fetch_oauth_account_id=source_oauth_id,
             inbox_shell_skip="none",
+            db_path=db_path,
+            timeline_thread_id=inbox_tid,
+            force_full_refresh=force_full_refresh,
         )
         for r in rows:
             r["inbox_delivery_kind"] = route.value
@@ -366,6 +541,22 @@ def expand_thread(
 
     if not effective_inner:
         shell_skip = "skip_to_inbox" if route == InboxRoute.CC_BCC else "skip_all_inbox"
+        if (
+            db_path
+            and not force_full_refresh
+            and thread_timeline_is_current(
+                db_path,
+                inbox_tid,
+                peek_timeline_source_ids_for_thread(
+                    source_service,
+                    inbox_tid,
+                    inbox_shell_skip=shell_skip,
+                    inbox_lower=inbox_lower,
+                ),
+            )
+        ):
+            log.info("Thread unchanged (metadata peek): inbox_thread_id=%s", inbox_tid)
+            return [], source_oauth_id
         rows = pull_timeline_messages_for_threads(
             source_service,
             source_oauth_id,
@@ -373,6 +564,9 @@ def expand_thread(
             include_body=include_body,
             fetch_oauth_account_id=source_oauth_id,
             inbox_shell_skip=shell_skip,
+            db_path=db_path,
+            timeline_thread_id=inbox_tid,
+            force_full_refresh=force_full_refresh,
         )
         for r in rows:
             r["inbox_delivery_kind"] = route.value
@@ -383,6 +577,22 @@ def expand_thread(
         if effective_inner == inner_rfc
         else {**row, "inner_rfc_message_id": effective_inner}
     )
+    if db_path:
+        pinned_result = _try_expand_via_pinned_account(
+            expand_row,
+            inner_rfc=effective_inner,
+            inbox_tid=inbox_tid,
+            route=route,
+            inbox_lower=inbox_lower,
+            source_service=source_service,
+            source_oauth_id=source_oauth_id,
+            db_path=db_path,
+            include_body=include_body,
+            force_full_refresh=force_full_refresh,
+        )
+        if pinned_result is not None:
+            return pinned_result
+
     candidates = collect_thread_expansion_candidates(
         expand_row, include_body=include_body
     )
@@ -421,6 +631,22 @@ def expand_thread(
         return [], preferred or source_oauth_id
 
     shell_skip = "skip_all_inbox"
+    if (
+        db_path
+        and not force_full_refresh
+        and thread_timeline_is_current(
+            db_path,
+            inbox_tid,
+            peek_timeline_source_ids_for_thread(
+                source_service,
+                inbox_tid,
+                inbox_shell_skip=shell_skip,
+                inbox_lower=inbox_lower,
+            ),
+        )
+    ):
+        log.info("Thread unchanged (metadata peek): inbox_thread_id=%s", inbox_tid)
+        return [], source_oauth_id
     rows = pull_timeline_messages_for_threads(
         source_service,
         source_oauth_id,
@@ -428,6 +654,9 @@ def expand_thread(
         include_body=include_body,
         fetch_oauth_account_id=source_oauth_id,
         inbox_shell_skip=shell_skip,
+        db_path=db_path,
+        timeline_thread_id=inbox_tid,
+        force_full_refresh=force_full_refresh,
     )
     for r in rows:
         r["inbox_delivery_kind"] = route.value
@@ -542,6 +771,7 @@ def process_inbox_pipeline(
     all_timeline: List[Dict[str, Any]] = []
     resolved_updates: List[Dict[str, Any]] = []
     processed_inbox_ids: set[str] = set()
+    threads_touched_this_run = set(by_tid.keys())
 
     for row in tracked_rows:
         inbox_thread_id = (row.get("inbox_thread_id") or "").strip()
@@ -560,6 +790,8 @@ def process_inbox_pipeline(
             source_oauth_id=oauth_account_id,
             inbox_lower=inbox_eff,
             include_body=True,
+            db_path=db,
+            force_full_refresh=inbox_thread_id in threads_touched_this_run,
         )
         pulled_ids = {
             str(x.get("source_id") or "").strip()
