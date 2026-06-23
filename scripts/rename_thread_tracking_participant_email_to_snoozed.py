@@ -10,6 +10,10 @@ import argparse
 import sqlite3
 from pathlib import Path
 
+from utils.runtime_paths import database_path, load_env
+
+load_env()
+
 
 def has_table(conn: sqlite3.Connection, table: str) -> bool:
     row = conn.execute(
@@ -103,8 +107,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--db",
-        default="timeline.db",
-        help="Path to SQLite database (default: timeline.db)",
+        default=database_path(),
+        help="Path to SQLite database (default: DATABASE_NAME under FIVELANES_DATA_ROOT)",
     )
     parser.add_argument(
         "--dry-run",

@@ -67,6 +67,8 @@ def configure_logging(*, level: int | None = None) -> Path:
     file_handler.setFormatter(formatter)
     root.addHandler(file_handler)
 
+    logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.WARNING)
+
     _CONFIGURED = True
     logging.getLogger(__name__).info("Logging to %s (level=%s)", log_path, logging.getLevelName(lvl))
     return log_path

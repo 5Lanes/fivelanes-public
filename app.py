@@ -10,6 +10,7 @@ import logging
 from typing import Any, Dict, List
 
 from utils.database import upsert_timeline_entries
+from utils.runtime_paths import database_path
 from services.calendar_service import pull_events_for_contacts
 from services.gmail_client import get_gmail_services_for_account_id
 from services.email.config import SOURCE_ACCOUNT, SOURCE_OAUTH_ACCOUNT_ID
@@ -69,7 +70,7 @@ def _timeline_rows(messages: List[dict]) -> List[Dict[str, Any]]:
 
 
 def populate_timeline(
-    db_path: str = "timeline.db",
+    db_path: str | None = None,
     *,
     lookback_days: int,
     lookforward_days: int,
@@ -104,7 +105,8 @@ def populate_timeline(
     all_rows = meeting_rows + email_rows
     all_rows.sort(key=lambda r: (r.get("datetime") or ""))
 
-    n = upsert_timeline_entries(db_path, all_rows)
+    db = db_path or database_path()
+    n = upsert_timeline_entries(db, all_rows)
     log.info(
         "Upserted %d rows into timeline_entries (%d calendar meetings, %d Gmail messages)",
         n,

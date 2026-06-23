@@ -25,6 +25,10 @@ try:
 except ImportError:
     pass
 
+from utils.runtime_paths import database_path, load_env  # noqa: E402
+
+load_env()
+
 from services.llm_service import get_llm_backend
 from services.pipeline.fingerprint import person_summary_fingerprint
 from services.prompts import format_person_summary_prompt
@@ -42,8 +46,8 @@ def main() -> None:
     parser.add_argument("person", help="Person name (case-insensitive) or numeric person id")
     parser.add_argument(
         "--db",
-        default=os.getenv("DATABASE_NAME") or "timeline.db",
-        help="SQLite database path (default: DATABASE_NAME or timeline.db)",
+        default=database_path(),
+        help="SQLite database path (default: DATABASE_NAME under FIVELANES_DATA_ROOT)",
     )
     parser.add_argument(
         "--dry-run",

@@ -101,6 +101,158 @@ _pipeline_state: Dict[str, Any] = {
     "finished_at": None,
 }
 
+_lane_summary_lock = threading.Lock()
+_lane_summary_jobs: Dict[int, Dict[str, Any]] = {}
+
+
+def _lane_summary_has_content(payload: Dict[str, Any]) -> bool:
+    if str(payload.get("summary") or "").strip():
+        return True
+    if str(payload.get("tone_overview") or "").strip():
+        return True
+    for key in ("highlights", "current_priorities", "waiting_on_others"):
+        val = payload.get(key)
+        if isinstance(val, list) and any(str(x).strip() for x in val):
+            return True
+    return False
+
+
+def _finalize_lane_summary_from_llm(result: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[str]]:
+    api_error = str(result.get("api_error") or "").strip()
+    summary = normalize_lane_summary_payload(result) if isinstance(result, dict) else {}
+    if not _lane_summary_has_content(summary):
+        raw = str(result.get("raw_text") or "").strip()
+        if raw:
+            summary["summary"] = raw
+        elif api_error:
+            return {}, api_error
+        else:
+            return {}, "Lane summary model returned no usable content"
+    return summary, None
+
+
+def _lane_summary_job_snapshot(lane_id: int) -> Optional[Dict[str, Any]]:
+    with _lane_summary_lock:
+        job = _lane_summary_jobs.get(int(lane_id))
+        return dict(job) if isinstance(job, dict) else None
+
+
+def _set_lane_summary_job(lane_id: int, **fields: Any) -> None:
+    with _lane_summary_lock:
+        job = dict(_lane_summary_jobs.get(int(lane_id)) or {})
+        job.update(fields)
+        _lane_summary_jobs[int(lane_id)] = job
+
+
+def _lane_summary_http_payload(
+    *,
+    lane_id: int,
+    lane_name: str,
+    summary: Dict[str, Any],
+    cached: bool,
+    updated_at: str,
+) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "ok": True,
+        "lane_id": lane_id,
+        "lane_name": lane_name,
+        "cached": cached,
+        "summary_updated_at": updated_at,
+        "pending": False,
+    }
+    out.update({k: v for k, v in summary.items() if k != "input_fingerprint"})
+    return out
+
+
+def _run_lane_summary_worker(
+    *,
+    lane_id: int,
+    lane_name: str,
+    summaries: List[Dict[str, Any]],
+    input_fingerprint: str,
+) -> None:
+    _set_lane_summary_job(
+        lane_id,
+        status="running",
+        error=None,
+        started_at=_utc_now_iso(),
+        finished_at=None,
+    )
+    try:
+        llm = get_llm_backend(env_path=str(env_file()))
+        prompt = format_lane_summary_prompt(lane_name, summaries, db_path=DB_PATH)
+        result = llm.submit_person_summary(prompt)
+        summary, err = _finalize_lane_summary_from_llm(result if isinstance(result, dict) else {})
+        if err:
+            raise RuntimeError(err)
+        summary["input_fingerprint"] = input_fingerprint
+        updated_at = save_lane_summary(DB_PATH, lane_id=lane_id, summary=summary)
+        _set_lane_summary_job(
+            lane_id,
+            status="done",
+            error=None,
+            finished_at=_utc_now_iso(),
+            summary_updated_at=updated_at,
+        )
+        log.info("Lane summary finished for lane_id=%s (%s)", lane_id, lane_name)
+    except Exception as exc:
+        log.exception("Lane summary failed for lane_id=%s", lane_id)
+        _set_lane_summary_job(
+            lane_id,
+            status="error",
+            error=str(exc) or "lane_summary_failed",
+            finished_at=_utc_now_iso(),
+        )
+
+
+def _start_lane_summary_job(
+    *,
+    lane_id: int,
+    lane_name: str,
+    summaries: List[Dict[str, Any]],
+    input_fingerprint: str,
+    force: bool,
+) -> Dict[str, Any]:
+    with _lane_summary_lock:
+        job = _lane_summary_jobs.get(int(lane_id))
+        if job and str(job.get("status") or "") == "running":
+            return {"ok": True, "pending": True, "lane_id": lane_id, "lane_name": lane_name}
+
+    if not force:
+        cached = load_lane_summary(DB_PATH, lane_id=lane_id)
+        if (
+            cached
+            and str(cached.get("input_fingerprint") or "") == input_fingerprint
+            and _lane_summary_has_content(cached)
+        ):
+            return _lane_summary_http_payload(
+                lane_id=lane_id,
+                lane_name=lane_name,
+                summary=cached,
+                cached=True,
+                updated_at=str(cached.get("updated_at") or ""),
+            )
+
+    _set_lane_summary_job(
+        lane_id,
+        status="running",
+        error=None,
+        started_at=_utc_now_iso(),
+        finished_at=None,
+    )
+    threading.Thread(
+        target=_run_lane_summary_worker,
+        kwargs={
+            "lane_id": lane_id,
+            "lane_name": lane_name,
+            "summaries": summaries,
+            "input_fingerprint": input_fingerprint,
+        },
+        name=f"lane-summary-{lane_id}",
+        daemon=True,
+    ).start()
+    return {"ok": True, "pending": True, "lane_id": lane_id, "lane_name": lane_name}
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -456,6 +608,42 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             {"ok": True, "inbox_thread_id": thread_id, "snoozed": 2},
         )
 
+    def _post_thread_summary(self, body: Dict[str, Any]) -> None:
+        thread_id = str(body.get("thread_id") or body.get("inbox_thread_id") or "").strip()
+        if not thread_id:
+            self._json_response(
+                HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_thread_id"}
+            )
+            return
+        if not Path(DB_PATH).is_file():
+            self._json_response(
+                HTTPStatus.NOT_FOUND, {"ok": False, "error": "database_not_found"}
+            )
+            return
+        try:
+            from utils.resummary_active_threads import resummary_single_thread
+
+            result = resummary_single_thread(db_path=DB_PATH, thread_id=thread_id)
+        except RuntimeError as exc:
+            self._json_response(
+                HTTPStatus.BAD_GATEWAY, {"ok": False, "error": str(exc)}
+            )
+            return
+        except Exception as exc:
+            log.exception("thread summary refresh failed")
+            self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": str(exc)}
+            )
+            return
+        if not result.get("ok"):
+            err = str(result.get("error") or "thread_summary_failed")
+            status = HTTPStatus.BAD_REQUEST
+            if err == "no_cleaned_messages":
+                status = HTTPStatus.BAD_REQUEST
+            self._json_response(status, result)
+            return
+        self._json_response(HTTPStatus.OK, result)
+
     def _post_lane_create(self, body: Dict[str, Any]) -> None:
         name = str(body.get("name") or "").strip()
         if not name:
@@ -552,6 +740,66 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
         self._json_response(HTTPStatus.OK, {"ok": True, "lane_id": lane_id})
 
+    def _get_lane_summary(self) -> None:
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        try:
+            lane_id = int(str((qs.get("lane_id") or ["0"])[0]).strip())
+        except (TypeError, ValueError):
+            lane_id = 0
+        if lane_id <= 0:
+            self._json_response(
+                HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_lane_id"}
+            )
+            return
+
+        lane, _summaries = load_lane_thread_summaries(DB_PATH, lane_id=lane_id)
+        if not lane:
+            self._json_response(
+                HTTPStatus.NOT_FOUND, {"ok": False, "error": "lane_not_found"}
+            )
+            return
+        lid = int(lane.get("id") or 0)
+        name = str(lane.get("name") or "").strip()
+
+        job = _lane_summary_job_snapshot(lid)
+        if job and str(job.get("status") or "") == "running":
+            self._json_response(
+                HTTPStatus.OK,
+                {"ok": True, "pending": True, "lane_id": lid, "lane_name": name},
+            )
+            return
+        if job and str(job.get("status") or "") == "error":
+            self._json_response(
+                HTTPStatus.OK,
+                {
+                    "ok": False,
+                    "lane_id": lid,
+                    "lane_name": name,
+                    "error": str(job.get("error") or "lane_summary_failed"),
+                },
+            )
+            return
+
+        cached = load_lane_summary(DB_PATH, lane_id=lid)
+        if cached and _lane_summary_has_content(cached):
+            self._json_response(
+                HTTPStatus.OK,
+                _lane_summary_http_payload(
+                    lane_id=lid,
+                    lane_name=name,
+                    summary=cached,
+                    cached=True,
+                    updated_at=str(cached.get("updated_at") or ""),
+                ),
+            )
+            return
+
+        self._json_response(
+            HTTPStatus.OK,
+            {"ok": True, "pending": False, "lane_id": lid, "lane_name": name},
+        )
+
     def _post_lane_summary(self, body: Dict[str, Any]) -> None:
         try:
             lane_id = int(body.get("lane_id") or 0)
@@ -590,57 +838,25 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             summary_datetimes=summary_datetimes,
             backend=llm.name,
         )
-        if not force:
-            cached = load_lane_summary(DB_PATH, lane_id=lid)
-            if cached and str(cached.get("input_fingerprint") or "") == fp:
-                out: Dict[str, Any] = {
-                    "ok": True,
-                    "lane_id": lid,
-                    "lane_name": name,
-                    "cached": True,
-                    "summary_updated_at": cached.get("updated_at"),
-                }
-                out.update({k: v for k, v in cached.items() if k != "input_fingerprint"})
-                self._json_response(HTTPStatus.OK, out)
-                return
-
         try:
-            prompt = format_lane_summary_prompt(name, summaries, db_path=DB_PATH)
-            result = llm.submit_person_summary(prompt)
+            out = _start_lane_summary_job(
+                lane_id=lid,
+                lane_name=name,
+                summaries=summaries,
+                input_fingerprint=fp,
+                force=force,
+            )
         except ValueError as exc:
             self._json_response(
                 HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc) or "bad_request"}
             )
             return
-        except RuntimeError as exc:
-            self._json_response(
-                HTTPStatus.BAD_GATEWAY, {"ok": False, "error": str(exc)}
-            )
-            return
         except Exception as exc:
-            log.exception("lane summary failed")
+            log.exception("lane summary start failed")
             self._json_response(
                 HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": str(exc)}
             )
             return
-
-        summary = normalize_lane_summary_payload(result) if isinstance(result, dict) else {}
-        summary["input_fingerprint"] = fp
-        try:
-            updated_at = save_lane_summary(DB_PATH, lane_id=lid, summary=summary)
-        except ValueError as exc:
-            self._json_response(
-                HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc) or "bad_request"}
-            )
-            return
-        out = {
-            "ok": True,
-            "lane_id": lid,
-            "lane_name": name,
-            "cached": False,
-            "summary_updated_at": updated_at,
-        }
-        out.update(summary)
         self._json_response(HTTPStatus.OK, out)
 
     def _post_person_create(self, body: Dict[str, Any]) -> None:
@@ -1292,6 +1508,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if path == "/api/meetings":
             self._get_meetings()
             return
+        if path == "/api/lanes/summary":
+            self._get_lane_summary()
+            return
         if path == "/api/config":
             self._get_config()
             return
@@ -1339,6 +1558,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._post_remove_tracking(body)
         elif path == "/api/thread-tracking/draft-reply":
             self._post_save_thread_draft(body)
+        elif path == "/api/threads/summary":
+            self._post_thread_summary(body)
         elif path == "/api/claude/email-reply":
             self._post_email_reply(body)
         elif path == "/api/meeting-prep":

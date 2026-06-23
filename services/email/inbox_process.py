@@ -54,8 +54,9 @@ from services.gmail_client import (
 )
 from services.thread_snooze import (
     is_removed,
-    known_source_ids_for_thread,
+    is_snoozed,
     maybe_unsnooze_email_thread,
+    unseen_source_ids,
 )
 from utils.database import (
     collapse_thread_tracking_duplicates_by_inner_rfc,
@@ -365,7 +366,29 @@ def _envelope_ref_from_inbox_cc_thread(
     return ""
 
 
-    return ""
+def _pinned_remote_peek(row: Dict[str, Any]) -> Optional[Tuple[str, Any, str, set[str]]]:
+    """Pinned-account metadata peek: account id, service, remote thread id, source ids."""
+    inner_rfc = (row.get("inner_rfc_message_id") or "").strip()
+    pinned = (row.get("resolved_oauth_account_id") or "").strip()
+    if not inner_rfc or not pinned:
+        return None
+    pairs = get_gmail_services_for_account_id(pinned)
+    if not pairs:
+        return None
+    pinned_id, pinned_svc = pairs[0]
+    from services.gmail_client import find_thread_id_by_rfc_message_id
+
+    remote_tid = find_thread_id_by_rfc_message_id(pinned_svc, inner_rfc)
+    if not remote_tid:
+        return None
+    peek_ids = peek_timeline_source_ids_for_thread(
+        pinned_svc,
+        remote_tid,
+        inbox_shell_skip="none",
+    )
+    if peek_ids is None:
+        return None
+    return pinned_id, pinned_svc, remote_tid, set(peek_ids)
 
 
 def _try_expand_via_pinned_account(
@@ -392,30 +415,17 @@ def _try_expand_via_pinned_account(
     if not pinned:
         return None
 
-    pairs = get_gmail_services_for_account_id(pinned)
-    if not pairs:
+    peek_ctx = _pinned_remote_peek(row)
+    if peek_ctx is None:
+        if pinned:
+            log.info(
+                "Pinned RFC resolve miss on account=%s inbox_thread_id=%s; full resolve",
+                pinned,
+                inbox_tid,
+            )
         return None
-    pinned_id, pinned_svc = pairs[0]
+    pinned_id, pinned_svc, remote_tid, peek_ids = peek_ctx
 
-    from services.gmail_client import find_thread_id_by_rfc_message_id
-
-    remote_tid = find_thread_id_by_rfc_message_id(pinned_svc, inner_rfc)
-    if not remote_tid:
-        log.info(
-            "Pinned RFC resolve miss on account=%s inbox_thread_id=%s; full resolve",
-            pinned_id,
-            inbox_tid,
-        )
-        return None
-
-    remote_peek = peek_timeline_source_ids_for_thread(
-        pinned_svc,
-        remote_tid,
-        inbox_shell_skip="none",
-    )
-    if remote_peek is None:
-        return None
-    peek_ids = set(remote_peek)
     if route == InboxRoute.CC_BCC and inbox_lower:
         inbox_peek = peek_cc_bcc_inbox_source_ids(
             source_service, inbox_tid, inbox_lower
@@ -775,12 +785,25 @@ def process_inbox_pipeline(
     resolved_updates: List[Dict[str, Any]] = []
     processed_inbox_ids: set[str] = set()
     threads_touched_this_run = set(by_tid.keys())
+    snoozed_skipped = 0
 
     for row in tracked_rows:
         inbox_thread_id = (row.get("inbox_thread_id") or "").strip()
         if not inbox_thread_id or inbox_thread_id in processed_inbox_ids:
             continue
         processed_inbox_ids.add(inbox_thread_id)
+
+        if (
+            is_snoozed(row.get("snoozed"))
+            and inbox_thread_id not in threads_touched_this_run
+            and route_from_tracking(row) != InboxRoute.CC_BCC
+        ):
+            peek_ctx = _pinned_remote_peek(row)
+            if peek_ctx is not None and not unseen_source_ids(
+                db, inbox_thread_id, peek_ctx[3]
+            ):
+                snoozed_skipped += 1
+                continue
 
         log.info(
             "Thread refresh start: inbox_thread_id=%r source_email=%r",
@@ -802,8 +825,7 @@ def process_inbox_pipeline(
             if str(x.get("source_id") or "").strip()
         }
         fetch_key = str(fetch_oauth_used or "").strip()
-        known_ids = known_source_ids_for_thread(db, inbox_thread_id, pulled_ids)
-        new_ids = pulled_ids - known_ids
+        new_ids = unseen_source_ids(db, inbox_thread_id, pulled_ids)
         new_sent_ids = new_sent_source_ids(expanded, new_ids, fetch_key)
         log.info(
             "Thread refresh result: inbox_thread_id=%r fetch_oauth_account_id=%r "
@@ -814,9 +836,7 @@ def process_inbox_pipeline(
             len(new_ids),
             len(new_sent_ids),
         )
-        if maybe_unsnooze_email_thread(
-            db, row, expanded, fetch_oauth_account_id=fetch_key
-        ):
+        if maybe_unsnooze_email_thread(db, row, expanded):
             row["snoozed"] = 0
 
         all_timeline.extend(expanded)
@@ -843,6 +863,12 @@ def process_inbox_pipeline(
                 "resolution_error": resolution_error,
                 "updated_at": now,
             }
+        )
+
+    if snoozed_skipped:
+        log.info(
+            "Skipped Gmail refresh for %d snoozed thread(s) with no new inbox activity",
+            snoozed_skipped,
         )
 
     if resolved_updates:

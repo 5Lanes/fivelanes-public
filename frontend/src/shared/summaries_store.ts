@@ -340,6 +340,29 @@ export function applySavedThreadDraft(threadId: string, data: LooseObj, response
   };
 }
 
+export function applyThreadSummary(threadId: string, summary: LooseObj): void {
+  if (!currentData || !Array.isArray(currentData.summary)) return;
+  const tid = threadId.trim();
+  if (!tid) return;
+  for (const row of currentData.summary as LooseObj[]) {
+    if (str(row.thread_id) !== tid) continue;
+    const preserved = {
+      thread_id: row.thread_id,
+      source_id: row.source_id,
+      datetime: row.datetime,
+      sender: row.sender,
+      subject: row.subject,
+      cleaned_content: row.cleaned_content,
+      quoted_reply: row.quoted_reply,
+      signature: row.signature,
+      snoozed: row.snoozed,
+      has_plan: row.has_plan,
+    };
+    Object.assign(row, summary, preserved);
+    row.summary_api_error = str(summary.api_error);
+  }
+}
+
 export function clearSummariesBundleCache(): void {
   try {
     sessionStorage.removeItem(SUMMARIES_CACHE_KEY);

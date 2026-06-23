@@ -29,6 +29,10 @@ try:
 except ImportError:
     pass
 
+from utils.runtime_paths import database_path, load_env  # noqa: E402
+
+load_env()
+
 
 def _duplicate_ids_query() -> str:
     return """
@@ -51,8 +55,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--db",
-        default=os.getenv("DATABASE_NAME") or "timeline.db",
-        help="SQLite database path (default: DATABASE_NAME or timeline.db)",
+        default=database_path(),
+        help="SQLite database path (default: DATABASE_NAME under FIVELANES_DATA_ROOT)",
     )
     parser.add_argument(
         "--dry-run",

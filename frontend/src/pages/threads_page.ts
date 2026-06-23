@@ -1,5 +1,6 @@
 import {
   applySavedThreadDraft,
+  applyThreadSummary,
   clearSummariesBundleCache,
   getCurrentData,
   getCurrentSourceLabel,
@@ -29,22 +30,25 @@ import {
 import type { LooseObj, ThreadView } from "../shared/types.js";
 import { escapeHtml, formatDate, formatRecipients, str, toneClass } from "../shared/utils.js";
 import { ensureAvailabilityDocLoaded } from "../shared/availability_windows.js";
+import { refreshAvailabilityPanel } from "../availability_panel.js";
 
 const PAGE_HTML = `
-<div class="dashboard-layout">
+<div class="dashboard-layout dashboard-layout--threads">
   <aside class="thread-nav" id="thread-nav">
     <h2>Threads</h2>
     <ul id="thread-nav-list"></ul>
+  </aside>
+  <div class="main-panel">
+    <div id="lanes" class="lanes-grid" hidden></div>
+    <div id="cards" class="cards"></div>
+  </div>
+  <aside class="availability-rail" id="availability-rail" aria-label="Your availability">
     <section id="availability-section" class="availability-section" aria-labelledby="availability-heading" hidden>
       <h2 id="availability-heading" class="availability-section-title">Open slots · next 7 days</h2>
       <p class="availability-meta" id="availability-meta"></p>
       <div id="availability-agenda" class="availability-agenda"></div>
     </section>
   </aside>
-  <div class="main-panel">
-    <div id="lanes" class="lanes-grid" hidden></div>
-    <div id="cards" class="cards"></div>
-  </div>
 </div>`;
 
 let threadViewMode: "active" | "snoozed" | "removed" = "active";
@@ -158,6 +162,7 @@ function renderCards(threads: ThreadView[]): void {
         isText ? `<span class="count-pill channel-text">Text</span>` : ""
       }` +
       `<div class="card-actions">` +
+      `<button type="button" class="thread-refresh-summary-btn" data-refresh-thread-id="${escapeHtml(thread.id)}">Refresh summary</button>` +
       `<button type="button" class="draft-reply-toggle" data-draft-thread-id="${escapeHtml(thread.id)}">Draft reply</button>` +
       `<button type="button" class="snooze-btn" data-snooze-thread-id="${escapeHtml(thread.id)}">${
         Number(s.snoozed || 0) === 1 ? "Unsnooze" : "Snooze"
@@ -341,6 +346,19 @@ async function persistThreadUnremove(threadId: string): Promise<void> {
   if (!res.ok) throw new Error(`Unremove failed (${res.status})`);
 }
 
+async function persistThreadSummary(threadId: string): Promise<LooseObj> {
+  const res = await fetch("/api/threads/summary", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ thread_id: threadId }),
+  });
+  const body = (await res.json().catch(() => ({}))) as LooseObj;
+  if (!res.ok || body.ok === false) {
+    throw new Error(str(body.error) || str(body.api_error) || `Thread summary failed (${res.status})`);
+  }
+  return body;
+}
+
 function reloadFromStore(): void {
   const data = getCurrentData();
   if (data) {
@@ -372,6 +390,7 @@ export async function renderThreadsPage(): Promise<void> {
   renderCards(visible);
   renderNav(visible, snoozedCount, removedCount, channelCounts);
   bindScrollNavHighlight();
+  await refreshAvailabilityPanel();
 }
 
 export function bindThreadsInteractions(): void {
@@ -429,6 +448,30 @@ export function bindThreadsInteractions(): void {
           outEl.hidden = false;
         } finally {
           draftGen.disabled = false;
+        }
+      })();
+      return;
+    }
+
+    const refreshBtn = target.closest("button.thread-refresh-summary-btn") as HTMLButtonElement | null;
+    if (refreshBtn && !refreshBtn.disabled) {
+      const threadId = str(refreshBtn.dataset.refreshThreadId);
+      if (!threadId) return;
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = "Refreshing…";
+      void (async () => {
+        try {
+          const body = await persistThreadSummary(threadId);
+          const summary = body.thread_summary;
+          if (summary && typeof summary === "object") {
+            applyThreadSummary(threadId, summary as LooseObj);
+          }
+          clearSummariesBundleCache();
+          reloadFromStore();
+        } catch (err) {
+          console.error(err);
+          refreshBtn.disabled = false;
+          refreshBtn.textContent = "Refresh summary";
         }
       })();
       return;

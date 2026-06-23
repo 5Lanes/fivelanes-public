@@ -1,22 +1,25 @@
-import { applySavedThreadDraft, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, setBundle, } from "../shared/summaries_store.js";
+import { applySavedThreadDraft, applyThreadSummary, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, setBundle, } from "../shared/summaries_store.js";
 import { counterpartyAvailabilityForSummary, counterpartyAvailabilitySectionHtml, formatDraftReplyMarkdown, latestUpdatesForThread, listSection, ownerNextStepsForThread, messageSourceDetailsHtml, nextStepsSectionHtml, partitionThreadsBySnooze, pendingMessageCountForThread, pendingMessagePillHtml, shouldShowThreadMessageBlocks, threadIsText, threadLabel, threadMessagesForDisplay, threadMessagesForReply, threadSummaryErrorHtml, threadSummaryForDisplay, } from "../shared/thread_domain.js";
 import { escapeHtml, formatDate, formatRecipients, str, toneClass } from "../shared/utils.js";
 import { ensureAvailabilityDocLoaded } from "../shared/availability_windows.js";
+import { refreshAvailabilityPanel } from "../availability_panel.js";
 const PAGE_HTML = `
-<div class="dashboard-layout">
+<div class="dashboard-layout dashboard-layout--threads">
   <aside class="thread-nav" id="thread-nav">
     <h2>Threads</h2>
     <ul id="thread-nav-list"></ul>
+  </aside>
+  <div class="main-panel">
+    <div id="lanes" class="lanes-grid" hidden></div>
+    <div id="cards" class="cards"></div>
+  </div>
+  <aside class="availability-rail" id="availability-rail" aria-label="Your availability">
     <section id="availability-section" class="availability-section" aria-labelledby="availability-heading" hidden>
       <h2 id="availability-heading" class="availability-section-title">Open slots · next 7 days</h2>
       <p class="availability-meta" id="availability-meta"></p>
       <div id="availability-agenda" class="availability-agenda"></div>
     </section>
   </aside>
-  <div class="main-panel">
-    <div id="lanes" class="lanes-grid" hidden></div>
-    <div id="cards" class="cards"></div>
-  </div>
 </div>`;
 let threadViewMode = "active";
 let threadChannelFilter = "all";
@@ -118,6 +121,7 @@ function renderCards(threads) {
         art.innerHTML =
             `<div class="card-top"><time datetime="${escapeHtml(dt)}">${formatDate(dt)}</time>${tone ? `<span class="tone ${toneClass(tone)}">${escapeHtml(tone)}</span>` : ""}<span class="count-pill">${nMsg} msg${nMsg > 1 ? " (thread)" : ""}</span>${pendingMessagePillHtml(pendingCount)}${isText ? `<span class="count-pill channel-text">Text</span>` : ""}` +
                 `<div class="card-actions">` +
+                `<button type="button" class="thread-refresh-summary-btn" data-refresh-thread-id="${escapeHtml(thread.id)}">Refresh summary</button>` +
                 `<button type="button" class="draft-reply-toggle" data-draft-thread-id="${escapeHtml(thread.id)}">Draft reply</button>` +
                 `<button type="button" class="snooze-btn" data-snooze-thread-id="${escapeHtml(thread.id)}">${Number(s.snoozed || 0) === 1 ? "Unsnooze" : "Snooze"}</button>` +
                 `<button type="button" class="remove-thread-btn" data-remove-thread-id="${escapeHtml(thread.id)}">${Number(s.snoozed || 0) === 2 ? "Unremove" : "Remove tracking"}</button>` +
@@ -290,6 +294,18 @@ async function persistThreadUnremove(threadId) {
     if (!res.ok)
         throw new Error(`Unremove failed (${res.status})`);
 }
+async function persistThreadSummary(threadId) {
+    const res = await fetch("/api/threads/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ thread_id: threadId }),
+    });
+    const body = (await res.json().catch(() => ({})));
+    if (!res.ok || body.ok === false) {
+        throw new Error(str(body.error) || str(body.api_error) || `Thread summary failed (${res.status})`);
+    }
+    return body;
+}
 function reloadFromStore() {
     const data = getCurrentData();
     if (data) {
@@ -320,6 +336,7 @@ export async function renderThreadsPage() {
     renderCards(visible);
     renderNav(visible, snoozedCount, removedCount, channelCounts);
     bindScrollNavHighlight();
+    await refreshAvailabilityPanel();
 }
 export function bindThreadsInteractions() {
     if (interactionsBound)
@@ -381,6 +398,31 @@ export function bindThreadsInteractions() {
                 }
                 finally {
                     draftGen.disabled = false;
+                }
+            })();
+            return;
+        }
+        const refreshBtn = target.closest("button.thread-refresh-summary-btn");
+        if (refreshBtn && !refreshBtn.disabled) {
+            const threadId = str(refreshBtn.dataset.refreshThreadId);
+            if (!threadId)
+                return;
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = "Refreshing…";
+            void (async () => {
+                try {
+                    const body = await persistThreadSummary(threadId);
+                    const summary = body.thread_summary;
+                    if (summary && typeof summary === "object") {
+                        applyThreadSummary(threadId, summary);
+                    }
+                    clearSummariesBundleCache();
+                    reloadFromStore();
+                }
+                catch (err) {
+                    console.error(err);
+                    refreshBtn.disabled = false;
+                    refreshBtn.textContent = "Refresh summary";
                 }
             })();
             return;

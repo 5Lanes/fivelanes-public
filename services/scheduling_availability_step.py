@@ -67,8 +67,9 @@ def load_calendar_events(
         except Exception:
             log.warning("Failed to load meetings from %s", db_path, exc_info=True)
     if not rows:
-        root = project_root or Path(__file__).resolve().parent.parent
-        avail_path = root / "out" / "availability_calendar_latest.json"
+        from utils.runtime_paths import data_path
+
+        avail_path = data_path("out", "availability_calendar_latest.json")
         if avail_path.is_file():
             try:
                 doc = json.loads(avail_path.read_text(encoding="utf-8"))

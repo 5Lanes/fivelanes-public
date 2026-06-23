@@ -1,6 +1,6 @@
 /**
- * Dashboard left-nav availability: loads out/availability_calendar_latest.json
- * and shows only likely-open windows for the next 7 calendar days (document TZ).
+ * Threads page right-rail availability: loads out/availability_calendar_latest.json
+ * and shows likely-open / virtual-only windows for the next 7 calendar days (document TZ).
  */
 
 import { dayHeadingLabelShort, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdInTz } from "./shared/time_ui.js";
@@ -303,7 +303,9 @@ export async function refreshAvailabilityPanel(): Promise<void> {
       return;
     }
     const data = (await res.json()) as LooseObj;
+    const tz = getTimeZone(data);
     section.hidden = false;
+    metaEl.textContent = `Next ${LEFT_NAV_AVAILABILITY_DAYS} days · ${tz}`;
     agendaEl.innerHTML = renderAgendaHtml(data);
   } catch (e) {
     section.hidden = false;

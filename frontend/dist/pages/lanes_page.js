@@ -1,5 +1,5 @@
 import { listSection, partitionThreadsBySnooze, threadEmailSubject, } from "../shared/thread_domain.js";
-import { applyLaneCreated, applyLaneRemoved, applyLaneSummary, applyLaneThreadMembership, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getLaneSummary, getLaneThreadIds, getLanes, loadLatestBundle, normalizeBundle, setBundle, } from "../shared/summaries_store.js";
+import { applyLaneCreated, applyLaneRemoved, applyLaneSummary, applyLaneThreadMembership, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getLaneSummary, getLaneThreadIds, getLanes, loadLatestBundle, normalizeBundle, setBundle, } from "../shared/summaries_store.js";
 import { escapeHtml, str } from "../shared/utils.js";
 const PAGE_HTML = `
 <div class="view-lanes">
@@ -10,12 +10,30 @@ const PAGE_HTML = `
     <input type="text" name="lane-name" id="lane-name-input" placeholder="Lane name" required />
     <button type="submit">Create</button>
     <button type="button" class="create-lane-cancel" id="create-lane-cancel">Cancel</button>
+    <p class="lane-create-error" id="lane-create-error" hidden></p>
   </form>
   <div id="lanes-list" class="lanes-list"></div>
 </div>`;
 let interactionsBound = false;
 let assignLaneId = null;
 let activeLaneTabId = null;
+const laneSummaryErrors = new Map();
+const laneSummaryPending = new Set();
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function laneSummaryHasContent(body) {
+    if (str(body.summary).trim())
+        return true;
+    if (str(body.tone_overview).trim())
+        return true;
+    for (const key of ["highlights", "current_priorities", "waiting_on_others"]) {
+        const val = body[key];
+        if (Array.isArray(val) && val.some((x) => str(x).trim()))
+            return true;
+    }
+    return false;
+}
 function isDashboardLanesList(listEl) {
     return !!listEl.closest(".view-dashboard");
 }
@@ -43,9 +61,16 @@ function threadPickerHtml(laneId, selectedIds) {
     <div class="lane-thread-options">${rows}</div>
   </div>`;
 }
-function laneSummaryHtml(summary) {
+function laneSummaryHtml(summary, laneId) {
+    const err = laneSummaryErrors.get(laneId);
+    if (err) {
+        return `<p class="lane-summary-error">${escapeHtml(err)}</p>`;
+    }
+    if (laneSummaryPending.has(laneId)) {
+        return `<p class="lane-summary-empty">Generating summary… this can take several minutes for lanes with long threads.</p>`;
+    }
     if (!summary) {
-        return `<p class="lane-summary-empty">No summary yet. Assign threads and refresh to generate one.</p>`;
+        return `<p class="lane-summary-empty">No summary yet. Assign threads and click Refresh summary.</p>`;
     }
     const tone = summary.tone_overview.trim();
     const updated = summary.updated_at.trim();
@@ -93,7 +118,7 @@ function laneCardHtml(lane, threadIds, summary, expanded, opts = {}) {
     const className = opts.tabbed ? "user-lane-panel" : "user-lane-card";
     return `<${tag} class="${className}" data-lane-id="${lane.id}">
     ${header}
-    ${laneSummaryHtml(summary)}
+    ${laneSummaryHtml(summary, lane.id)}
     ${threadsBlock}
     ${picker}
     <div class="user-lane-actions">
@@ -193,6 +218,30 @@ async function persistLaneThread(laneId, threadId, inLane) {
     if (!res.ok)
         throw new Error(str(body.error) || `Lane update failed (${res.status})`);
 }
+async function fetchLaneSummaryStatus(laneId) {
+    const res = await fetch(`/api/lanes/summary?lane_id=${laneId}`, {
+        credentials: "same-origin",
+    });
+    const body = (await res.json().catch(() => ({})));
+    if (!res.ok) {
+        throw new Error(str(body.error) || `Lane summary status failed (${res.status})`);
+    }
+    return body;
+}
+async function waitForLaneSummary(laneId, maxWaitMs = 20 * 60 * 1000) {
+    const start = Date.now();
+    while (Date.now() - start < maxWaitMs) {
+        const body = await fetchLaneSummaryStatus(laneId);
+        if (body.ok === false) {
+            throw new Error(str(body.error) || "Lane summary failed");
+        }
+        if (!body.pending && laneSummaryHasContent(body)) {
+            return body;
+        }
+        await sleep(3000);
+    }
+    throw new Error("Lane summary is still running. You can leave this page and click Refresh summary again later.");
+}
 async function persistLaneSummary(laneId, force = false) {
     const res = await fetch("/api/lanes/summary", {
         method: "POST",
@@ -200,8 +249,15 @@ async function persistLaneSummary(laneId, force = false) {
         body: JSON.stringify({ lane_id: laneId, force }),
     });
     const body = (await res.json().catch(() => ({})));
-    if (!res.ok)
+    if (!res.ok || body.ok === false) {
         throw new Error(str(body.error) || `Lane summary failed (${res.status})`);
+    }
+    if (body.pending) {
+        return waitForLaneSummary(laneId);
+    }
+    if (!laneSummaryHasContent(body)) {
+        throw new Error(str(body.error) || "Lane summary returned no content");
+    }
     return body;
 }
 async function persistLaneDelete(laneId) {
@@ -213,6 +269,35 @@ async function persistLaneDelete(laneId) {
     const body = (await res.json().catch(() => ({})));
     if (!res.ok)
         throw new Error(str(body.error) || `Delete lane failed (${res.status})`);
+}
+function isLaneUi(target) {
+    return !!(target instanceof Element &&
+        target.closest(".view-lanes, .dashboard-lanes-section"));
+}
+function showLaneCreateError(message) {
+    const errEl = document.getElementById("lane-create-error");
+    if (!errEl)
+        return;
+    if (!message) {
+        errEl.textContent = "";
+        errEl.hidden = true;
+        return;
+    }
+    errEl.textContent = message;
+    errEl.hidden = false;
+}
+async function reloadLanesFromServer() {
+    clearSummariesBundleCache();
+    try {
+        const { data, label } = await loadLatestBundle();
+        setBundle(normalizeBundle(data), label);
+    }
+    catch {
+        const data = getCurrentData();
+        if (data)
+            setBundle(data, getCurrentSourceLabel());
+    }
+    renderLanesList();
 }
 function reloadFromStore() {
     const data = getCurrentData();
@@ -236,24 +321,24 @@ export function bindLanesInteractions() {
     interactionsBound = true;
     document.addEventListener("click", (ev) => {
         const target = ev.target;
-        if (!target)
+        if (!target || !isLaneUi(target))
             return;
-        if (!document.getElementById("page-root")?.contains(target))
-            return;
-        if (target.id === "create-lane-btn") {
+        if (target.closest("#create-lane-btn")) {
             const form = document.getElementById("create-lane-form");
             const btn = document.getElementById("create-lane-btn");
             form?.removeAttribute("hidden");
             btn?.setAttribute("hidden", "");
+            showLaneCreateError("");
             document.getElementById("lane-name-input")?.focus();
             return;
         }
-        if (target.id === "create-lane-cancel") {
+        if (target.closest("#create-lane-cancel")) {
             const form = document.getElementById("create-lane-form");
             const btn = document.getElementById("create-lane-btn");
             form?.reset();
             form?.setAttribute("hidden", "");
             btn?.removeAttribute("hidden");
+            showLaneCreateError("");
             return;
         }
         const tabBtn = target.closest(".lane-tab");
@@ -278,18 +363,32 @@ export function bindLanesInteractions() {
             const laneId = Number(refreshBtn.dataset.laneId) || 0;
             if (!laneId)
                 return;
+            laneSummaryErrors.delete(laneId);
+            laneSummaryPending.add(laneId);
             refreshBtn.disabled = true;
             refreshBtn.textContent = "Refreshing…";
+            reloadFromStore();
             void (async () => {
                 try {
                     const body = await persistLaneSummary(laneId, true);
+                    laneSummaryPending.delete(laneId);
                     applyLaneSummary(laneId, body);
-                    reloadFromStore();
+                    clearSummariesBundleCache();
+                    await reloadLanesFromServer();
                 }
                 catch (err) {
+                    laneSummaryPending.delete(laneId);
+                    const msg = err instanceof Error ? err.message : String(err);
+                    laneSummaryErrors.set(laneId, msg);
                     console.error(err);
-                    refreshBtn.disabled = false;
-                    refreshBtn.textContent = "Refresh summary";
+                    reloadFromStore();
+                }
+                finally {
+                    const btn = document.querySelector(`.lane-refresh-summary-btn[data-lane-id="${laneId}"]`);
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = "Refresh summary";
+                    }
                 }
             })();
             return;
@@ -331,7 +430,7 @@ export function bindLanesInteractions() {
     });
     document.addEventListener("submit", (ev) => {
         const form = ev.target?.closest("#create-lane-form");
-        if (!form)
+        if (!form || !isLaneUi(form))
             return;
         ev.preventDefault();
         void (async () => {
@@ -339,6 +438,10 @@ export function bindLanesInteractions() {
             const name = input?.value.trim() ?? "";
             if (!name)
                 return;
+            const submitBtn = form.querySelector('button[type="submit"]');
+            if (submitBtn)
+                submitBtn.disabled = true;
+            showLaneCreateError("");
             try {
                 const lane = await persistLaneCreate(name);
                 applyLaneCreated(lane);
@@ -347,16 +450,22 @@ export function bindLanesInteractions() {
                 form.setAttribute("hidden", "");
                 document.getElementById("create-lane-btn")?.removeAttribute("hidden");
                 form.reset();
-                reloadFromStore();
+                await reloadLanesFromServer();
             }
             catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                showLaneCreateError(msg);
                 console.error(err);
+            }
+            finally {
+                if (submitBtn)
+                    submitBtn.disabled = false;
             }
         })();
     });
     document.addEventListener("change", (ev) => {
         const checkbox = ev.target?.closest(".lane-thread-checkbox");
-        if (!checkbox)
+        if (!checkbox || !isLaneUi(checkbox))
             return;
         const laneId = Number(checkbox.dataset.laneId) || 0;
         const threadId = str(checkbox.dataset.threadId);
@@ -367,6 +476,7 @@ export function bindLanesInteractions() {
             applyLaneThreadMembership(laneId, threadId, inLane);
             try {
                 await persistLaneThread(laneId, threadId, inLane);
+                clearSummariesBundleCache();
                 reloadFromStore();
             }
             catch (err) {

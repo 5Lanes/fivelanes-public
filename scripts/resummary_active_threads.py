@@ -31,7 +31,11 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="Re-summarize active inbox threads")
-    parser.add_argument("--db", default=None, help="SQLite path (default: DATABASE_NAME or timeline.db)")
+    parser.add_argument(
+        "--db",
+        default=None,
+        help="SQLite path (default: DATABASE_NAME under FIVELANES_DATA_ROOT)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--thread-id", default=None, help="Only this inbox thread id")
     args = parser.parse_args()

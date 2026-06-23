@@ -42,6 +42,7 @@ const PAGE_HTML = `
       <input type="text" name="lane-name" id="lane-name-input" placeholder="Lane name" required />
       <button type="submit">Create</button>
       <button type="button" class="create-lane-cancel" id="create-lane-cancel">Cancel</button>
+      <p class="lane-create-error" id="lane-create-error" hidden></p>
     </form>
     <div id="lanes-list" class="lanes-list dashboard-lanes-list"></div>
   </section>

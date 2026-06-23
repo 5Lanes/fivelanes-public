@@ -182,9 +182,7 @@ def _thread_summary_block_template() -> str:
 
 def _segmentation_email_body(body: str) -> str:
     """Cap body length for segmentation prompts (new content is usually at the top)."""
-    from services.email.segmentation import strip_quoted_thread_tail
-
-    text = strip_quoted_thread_tail(str(body or ""))
+    text = str(body or "")
     limit = SEGMENTATION_MAX_BODY_CHARS
     if limit > 0 and len(text) > limit:
         return text[:limit]
@@ -193,6 +191,38 @@ def _segmentation_email_body(body: str) -> str:
 
 def _message_datetime_key(msg: Dict[str, Any]) -> str:
     return str(msg.get("datetime") or msg.get("timestamp") or "").strip()
+
+
+def _sender_label(sender: str) -> str:
+    raw = str(sender or "").strip()
+    if not raw:
+        return "(unknown)"
+    if "<" in raw:
+        name = raw.split("<", 1)[0].strip().strip('"')
+        if name:
+            return name
+    if "@" in raw:
+        return raw.split("@", 1)[0].strip()
+    return raw
+
+
+def build_last_message_anchor(messages: Sequence[Dict[str, Any]]) -> str:
+    """One-line anchor for summary prompts: last message in chronological order."""
+    if not messages:
+        return "(none)"
+    ordered = sorted(
+        list(messages),
+        key=lambda m: _parse_message_datetime(_message_datetime_key(m)),
+    )
+    last = ordered[-1]
+    dt = _message_datetime_key(last) or "(unknown)"
+    sender = _sender_label(str(last.get("sender") or last.get("from") or ""))
+    content = str(last.get("content") or "").strip().replace("\r\n", "\n")
+    if not content:
+        content = "(empty)"
+    if len(content) > 480:
+        content = content[:477].rstrip() + "..."
+    return f"{dt} | From: {sender}\n{content}"
 
 
 def _parse_message_datetime(dt: str) -> datetime:
@@ -301,7 +331,8 @@ def format_thread_summary_prompt(
     """
     Build the full thread-summary prompt from structured messages.
 
-    Callers should pass messages **newest first**; only the most recent N are included.
+    Messages are rendered **chronologically** (oldest first); when truncated, the
+    most recent N messages are kept.
     """
     settings = _load_settings()
     max_messages = int(settings.get("thread_summary_max_messages") or 12)
@@ -310,6 +341,7 @@ def format_thread_summary_prompt(
         max_messages=max_messages,
         message_template=message_template,
         sanitize=True,
+        chronological=True,
     )
     aliases = ", ".join(_summary_routing_aliases())
     from services.scheduling_availability_step import calendar_context_for_summary_prompt
@@ -321,6 +353,7 @@ def format_thread_summary_prompt(
     return _format_prompt_pair(
         "email_thread_summary",
         thread_messages=thread_messages,
+        last_message_anchor=build_last_message_anchor(messages),
         summary_routing_aliases=aliases,
         summary_datetime=summary_as_of_datetime(as_of=as_of),
         calendar_events_block=calendar_events_block,
@@ -343,6 +376,7 @@ def format_incremental_thread_summary_prompt(
         max_messages=None,
         message_template=message_template,
         sanitize=True,
+        chronological=True,
     )
     aliases = ", ".join(_summary_routing_aliases())
     from services.scheduling_availability_step import calendar_context_for_summary_prompt

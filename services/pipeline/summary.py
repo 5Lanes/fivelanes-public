@@ -16,8 +16,11 @@ from utils.thread_summary_normalize import finalize_thread_summary
 
 
 def build_summary_blocks(cleaned: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Build message blocks for summary prompts (newest first)."""
-    newest_first = list(reversed(list(cleaned)))
+    """Build message blocks for summary prompts (chronological, oldest first)."""
+    ordered = sorted(
+        list(cleaned),
+        key=lambda m: str(m.get("datetime") or ""),
+    )
     return [
         {
             "datetime": m.get("datetime", ""),
@@ -26,7 +29,7 @@ def build_summary_blocks(cleaned: Sequence[Dict[str, Any]]) -> List[Dict[str, An
             "subject": m.get("subject", ""),
             "content": m.get("cleaned_content", ""),
         }
-        for m in newest_first
+        for m in ordered
     ]
 
 

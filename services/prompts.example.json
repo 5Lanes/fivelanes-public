@@ -5,11 +5,11 @@
       "user": "<your user prompt; must include {email_body} placeholder>"
     },
     "email_thread_summary": {
-      "system": "<your system prompt for summarizing a full email thread into JSON with: latest_updates (string[]), next_steps ({type, action, by_when}[]), last_sender, tone, suggested_thread_label, parties ({active_speakers, audience}), and counterparty_availability ({date: YYYY-MM-DD, start: HH:MM, end: HH:MM, party?, label?}[] — windows the counterparty offered for scheduling, in {calendar_timezone}; omit when none). Must handle {summary_routing_aliases}>",
-      "user": "<your user prompt; must include {summary_datetime}, {calendar_timezone}, {calendar_events_block}, and {thread_messages} placeholders>"
+      "system": "<your system prompt for summarizing a full email thread into JSON with: latest_updates (string[]), next_steps ({type, action, by_when}[]), last_sender, tone, suggested_thread_label, parties ({active_speakers, audience}), and counterparty_availability ({date: YYYY-MM-DD, start: HH:MM, end: HH:MM, party?, label?}[] — windows the counterparty offered for scheduling, in {calendar_timezone}; omit when none). Messages are shown chronologically (oldest first); the last message is most recent. Instruct the model to read the thread as a timeline and weight recent messages for current state. Must handle {summary_routing_aliases}>",
+      "user": "<your user prompt; must include {summary_datetime}, {last_message_anchor}, {calendar_timezone}, {calendar_events_block}, and {thread_messages} placeholders. State that messages are chronological (oldest first) and that later messages supersede earlier ones when the situation changed>"
     },
     "email_thread_summary_incremental": {
-      "system": "<your system prompt for merging new messages into an existing thread summary JSON; preserve or update counterparty_availability when the counterparty proposes new times; must handle {summary_routing_aliases}>",
+      "system": "<your system prompt for merging new messages into an existing thread summary JSON; new messages are chronological (last is most recent); preserve or update counterparty_availability when the counterparty proposes new times; must handle {summary_routing_aliases}>",
       "user": "<your user prompt; must include {summary_datetime}, {prior_summary_json}, {new_thread_messages}, {calendar_timezone}, and {calendar_events_block} placeholders>"
     },
     "email_reply_voice": {

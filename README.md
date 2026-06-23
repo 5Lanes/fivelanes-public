@@ -20,7 +20,7 @@ Typical data-directory layout:
     tokens.json        # OAuth tokens (created by utils/add_account.py)
     calendar_scheduling_rules.json
   conversations/       # iMessage/SMS JSON exports
-  out/                 # pipeline outputs (calendar JSON, etc.)
+  out/                 # calendar availability JSON
   logs/
 ```
 

@@ -102,11 +102,10 @@ def seconds_until_quiet_ends(
 
 
 def run_fivelanes_cycle(*, trigger: str = "scheduler") -> None:
-    """One full scheduled cycle: pipeline, out/ cleanup, optional calendar export."""
+    """One full scheduled cycle: pipeline and optional calendar export."""
     import fivelanes as fl
     from services.calendar_availability_export import run_calendar_availability_pull
     from utils.backend_config import get_backend
-    from utils.clear_out_json_older_than import main as clear_out_json_older_than_main
     from utils.pipeline_run_log import record_pipeline_run_finish, record_pipeline_run_start
 
     os.chdir(infra_root())
@@ -115,7 +114,6 @@ def run_fivelanes_cycle(*, trigger: str = "scheduler") -> None:
     err: Optional[str] = None
     try:
         fl.main(lookback_days=FIVELANES_LOOKBACK_DAYS)
-        clear_out_json_older_than_main()
         if not CALENDAR_AVAILABILITY_DISABLE:
             out_json = data_path("out", "availability_calendar_latest.json")
             try:

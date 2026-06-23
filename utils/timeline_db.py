@@ -6,11 +6,13 @@ import sqlite3
 from pathlib import Path
 
 from utils.database import _ensure_thread_tracking_schema, ensure_database_schema
+from utils.runtime_paths import database_path, load_env
 
 
-def create_timeline_db(db_path: str = "timeline.db") -> None:
+def create_timeline_db(db_path: str | None = None) -> None:
     """Create DB files and active tables if missing."""
-    ensure_database_schema(db_path)
+    load_env()
+    ensure_database_schema(db_path or database_path())
 
 
 def create_threads_table(conn: sqlite3.Connection) -> None:

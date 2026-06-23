@@ -1099,6 +1099,16 @@ header p.run-meta {
   color: var(--text) !important;
 }
 
+.lane-create-error,
+.person-create-error {
+  margin: 0.35rem 0 0;
+  width: 100%;
+  flex-basis: 100%;
+  font-size: 0.85rem;
+  color: var(--error);
+  font-family: system-ui, sans-serif;
+}
+
 .lanes-list,
 .people-list {
   display: flex;
@@ -1199,6 +1209,17 @@ header p.run-meta {
   margin: 0 0 0.85rem;
   font-size: 0.88rem;
   color: var(--muted);
+  font-family: system-ui, sans-serif;
+}
+
+.lane-summary-error {
+  margin: 0 0 0.85rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--error) 35%, var(--border));
+  background: color-mix(in srgb, var(--error) 8%, var(--surface));
+  color: var(--error);
+  font-size: 0.85rem;
   font-family: system-ui, sans-serif;
 }
 
@@ -1489,6 +1510,10 @@ header p.run-meta {
   align-items: start;
 }
 
+.dashboard-layout--threads {
+  grid-template-columns: 280px minmax(0, 1fr) min(320px, 30vw);
+}
+
 .main-panel {
   min-width: 0;
 }
@@ -1496,6 +1521,42 @@ header p.run-meta {
 @media (max-width: 960px) {
   .dashboard-layout {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-layout--threads {
+    grid-template-columns: 1fr;
+  }
+
+  .availability-rail {
+    position: static;
+    top: auto;
+    max-height: min(42vh, 22rem);
+    order: 3;
+  }
+
+  .dashboard-layout--threads .thread-nav {
+    order: 1;
+  }
+
+  .dashboard-layout--threads .main-panel {
+    order: 2;
+  }
+
+  .availability-rail .dash-avail-agenda {
+    min-width: 0;
+    flex-direction: column;
+    overflow-x: visible;
+  }
+
+  .availability-rail .dash-avail-day {
+    flex: none;
+    min-width: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .availability-rail .dash-avail-day:last-child {
+    border-bottom: none;
   }
 }
 
@@ -1790,7 +1851,8 @@ details.body-detail summary {
 
 .snooze-btn,
 .draft-reply-toggle,
-.remove-thread-btn {
+.remove-thread-btn,
+.thread-refresh-summary-btn {
   border: 1px solid var(--border);
   background: var(--elevated);
   border-radius: 999px;
@@ -1803,8 +1865,14 @@ details.body-detail summary {
 
 .snooze-btn:hover,
 .draft-reply-toggle:hover,
-.remove-thread-btn:hover {
+.remove-thread-btn:hover,
+.thread-refresh-summary-btn:hover:not(:disabled) {
   background: var(--hover);
+}
+
+.thread-refresh-summary-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .draft-reply-panel {
@@ -1910,62 +1978,69 @@ details.body-detail summary {
   font-family: system-ui, sans-serif;
 }
 
-/* Open slots (next 7 days) in left thread nav */
-.thread-nav .availability-section {
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--border);
+/* Open slots (next 7 days) in threads page right rail */
+.availability-rail {
+  position: sticky;
+  top: 1rem;
+  align-self: start;
+  max-height: calc(100vh - 2rem);
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-.thread-nav .availability-section-title {
+.availability-rail .availability-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.availability-rail .availability-section-title {
   font-size: 0.82rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--muted);
+  margin: 0 0 0.35rem;
 }
 
-.thread-nav .availability-meta {
+.availability-rail .availability-meta {
   font-size: 0.72rem;
-  margin-bottom: 0.65rem;
+  margin: 0 0 0.65rem;
+  color: var(--muted);
 }
 
-.thread-nav .dash-avail-agenda {
-  flex-direction: column;
-  overflow-x: visible;
+.availability-rail .availability-agenda {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
-.thread-nav .dash-avail-day {
-  flex: none;
-  min-width: 0;
-  border-right: none;
-  border-bottom: 1px solid var(--border);
+.availability-rail .dash-avail-agenda {
+  min-width: max-content;
 }
 
-.thread-nav .dash-avail-day:last-child {
-  border-bottom: none;
+.availability-rail .dash-avail-day {
+  flex: 0 0 148px;
+  min-width: 148px;
 }
 
-.thread-nav .dash-avail-day-head {
-  text-align: left;
-  padding: 0.45rem 0.35rem;
-}
-
-.thread-nav .dash-avail-row {
-  flex-direction: column;
-  gap: 0.15rem;
-  align-items: stretch;
-}
-
-.thread-nav .dash-avail-time {
+.availability-rail .dash-avail-time {
   font-size: 0.72rem;
 }
 
-.thread-nav .dash-avail-title {
+.availability-rail .dash-avail-title {
   font-size: 0.78rem;
 }
 
-.thread-nav .dash-avail-detail {
+.availability-rail .dash-avail-detail {
   font-size: 0.7rem;
 }
 
@@ -2429,6 +2504,7 @@ details.body-detail summary {
   .snooze-btn,
   .draft-reply-toggle,
   .remove-thread-btn,
+  .thread-refresh-summary-btn,
   .meeting-prep-btn {
     min-height: 2.25rem;
     padding: 0.35rem 0.65rem;

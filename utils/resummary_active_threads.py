@@ -2,120 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 log = logging.getLogger(__name__)
-
-_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _run_stamp_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-
-
-def _summary_rows_for_ui(per_message: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    for row in per_message:
-        ts = row.get("thread_summary")
-        base = {k: v for k, v in row.items() if k != "thread_summary"}
-        if isinstance(ts, dict):
-            out.append({**ts, **base})
-        else:
-            out.append(dict(base))
-    return out
-
-
-def _row_to_cleaned(row: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "thread_id": row.get("thread_id") or "",
-        "source_id": row.get("source_id") or "",
-        "datetime": row.get("datetime") or "",
-        "sender": row.get("sender") or "",
-        "recipients": row.get("recipients") or "",
-        "subject": row.get("subject") or "",
-        "raw_text": row.get("raw_text") or "",
-        "forwarded_from": row.get("forwarded_from") or "",
-        "cleaned_content": row.get("cleaned_content") or "",
-        "quoted_reply": row.get("quoted_reply") or "",
-        "signature": row.get("signature") or "",
-        "api_error": row.get("api_error") or "",
-    }
-
-
-def _row_to_per_message(row: Dict[str, Any]) -> Dict[str, Any]:
-    try:
-        ts = json.loads(row.get("thread_summary_json") or "{}")
-    except json.JSONDecodeError:
-        ts = {}
-    if not isinstance(ts, dict):
-        ts = {}
-    return {
-        "thread_id": row.get("thread_id") or "",
-        "source_id": row.get("source_id") or "",
-        "thread_summary": ts,
-        "cleaned_content": row.get("cleaned_content") or "",
-        "quoted_reply": row.get("quoted_reply") or "",
-        "signature": row.get("signature") or "",
-        "api_error": row.get("api_error") or "",
-        "sender": row.get("sender") or "",
-        "datetime": row.get("datetime") or "",
-        "subject": row.get("subject") or "",
-    }
-
-
-def write_fivelanes_bundle_from_db(
-    db_path: str,
-    *,
-    run_stamp: str,
-    generated_at: str,
-) -> Path:
-    from utils.database import load_latest_claude_output_snapshot_rows
-
-    rows = load_latest_claude_output_snapshot_rows(db_path)
-    cleaned = [_row_to_cleaned(r) for r in rows]
-    per_message = [_row_to_per_message(r) for r in rows]
-    bundle = {
-        "cleaned": cleaned,
-        "summary": _summary_rows_for_ui(per_message),
-        "run_stamp": run_stamp,
-        "generated_at": generated_at,
-    }
-    out_dir = _ROOT / "out"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    bundle_path = out_dir / "fivelanes_summary.json"
-    stamped_path = out_dir / f"fivelanes_bundle_{run_stamp}.json"
-    for path in (bundle_path, stamped_path):
-        with path.open("w", encoding="utf-8") as f:
-            json.dump(bundle, f, indent=2, ensure_ascii=False)
-    latest_path = out_dir / "latest.json"
-    latest_payload = {
-        "run_stamp": run_stamp,
-        "generated_at": generated_at,
-        "files": {
-            "bundle": stamped_path.name,
-            "cleaned_messages": f"cleaned_messages_{run_stamp}.json",
-            "per_message_summary": f"summary_{run_stamp}.json",
-        },
-    }
-    with latest_path.open("w", encoding="utf-8") as f:
-        json.dump(latest_payload, f, indent=2, ensure_ascii=False)
-    json.dump(
-        cleaned,
-        open(out_dir / f"cleaned_messages_{run_stamp}.json", "w"),
-        indent=2,
-        ensure_ascii=False,
-    )
-    json.dump(
-        per_message,
-        open(out_dir / f"summary_{run_stamp}.json", "w"),
-        indent=2,
-        ensure_ascii=False,
-    )
-    return bundle_path
 
 
 def force_resummary_active_threads(
@@ -126,17 +17,8 @@ def force_resummary_active_threads(
 ) -> int:
     """Re-summarize threads shown as Active in the dashboard."""
     from services.llm_service import get_llm_backend
-    from services.pipeline.summary import (
-        compute_summary_fingerprint,
-        summarize_thread,
-    )
-    from utils.api_error_detection import thread_summary_is_valid
-    from utils.database import (
-        apply_thread_resummary_to_db,
-        list_active_thread_ids_for_resummary,
-        load_processed_cleaned_for_thread,
-        save_thread_summary_cache,
-    )
+    from services.pipeline.process import force_resummarize_thread
+    from utils.database import list_active_thread_ids_for_resummary
     from utils.runtime_paths import database_path
 
     db = db_path or database_path()
@@ -156,9 +38,10 @@ def force_resummary_active_threads(
 
     updated = 0
     generated_at = datetime.now(timezone.utc).isoformat()
-    run_stamp = _run_stamp_utc()
 
     for i, tid in enumerate(thread_ids, start=1):
+        from utils.database import load_processed_cleaned_for_thread
+
         cleaned = load_processed_cleaned_for_thread(db, tid)
         if not cleaned:
             log.warning("[%d/%d] Skip %s: no cleaned messages", i, len(thread_ids), tid)
@@ -170,41 +53,89 @@ def force_resummary_active_threads(
             tid,
             len(cleaned),
         )
-        tsumm = summarize_thread(cleaned, mode="full", db_path=db, backend=llm)
-        if not thread_summary_is_valid(tsumm, cleaned=cleaned):
-            log.error(
-                "Skip persist %s: invalid summary (%s)",
-                tid,
-                str(tsumm.get("api_error") or tsumm.keys()),
-            )
-            continue
-        fp = compute_summary_fingerprint(cleaned, db_path=db, backend=llm.name)
-        save_thread_summary_cache(
+        if force_resummarize_thread(
             db,
-            thread_id=tid,
-            thread_summary=tsumm,
-            input_fingerprint=fp,
-            summary_mode="full",
-            backend=llm.name,
+            tid,
+            llm=llm,
             generated_at=generated_at,
-        )
-        n = apply_thread_resummary_to_db(
-            db,
-            thread_id=tid,
-            thread_summary=tsumm,
-            generated_at=generated_at,
-        )
-        if n:
+            apply_to_outputs=True,
+        ):
             updated += 1
 
     if updated:
-        write_fivelanes_bundle_from_db(
-            db,
-            run_stamp=run_stamp,
-            generated_at=generated_at,
-        )
-    if updated:
-        log.info("Updated %d thread(s); bundle written to out/fivelanes_summary.json", updated)
+        log.info("Updated %d thread(s)", updated)
     else:
         log.info("Updated 0 thread(s)")
     return updated
+
+
+def resummary_single_thread(
+    *,
+    db_path: str | None = None,
+    thread_id: str,
+) -> Dict[str, Any]:
+    """Re-run a full thread summary for one thread (dashboard refresh)."""
+    from services.texts.tracking import TEXT_THREAD_PREFIX, parse_text_inbox_thread_id
+    from utils.api_error_detection import thread_summary_is_valid
+    from utils.database import load_cached_thread_summary, load_processed_cleaned_for_thread
+    from utils.runtime_paths import database_path
+
+    tid = (thread_id or "").strip()
+    if not tid:
+        return {"ok": False, "error": "missing_thread_id"}
+
+    db = db_path or database_path()
+
+    if tid.startswith(TEXT_THREAD_PREFIX):
+        key = parse_text_inbox_thread_id(tid)
+        if not key:
+            return {"ok": False, "error": "invalid_text_thread_id", "thread_id": tid}
+        from services.texts.summarize import _latest_thread_summary, summarize_one_text_thread
+
+        result = summarize_one_text_thread(db, key, force=True)
+        if not result.get("ok"):
+            return result
+        tsumm = _latest_thread_summary(db, tid)
+        cleaned = load_processed_cleaned_for_thread(db, tid)
+        if not thread_summary_is_valid(tsumm, cleaned=cleaned):
+            return {
+                "ok": False,
+                "error": "invalid_summary",
+                "thread_id": tid,
+                "api_error": str(tsumm.get("api_error") or ""),
+            }
+        cached = load_cached_thread_summary(db, tid)
+        return {
+            "ok": True,
+            "thread_id": tid,
+            "thread_summary": tsumm,
+            "summary_updated_at": (cached or {}).get("generated_at"),
+            "skipped": bool(result.get("skipped")),
+        }
+
+    cleaned = load_processed_cleaned_for_thread(db, tid)
+    if not cleaned:
+        return {"ok": False, "error": "no_cleaned_messages", "thread_id": tid}
+
+    rows_updated = force_resummary_active_threads(db_path=db, thread_id=tid)
+    cached = load_cached_thread_summary(db, tid)
+    tsumm = (cached or {}).get("thread_summary") if cached else {}
+    if not isinstance(tsumm, dict):
+        tsumm = {}
+    if not thread_summary_is_valid(tsumm, cleaned=cleaned):
+        return {
+            "ok": False,
+            "error": "invalid_summary",
+            "thread_id": tid,
+            "api_error": str(tsumm.get("api_error") or ""),
+        }
+    if not rows_updated:
+        return {"ok": False, "error": "no_rows_updated", "thread_id": tid}
+
+    return {
+        "ok": True,
+        "thread_id": tid,
+        "thread_summary": tsumm,
+        "summary_updated_at": (cached or {}).get("generated_at"),
+        "rows_updated": rows_updated,
+    }

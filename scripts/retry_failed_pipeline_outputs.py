@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -13,22 +12,17 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv(_ROOT / ".env")
-except ImportError:
-    pass
-
 from utils.retry_failed_pipeline_outputs import retry_failed_pipeline_outputs  # noqa: E402
+from utils.runtime_paths import database_path, load_env  # noqa: E402
 
 
 def main() -> None:
+    load_env()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--db",
-        default=os.getenv("DATABASE_NAME") or "timeline.db",
-        help="SQLite path (default: DATABASE_NAME or timeline.db)",
+        default=database_path(),
+        help="SQLite path (default: DATABASE_NAME under FIVELANES_DATA_ROOT)",
     )
     parser.add_argument(
         "--dry-run",
@@ -42,11 +36,8 @@ def main() -> None:
     )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
-    db_path = Path(args.db)
-    if not db_path.is_absolute():
-        db_path = (_ROOT / db_path).resolve()
     retry_failed_pipeline_outputs(
-        db_path=str(db_path),
+        db_path=str(Path(args.db).expanduser().resolve()),
         dry_run=args.dry_run,
         thread_id=args.thread_id,
     )

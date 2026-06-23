@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any, Dict, List, Optional, Sequence
 
 log = logging.getLogger(__name__)
 
@@ -145,59 +145,41 @@ def known_source_ids_for_thread(
     return known
 
 
-def should_unsnooze_for_new_activity(
-    *,
-    current_state: int,
-    new_source_ids: Set[str],
-    known_source_ids: Set[str],
-    new_sent_source_ids: Set[str],
-) -> bool:
-    """
-    Whether a snoozed thread should return to active on newly observed messages.
-
-    Requires established thread history (some known ids) unless the new messages
-    were sent by the inbox owner.
-    """
-    if not is_snoozed(current_state):
-        return False
-    if new_sent_source_ids:
-        return True
-    return bool(new_source_ids and known_source_ids)
+def unseen_source_ids(
+    db_path: str,
+    thread_id: str,
+    candidate_source_ids: set[str] | Sequence[str],
+) -> set[str]:
+    """Source ids in ``candidate_source_ids`` not yet stored for this thread."""
+    clean = {str(x).strip() for x in candidate_source_ids if str(x).strip()}
+    if not clean:
+        return set()
+    return clean - known_source_ids_for_thread(db_path, thread_id, clean)
 
 
 def maybe_unsnooze_email_thread(
     db_path: str,
     tracking_row: Dict[str, Any],
     expanded: List[Dict[str, Any]],
-    *,
-    fetch_oauth_account_id: Optional[str],
 ) -> bool:
-    """Unsnooze an email thread when inbox refresh finds new message activity."""
-    from services.email.thread_resolve import new_sent_source_ids
-
+    """Unsnooze when an existing snoozed thread has any new message activity."""
     inbox_thread_id = (tracking_row.get("inbox_thread_id") or "").strip()
     if not inbox_thread_id or not is_snoozed(tracking_row.get("snoozed")):
         return False
 
-    pulled_ids = {
-        str(x.get("source_id") or "").strip()
-        for x in expanded
-        if str(x.get("source_id") or "").strip()
+    pulled = {
+        str(row.get("source_id") or "").strip()
+        for row in expanded
+        if str(row.get("source_id") or "").strip()
     }
-    known = known_source_ids_for_thread(db_path, inbox_thread_id, pulled_ids)
-    new_ids = pulled_ids - known
-    new_sent = new_sent_source_ids(expanded, new_ids, fetch_oauth_account_id)
-    if not should_unsnooze_for_new_activity(
-        current_state=SNOOZED,
-        new_source_ids=new_ids,
-        known_source_ids=known,
-        new_sent_source_ids=new_sent,
-    ):
+    known = known_source_ids_for_thread(db_path, inbox_thread_id, pulled)
+    if not known or not unseen_source_ids(db_path, inbox_thread_id, pulled):
         return False
 
     unsnooze_threads(db_path, [inbox_thread_id])
     log.info(
-        "Cleared snooze for inbox_thread_id=%r (new message activity)", inbox_thread_id
+        "Cleared snooze for inbox_thread_id=%r (new thread activity)",
+        inbox_thread_id,
     )
     return True
 
