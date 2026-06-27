@@ -1,6 +1,9 @@
 """
 Gmail inbox pipeline: pull, thread expansion, and timeline population.
 
+Thread identity (inbox tracking vs ``source_id`` on timeline rows) is documented in README.md
+§ "Thread identity: inbox tracking vs timeline messages".
+
 Heavy modules (Gmail API) are lazy-loaded so lightweight imports (e.g. unit tests
 for routing) do not require ``google`` packages.
 """

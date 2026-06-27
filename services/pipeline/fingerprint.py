@@ -94,27 +94,6 @@ def email_reply_fingerprint(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def person_summary_fingerprint(
-    *,
-    person_id: int,
-    thread_ids: List[str],
-    summary_datetimes: List[str],
-    backend: str = "",
-    version: str | None = None,
-) -> str:
-    payload = json.dumps(
-        {
-            "person_id": int(person_id),
-            "thread_ids": [s.strip() for s in thread_ids if s.strip()],
-            "summary_datetimes": [s.strip() for s in summary_datetimes if s.strip()],
-            "prompt_version": version or prompt_version(),
-            "backend": (backend or "").strip().lower(),
-        },
-        sort_keys=True,
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
 def lane_summary_fingerprint(
     *,
     lane_id: int,

@@ -20,6 +20,14 @@ def infra_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def premium_root() -> Path:
+    """Optional paid add-on package directory (sibling ``fivelanes-premium/`` by default)."""
+    override = (os.getenv("FIVELANES_PREMIUM_ROOT") or "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return infra_root() / "fivelanes-premium"
+
+
 def _data_root_from_env() -> Path:
     """Resolve data root from the current environment (before or after ``load_env``)."""
     override = (os.getenv("FIVELANES_DATA_ROOT") or "").strip()

@@ -1,13 +1,19 @@
 """
 SQLite storage.
 
-**``timeline_entries``** — one row per Gmail message from expanded threads; includes ``thread_id``
-for grouping and ``fetch_oauth_account_id`` for which token was used to fetch.
+**``thread_tracking``** — one row per Fivelanes inbox thread: ``inbox_thread_id`` (snooze/remove/dashboard
+key), ``gmail_inbox_thread_id`` (Cc/Bcc: real inbox Gmail ``threadId`` when ``inbox_thread_id`` is
+``rfc:…``), ``source_email`` (envelope **From** = which of your addresses delivered to the inbox),
+``snoozed`` (0 active / 1 snoozed / 2 removed), ``has_plan``, ``inner_rfc_message_id``,
+``resolved_oauth_account_id``, ``resolution_error``, timestamps. Snooze and removal always use
+``inbox_thread_id``; they are independent of which mailbox supplied ``timeline_entries.source_id``.
 
-**``thread_tracking``** — one row per Fivelanes inbox thread: ``inbox_thread_id``,
-``source_email`` (envelope **From** = which of your addresses delivered to the inbox),
-``snoozed`` (0/1/2), ``has_plan`` (0/1 — at least one row in ``thread_plans``),
-``inner_rfc_message_id``, ``resolved_oauth_account_id``, ``resolution_error``, timestamps.
+**``timeline_entries``** — one row per message in a resolved conversation. ``thread_id`` matches
+``thread_tracking.inbox_thread_id`` (inbox tracking key for UI/pipeline grouping).
+``source_id`` is the Gmail message id from the mailbox thread where the conversation lives
+(resolved via RFC Message-ID on the forwarder's OAuth account), **not** from Fivelanes inbox
+forward/cc shell copies. ``fetch_oauth_account_id`` records which token was used to fetch the body.
+See README § "Thread identity: inbox tracking vs timeline messages".
 
 **``meetings``** — calendar events from ``out/availability_calendar_latest.json``
 (``calendar_events_index``), refreshed on each availability export.
@@ -23,10 +29,6 @@ for grouping and ``fetch_oauth_account_id`` for which token was used to fetch.
 **``lanes``** / **``lane_threads``** — user-defined lanes and inbox thread membership.
 
 **``lane_summaries``** — LLM roll-up briefs for all threads assigned to a lane.
-
-**``people``** / **``person_threads``** — user-defined people and inbox thread assignment.
-
-**``person_summaries``** — LLM roll-up briefs for all threads assigned to a person.
 
 **``thread_plans``** — user-defined next steps tied to an inbox thread (action, type, optional deadline).
 
@@ -55,8 +57,6 @@ def ensure_database_schema(db_path: str) -> None:
         _ensure_meeting_preps_schema(conn)
         _ensure_lanes_schema(conn)
         _ensure_lane_summaries_schema(conn)
-        _ensure_people_schema(conn)
-        _ensure_person_summaries_schema(conn)
         _ensure_thread_plans_schema(conn)
         _ensure_dismissed_todo_plans_schema(conn)
         _ensure_claude_outputs_schema(conn)
@@ -117,6 +117,7 @@ def _dedupe_thread_tracking_rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[st
             _sn = 0
         normalized = {
             "inbox_thread_id": inbox_tid,
+            "gmail_inbox_thread_id": _normalize_field(row.get("gmail_inbox_thread_id")),
             "source_email": _normalize_field(row.get("source_email")),
             "snoozed": _sn,
             "inner_rfc_message_id": _normalize_field(row.get("inner_rfc_message_id")),
@@ -124,6 +125,7 @@ def _dedupe_thread_tracking_rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[st
                 row.get("resolved_oauth_account_id")
             ),
             "resolution_error": _normalize_field(row.get("resolution_error")),
+            "inbox_delivery_kind": _normalize_field(row.get("inbox_delivery_kind")),
             "created_at": _normalize_field(row.get("created_at")),
             "updated_at": _normalize_field(row.get("updated_at")),
         }
@@ -136,6 +138,13 @@ def _dedupe_thread_tracking_rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[st
             by_thread[tid] = normalized
             order.append(tid)
         elif normalized["updated_at"] > by_thread[tid]["updated_at"]:
+            prev = by_thread[tid]
+            if not normalized["inbox_delivery_kind"]:
+                normalized["inbox_delivery_kind"] = prev.get("inbox_delivery_kind", "")
+            if not normalized["resolved_oauth_account_id"]:
+                normalized["resolved_oauth_account_id"] = prev.get(
+                    "resolved_oauth_account_id", ""
+                )
             by_thread[tid] = normalized
 
     return [by_thread[tid] for tid in order]
@@ -815,315 +824,6 @@ def load_all_lane_summaries(db_path: str) -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def _ensure_people_schema(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS people (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS person_threads (
-            person_id INTEGER NOT NULL,
-            inbox_thread_id TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            PRIMARY KEY (person_id, inbox_thread_id),
-            FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
-        )
-        """
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_person_threads_inbox_thread_id "
-        "ON person_threads(inbox_thread_id)"
-    )
-
-
-def create_person(db_path: str, *, name: str) -> Dict[str, Any]:
-    """Insert a person and return its row."""
-    label = _normalize_field(name)
-    if not label:
-        raise ValueError("missing_person_name")
-    now = datetime.now(timezone.utc).isoformat()
-    db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
-        _ensure_people_schema(conn)
-        cur = conn.execute(
-            "INSERT INTO people (name, created_at, updated_at) VALUES (?, ?, ?)",
-            (label, now, now),
-        )
-        person_id = int(cur.lastrowid or 0)
-        conn.commit()
-    return {"id": person_id, "name": label, "created_at": now, "updated_at": now}
-
-
-def add_thread_to_person(db_path: str, *, person_id: int, inbox_thread_id: str) -> bool:
-    """Add a thread to a person. Returns False if person missing."""
-    tid = _normalize_field(inbox_thread_id)
-    if not tid or person_id <= 0:
-        return False
-    now = datetime.now(timezone.utc).isoformat()
-    db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
-        _ensure_people_schema(conn)
-        row = conn.execute("SELECT id FROM people WHERE id = ?", (person_id,)).fetchone()
-        if not row:
-            return False
-        conn.execute(
-            """
-            INSERT INTO person_threads (person_id, inbox_thread_id, created_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(person_id, inbox_thread_id) DO NOTHING
-            """,
-            (person_id, tid, now),
-        )
-        conn.execute(
-            "UPDATE people SET updated_at = ? WHERE id = ?",
-            (now, person_id),
-        )
-        conn.commit()
-    return True
-
-
-def remove_thread_from_person(db_path: str, *, person_id: int, inbox_thread_id: str) -> bool:
-    """Remove a thread from a person. Returns False if person missing."""
-    tid = _normalize_field(inbox_thread_id)
-    if not tid or person_id <= 0:
-        return False
-    now = datetime.now(timezone.utc).isoformat()
-    db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
-        _ensure_people_schema(conn)
-        row = conn.execute("SELECT id FROM people WHERE id = ?", (person_id,)).fetchone()
-        if not row:
-            return False
-        conn.execute(
-            "DELETE FROM person_threads WHERE person_id = ? AND inbox_thread_id = ?",
-            (person_id, tid),
-        )
-        conn.execute(
-            "UPDATE people SET updated_at = ? WHERE id = ?",
-            (now, person_id),
-        )
-        conn.commit()
-    return True
-
-
-def load_all_people(db_path: str) -> List[Dict[str, Any]]:
-    """Return all people ordered by name."""
-    db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
-        _ensure_people_schema(conn)
-        rows = conn.execute(
-            "SELECT id, name, created_at, updated_at FROM people ORDER BY name COLLATE NOCASE"
-        ).fetchall()
-    return [
-        {
-            "id": int(r[0]),
-            "name": _normalize_field(r[1]),
-            "created_at": _normalize_field(r[2]),
-            "updated_at": _normalize_field(r[3]),
-        }
-        for r in rows
-    ]
-
-
-def load_person_thread_memberships(db_path: str) -> Dict[str, List[str]]:
-    """Return ``person_id`` → ordered inbox thread ids."""
-    db_file = Path(db_path)
-    out: Dict[str, List[str]] = {}
-    with sqlite3.connect(db_file) as conn:
-        _ensure_people_schema(conn)
-        rows = conn.execute(
-            """
-            SELECT person_id, inbox_thread_id
-            FROM person_threads
-            ORDER BY person_id, created_at
-            """
-        ).fetchall()
-    for person_id, thread_id in rows:
-        key = str(int(person_id))
-        tid = _normalize_field(thread_id)
-        if not tid:
-            continue
-        bucket = out.setdefault(key, [])
-        if tid not in bucket:
-            bucket.append(tid)
-    return out
-
-
-def load_person_thread_summaries(
-    db_path: str,
-    *,
-    person_name: str | None = None,
-    person_id: int | None = None,
-) -> tuple[Dict[str, Any] | None, List[Dict[str, Any]]]:
-    """
-    Return ``(person_row, summaries)`` for a person.
-
-    ``summaries`` are dashboard-shaped thread summary dicts for threads assigned to the person,
-    sorted by ``datetime`` ascending (oldest first). Threads without a summary are omitted.
-    """
-    people = load_all_people(db_path)
-    person: Dict[str, Any] | None = None
-    if person_id is not None:
-        person = next((p for p in people if int(p.get("id") or 0) == int(person_id)), None)
-    elif person_name:
-        key = (person_name or "").strip().casefold()
-        person = next((p for p in people if (p.get("name") or "").strip().casefold() == key), None)
-    if not person:
-        return None, []
-
-    memberships = load_person_thread_memberships(db_path)
-    thread_ids = memberships.get(str(int(person["id"])), [])
-    if not thread_ids:
-        return person, []
-
-    bundle = build_summaries_bundle(db_path)
-    by_tid: Dict[str, Dict[str, Any]] = {}
-    for row in bundle.get("summary") or []:
-        tid = _normalize_field(row.get("thread_id"))
-        if tid and tid not in by_tid:
-            by_tid[tid] = row
-
-    summaries: List[Dict[str, Any]] = []
-    for tid in thread_ids:
-        row = by_tid.get(tid)
-        if row:
-            summaries.append(row)
-    summaries.sort(key=lambda s: _parse_iso_datetime(aggregate_thread_chronological_anchor(db_path, s)))
-    return person, summaries
-
-
-def normalize_person_summary_payload(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract storable person-summary fields from an API/LLM response."""
-    out: Dict[str, Any] = {}
-    for key in _AGGREGATE_SUMMARY_FIELDS:
-        val = raw.get(key)
-        if key in ("highlights", "current_priorities", "waiting_on_others"):
-            if isinstance(val, list):
-                out[key] = [str(x).strip() for x in val if str(x).strip()]
-            else:
-                out[key] = []
-        else:
-            out[key] = _normalize_field(val)
-    return out
-
-
-def _ensure_person_summaries_schema(conn: sqlite3.Connection) -> None:
-    _ensure_people_schema(conn)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS person_summaries (
-            person_id INTEGER PRIMARY KEY,
-            summary_json TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
-        )
-        """
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_person_summaries_updated_at "
-        "ON person_summaries(updated_at)"
-    )
-
-
-def save_person_summary(
-    db_path: str,
-    *,
-    person_id: int,
-    summary: Dict[str, Any],
-) -> str:
-    """
-    Persist a roll-up summary for one person.
-
-    Returns ``updated_at`` (UTC ISO).
-    """
-    if person_id <= 0:
-        raise ValueError("person_id is required")
-    updated_at = datetime.now(timezone.utc).isoformat()
-    raw = summary if isinstance(summary, dict) else {}
-    payload = normalize_person_summary_payload(raw)
-    fp = _normalize_field(raw.get("input_fingerprint"))
-    if fp:
-        payload["input_fingerprint"] = fp
-    db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
-        _ensure_person_summaries_schema(conn)
-        row = conn.execute("SELECT id FROM people WHERE id = ?", (person_id,)).fetchone()
-        if not row:
-            raise ValueError("person_not_found")
-        conn.execute(
-            """
-            INSERT INTO person_summaries (person_id, summary_json, updated_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(person_id) DO UPDATE SET
-                summary_json = excluded.summary_json,
-                updated_at = excluded.updated_at
-            """,
-            (person_id, json.dumps(payload, ensure_ascii=False), updated_at),
-        )
-        conn.execute(
-            "UPDATE people SET updated_at = ? WHERE id = ?",
-            (updated_at, person_id),
-        )
-        conn.commit()
-    return updated_at
-
-
-def load_person_summary(db_path: str, *, person_id: int) -> Optional[Dict[str, Any]]:
-    """Return parsed person summary JSON, or ``None``."""
-    if person_id <= 0:
-        return None
-    db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
-        _ensure_person_summaries_schema(conn)
-        row = conn.execute(
-            "SELECT summary_json, updated_at FROM person_summaries WHERE person_id = ?",
-            (person_id,),
-        ).fetchone()
-    if not row or not row[0]:
-        return None
-    try:
-        loaded = json.loads(row[0])
-        out = normalize_person_summary_payload(loaded) if isinstance(loaded, dict) else {}
-        out["updated_at"] = _normalize_field(row[1])
-        if isinstance(loaded, dict) and loaded.get("input_fingerprint"):
-            out["input_fingerprint"] = _normalize_field(loaded.get("input_fingerprint"))
-        return out
-    except json.JSONDecodeError:
-        return None
-
-
-def load_all_person_summaries(db_path: str) -> Dict[str, Dict[str, Any]]:
-    """Return ``person_id`` → summary payload (includes ``updated_at``)."""
-    db_file = Path(db_path)
-    out: Dict[str, Dict[str, Any]] = {}
-    with sqlite3.connect(db_file) as conn:
-        _ensure_person_summaries_schema(conn)
-        rows = conn.execute(
-            "SELECT person_id, summary_json, updated_at FROM person_summaries ORDER BY updated_at DESC"
-        ).fetchall()
-    for person_id, summary_json, updated_at in rows:
-        key = str(int(person_id))
-        loaded: Dict[str, Any] = {}
-        try:
-            parsed = json.loads(summary_json or "{}")
-            loaded = parsed if isinstance(parsed, dict) else {}
-            payload = normalize_person_summary_payload(loaded)
-        except json.JSONDecodeError:
-            payload = {}
-        payload["updated_at"] = _normalize_field(updated_at)
-        if loaded.get("input_fingerprint"):
-            payload["input_fingerprint"] = _normalize_field(loaded.get("input_fingerprint"))
-        out[key] = payload
-    return out
-
-
 TODO_PLAN_THREAD_PREFIX = "todo:"
 
 
@@ -1463,7 +1163,7 @@ def untrack_todo_plan_inbox_thread(db_path: str, *, inbox_thread_id: str) -> boo
     ``thread_plans`` rows are kept — Todo emails should exist only as plans.
     """
     tid = _normalize_field(inbox_thread_id)
-    if not tid or tid.startswith("text:"):
+    if not tid or tid.startswith("text:") or tid.startswith("slack:"):
         return False
     now = datetime.now(timezone.utc).isoformat()
     db_file = Path(db_path)
@@ -1474,7 +1174,6 @@ def untrack_todo_plan_inbox_thread(db_path: str, *, inbox_thread_id: str) -> boo
         _ensure_thread_summaries_schema(conn)
         _ensure_thread_draft_replies_schema(conn)
         _ensure_lanes_schema(conn)
-        _ensure_people_schema(conn)
         conn.execute(
             "DELETE FROM timeline_entries WHERE COALESCE(thread_id, '') = ?", (tid,)
         )
@@ -1485,7 +1184,6 @@ def untrack_todo_plan_inbox_thread(db_path: str, *, inbox_thread_id: str) -> boo
         conn.execute("DELETE FROM thread_summaries WHERE thread_id = ?", (tid,))
         conn.execute("DELETE FROM thread_draft_replies WHERE thread_id = ?", (tid,))
         conn.execute("DELETE FROM lane_threads WHERE inbox_thread_id = ?", (tid,))
-        conn.execute("DELETE FROM person_threads WHERE inbox_thread_id = ?", (tid,))
         conn.execute(
             """
             INSERT INTO thread_tracking (
@@ -1723,6 +1421,11 @@ def _ensure_thread_tracking_schema(conn: sqlite3.Connection) -> None:
             )
             """
         )
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(thread_tracking)").fetchall()}
+    if "gmail_inbox_thread_id" not in cols:
+        conn.execute(
+            "ALTER TABLE thread_tracking ADD COLUMN gmail_inbox_thread_id TEXT"
+        )
     cols = [row[1] for row in conn.execute("PRAGMA table_info(thread_tracking)").fetchall()]
     if "participant_email" in cols:
         conn.execute(
@@ -1861,6 +1564,36 @@ def upsert_timeline_entries(db_path: str, rows: List[Dict[str, Any]]) -> int:
     return len(deduped_rows)
 
 
+def prune_timeline_entries_for_thread(
+    db_path: str, thread_id: str, keep_source_ids: set[str]
+) -> int:
+    """Delete timeline rows for ``thread_id`` whose ``source_id`` is not in ``keep_source_ids``."""
+    tid = _normalize_field(thread_id)
+    if not tid:
+        return 0
+    keep = sorted({str(x).strip() for x in keep_source_ids if str(x).strip()})
+    db_file = Path(db_path)
+    with sqlite3.connect(db_file) as conn:
+        _ensure_timeline_schema(conn)
+        if keep:
+            placeholders = ",".join("?" for _ in keep)
+            cur = conn.execute(
+                f"""
+                DELETE FROM timeline_entries
+                WHERE thread_id = ? AND COALESCE(TRIM(source_id), '') != ''
+                  AND source_id NOT IN ({placeholders})
+                """,
+                [tid, *keep],
+            )
+        else:
+            cur = conn.execute(
+                "DELETE FROM timeline_entries WHERE thread_id = ?",
+                (tid,),
+            )
+        conn.commit()
+        return int(cur.rowcount or 0)
+
+
 def upsert_thread_tracking(db_path: str, rows: List[Dict[str, Any]]) -> int:
     """
     Insert or update rows in ``thread_tracking`` by ``inbox_thread_id``.
@@ -1876,12 +1609,16 @@ def upsert_thread_tracking(db_path: str, rows: List[Dict[str, Any]]) -> int:
             conn.executemany(
                 """
                 INSERT INTO thread_tracking (
-                    inbox_thread_id, source_email, snoozed, inner_rfc_message_id,
-                    resolved_oauth_account_id, resolution_error, inbox_delivery_kind,
-                    created_at, updated_at
+                    inbox_thread_id, gmail_inbox_thread_id, source_email, snoozed,
+                    inner_rfc_message_id, resolved_oauth_account_id, resolution_error,
+                    inbox_delivery_kind, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(inbox_thread_id) DO UPDATE SET
+                    gmail_inbox_thread_id = COALESCE(
+                        NULLIF(excluded.gmail_inbox_thread_id, ''),
+                        thread_tracking.gmail_inbox_thread_id
+                    ),
                     source_email = excluded.source_email,
                     -- Preserve persisted snooze/plan state during refresh upserts.
                     -- Explicit changes are applied via API endpoints.
@@ -1891,7 +1628,10 @@ def upsert_thread_tracking(db_path: str, rows: List[Dict[str, Any]]) -> int:
                         NULLIF(excluded.inner_rfc_message_id, ''),
                         thread_tracking.inner_rfc_message_id
                     ),
-                    resolved_oauth_account_id = excluded.resolved_oauth_account_id,
+                    resolved_oauth_account_id = COALESCE(
+                        NULLIF(excluded.resolved_oauth_account_id, ''),
+                        thread_tracking.resolved_oauth_account_id
+                    ),
                     resolution_error = excluded.resolution_error,
                     inbox_delivery_kind = COALESCE(
                         NULLIF(excluded.inbox_delivery_kind, ''),
@@ -1903,6 +1643,7 @@ def upsert_thread_tracking(db_path: str, rows: List[Dict[str, Any]]) -> int:
                 [
                     (
                         row["inbox_thread_id"],
+                        row.get("gmail_inbox_thread_id", ""),
                         row["source_email"],
                         row.get("snoozed", 0),
                         row["inner_rfc_message_id"],
@@ -1936,8 +1677,45 @@ def fetch_removed_inbox_thread_ids(db_path: str) -> set[str]:
     return out
 
 
+def retire_legacy_gmail_forward_tracking(
+    db_path: str, gmail_inbox_thread_id: str
+) -> bool:
+    """
+    Drop a legacy ``forward_to`` row keyed by inbox Gmail ``threadId`` once RFC rows exist.
+
+    Does not remap timeline data (avoids dragging incorrectly merged messages onto one RFC).
+    """
+    tid = _normalize_field(gmail_inbox_thread_id)
+    if not tid or tid.startswith(_RFC_THREAD_PREFIX):
+        return False
+    with sqlite3.connect(db_path) as conn:
+        _ensure_thread_tracking_schema(conn)
+        row = conn.execute(
+            """
+            SELECT inbox_delivery_kind FROM thread_tracking
+            WHERE inbox_thread_id = ?
+            """,
+            (tid,),
+        ).fetchone()
+        if not row or _normalize_field(row[0]) != "forward_to":
+            return False
+        (rfc_count,) = conn.execute(
+            """
+            SELECT COUNT(*) FROM thread_tracking
+            WHERE gmail_inbox_thread_id = ?
+              AND inbox_thread_id LIKE ?
+            """,
+            (tid, f"{_RFC_THREAD_PREFIX}%"),
+        ).fetchone()
+        if int(rfc_count or 0) < 1:
+            return False
+        conn.execute("DELETE FROM thread_tracking WHERE inbox_thread_id = ?", (tid,))
+        conn.commit()
+    return True
+
+
 def remap_dashboard_thread_id(db_path: str, from_tid: str, to_tid: str) -> None:
-    """Point timeline, Claude outputs, lanes, people, and drafts at one dashboard thread id."""
+    """Point timeline, Claude outputs, lanes, and drafts at one dashboard thread id."""
     src = _normalize_field(from_tid)
     dst = _normalize_field(to_tid)
     if not src or not dst or src == dst:
@@ -1950,12 +1728,23 @@ def remap_dashboard_thread_id(db_path: str, from_tid: str, to_tid: str) -> None:
         _ensure_claude_outputs_schema(conn)
         _ensure_thread_tracking_schema(conn)
         _ensure_lanes_schema(conn)
-        _ensure_people_schema(conn)
         _ensure_thread_plans_schema(conn)
         _ensure_thread_draft_replies_schema(conn)
         conn.execute(
             "UPDATE timeline_entries SET thread_id = ? WHERE thread_id = ?",
             (dst, src),
+        )
+        conn.execute(
+            """
+            DELETE FROM claude_message_outputs
+            WHERE COALESCE(thread_id, '') = ?
+              AND COALESCE(TRIM(source_id), '') != ''
+              AND source_id IN (
+                  SELECT source_id FROM claude_message_outputs
+                  WHERE COALESCE(thread_id, '') = ?
+              )
+            """,
+            (src, dst),
         )
         conn.execute(
             "UPDATE claude_message_outputs SET thread_id = ? WHERE thread_id = ?",
@@ -1972,16 +1761,6 @@ def remap_dashboard_thread_id(db_path: str, from_tid: str, to_tid: str) -> None:
             (dst, dst),
         )
         conn.execute(
-            "UPDATE person_threads SET inbox_thread_id = ? WHERE inbox_thread_id = ?",
-            (dst, src),
-        )
-        conn.execute(
-            "DELETE FROM person_threads WHERE inbox_thread_id = ? AND rowid NOT IN ("
-            "SELECT MIN(rowid) FROM person_threads WHERE inbox_thread_id = ? GROUP BY person_id"
-            ")",
-            (dst, dst),
-        )
-        conn.execute(
             "UPDATE thread_draft_replies SET thread_id = ? WHERE thread_id = ?",
             (dst, src),
         )
@@ -1993,6 +1772,39 @@ def remap_dashboard_thread_id(db_path: str, from_tid: str, to_tid: str) -> None:
             "DELETE FROM thread_tracking WHERE inbox_thread_id = ?", (src,)
         )
         conn.commit()
+
+
+_RFC_THREAD_PREFIX = "rfc:"
+
+
+def _is_rfc_thread_id(thread_id: str) -> bool:
+    return str(thread_id or "").strip().startswith(_RFC_THREAD_PREFIX)
+
+
+def _cc_bcc_gmail_vs_rfc_pair(
+    group: List[Dict[str, Any]],
+) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    """
+    Return ``(gmail_inbox_row, rfc_canonical_row)`` for Cc/Bcc migration leftovers.
+
+    Before RFC-prefixed tracking keys, inbox seeds used the Fivelanes Gmail thread id;
+    the canonical row keeps that id in ``gmail_inbox_thread_id``.
+    """
+    if len(group) != 2:
+        return None
+    rfc_rows = [r for r in group if _is_rfc_thread_id(r.get("inbox_thread_id"))]
+    gmail_rows = [r for r in group if not _is_rfc_thread_id(r.get("inbox_thread_id"))]
+    if len(rfc_rows) != 1 or len(gmail_rows) != 1:
+        return None
+    rfc_row, gmail_row = rfc_rows[0], gmail_rows[0]
+    kind = _normalize_field(gmail_row.get("inbox_delivery_kind"))
+    if kind not in ("cc_bcc", "cc_bcc_only"):
+        return None
+    gmail_tid = _normalize_field(gmail_row.get("inbox_thread_id"))
+    rfc_gmail = _normalize_field(rfc_row.get("gmail_inbox_thread_id"))
+    if not gmail_tid or rfc_gmail != gmail_tid:
+        return None
+    return gmail_row, rfc_row
 
 
 def _inbox_seed_vs_discovered_pair(
@@ -2039,7 +1851,7 @@ def collapse_thread_tracking_duplicates_by_inner_rfc(db_path: str) -> int:
             by_inner.setdefault(inner, []).append(row)
     collapsed = 0
     for group in by_inner.values():
-        pair = _inbox_seed_vs_discovered_pair(group)
+        pair = _inbox_seed_vs_discovered_pair(group) or _cc_bcc_gmail_vs_rfc_pair(group)
         if not pair:
             continue
         discovered, seed = pair
@@ -2050,7 +1862,48 @@ def collapse_thread_tracking_duplicates_by_inner_rfc(db_path: str) -> int:
         if from_tid and to_tid and from_tid != to_tid:
             remap_dashboard_thread_id(db_path, from_tid, to_tid)
             collapsed += 1
+    if collapsed:
+        prune_inbox_shell_duplicate_entries(db_path)
     return collapsed
+
+
+def prune_inbox_shell_duplicate_entries(db_path: str) -> Tuple[int, int]:
+    """
+    Drop Fivelanes-inbox Bcc/Cc shell copies (``source_id`` = ``gmail_inbox_thread_id``).
+
+    Returns ``(timeline_deleted, claude_outputs_deleted)``.
+    """
+    shell_ids: set[str] = set()
+    for row in fetch_thread_tracking_rows(db_path):
+        if not _is_rfc_thread_id(row.get("inbox_thread_id")):
+            continue
+        gid = _normalize_field(row.get("gmail_inbox_thread_id"))
+        if gid:
+            shell_ids.add(gid)
+    if not shell_ids:
+        return 0, 0
+
+    placeholders = ",".join("?" for _ in shell_ids)
+    params = sorted(shell_ids)
+    with sqlite3.connect(db_path) as conn:
+        _ensure_timeline_schema(conn)
+        _ensure_claude_outputs_schema(conn)
+        cur_t = conn.execute(
+            f"""
+            DELETE FROM timeline_entries
+            WHERE source_id IN ({placeholders})
+            """,
+            params,
+        )
+        cur_c = conn.execute(
+            f"""
+            DELETE FROM claude_message_outputs
+            WHERE source_id IN ({placeholders})
+            """,
+            params,
+        )
+        conn.commit()
+        return int(cur_t.rowcount or 0), int(cur_c.rowcount or 0)
 
 
 def fetch_thread_tracking_rows(db_path: str) -> List[Dict[str, Any]]:
@@ -2060,7 +1913,7 @@ def fetch_thread_tracking_rows(db_path: str) -> List[Dict[str, Any]]:
         _ensure_thread_tracking_schema(conn)
         cur = conn.execute(
             """
-            SELECT inbox_thread_id, source_email, snoozed, has_plan,
+            SELECT inbox_thread_id, gmail_inbox_thread_id, source_email, snoozed, has_plan,
                    inner_rfc_message_id, resolved_oauth_account_id, resolution_error,
                    inbox_delivery_kind, created_at, updated_at
             FROM thread_tracking
@@ -2072,15 +1925,16 @@ def fetch_thread_tracking_rows(db_path: str) -> List[Dict[str, Any]]:
             out.append(
                 {
                     "inbox_thread_id": r[0] or "",
-                    "source_email": r[1] or "",
-                    "snoozed": int(r[2] or 0),
-                    "has_plan": int(r[3] or 0),
-                    "inner_rfc_message_id": r[4] or "",
-                    "resolved_oauth_account_id": r[5] or "",
-                    "resolution_error": r[6] or "",
-                    "inbox_delivery_kind": r[7] or "",
-                    "created_at": r[8] or "",
-                    "updated_at": r[9] or "",
+                    "gmail_inbox_thread_id": r[1] or "",
+                    "source_email": r[2] or "",
+                    "snoozed": int(r[3] or 0),
+                    "has_plan": int(r[4] or 0),
+                    "inner_rfc_message_id": r[5] or "",
+                    "resolved_oauth_account_id": r[6] or "",
+                    "resolution_error": r[7] or "",
+                    "inbox_delivery_kind": r[8] or "",
+                    "created_at": r[9] or "",
+                    "updated_at": r[10] or "",
                 }
             )
         return out
@@ -2329,7 +2183,7 @@ def load_processed_cleaned_for_thread(
 
 
 def aggregate_thread_chronological_anchor(db_path: str, summary: Dict[str, Any]) -> str:
-    """Earliest email datetime in a thread, used to order threads for lane/person summaries."""
+    """Earliest email datetime in a thread, used to order threads for lane summaries."""
     tid = _normalize_field(summary.get("thread_id"))
     if tid:
         cleaned = load_processed_cleaned_for_thread(db_path, tid)
@@ -2707,18 +2561,31 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
     """
     Dashboard summaries payload: latest message rows, snooze overrides, drafts, meeting preps.
     """
+    from services.slack.tracking import (
+        SLACK_THREAD_PREFIX,
+        fetch_tracked_conversation_keys as fetch_tracked_slack_keys,
+        slack_inbox_thread_id as _slack_inbox_thread_id,
+    )
     from services.texts.tracking import (
         TEXT_THREAD_PREFIX,
         fetch_tracked_conversation_keys,
         text_inbox_thread_id as _text_inbox_thread_id,
     )
-    from services.thread_snooze import refresh_text_threads_auto_unsnooze, snooze_map
+    from services.thread_snooze import (
+        refresh_slack_threads_auto_unsnooze,
+        refresh_text_threads_auto_unsnooze,
+        snooze_map,
+    )
 
     refresh_text_threads_auto_unsnooze(db_path)
+    refresh_slack_threads_auto_unsnooze(db_path)
     from utils.thread_summary_normalize import finalize_thread_summary
 
     tracked_text_thread_ids = {
         _text_inbox_thread_id(k) for k in fetch_tracked_conversation_keys(db_path)
+    }
+    tracked_slack_thread_ids = {
+        _slack_inbox_thread_id(k) for k in fetch_tracked_slack_keys(db_path)
     }
     thread_summary_cache = load_all_thread_summaries_map(db_path)
     finalized_by_thread: Dict[str, Dict[str, Any]] = {}
@@ -2740,6 +2607,8 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
     for raw in rows:
         tid = _normalize_field(raw.get("thread_id"))
         if tid.startswith(TEXT_THREAD_PREFIX) and tid not in tracked_text_thread_ids:
+            continue
+        if tid.startswith(SLACK_THREAD_PREFIX) and tid not in tracked_slack_thread_ids:
             continue
         fallback_summary = _parse_thread_summary_json(raw.get("thread_summary_json"))
         thread_summary = finalized_for_thread(tid, fallback_summary) if tid else fallback_summary
@@ -2806,20 +2675,18 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
         "lanes": load_all_lanes(db_path),
         "lane_threads": load_lane_thread_memberships(db_path),
         "lane_summaries": load_all_lane_summaries(db_path),
-        "people": load_all_people(db_path),
-        "person_threads": load_person_thread_memberships(db_path),
-        "person_summaries": load_all_person_summaries(db_path),
         "thread_plans": load_all_thread_plans(db_path),
     }
+    from services.email.bundle import append_unsynced_email_threads_to_bundle
+    from services.slack.bundle import append_unsynced_slack_threads_to_bundle
     from services.texts.bundle import append_unsynced_text_threads_to_bundle
+    from services.email.config import inbox_lookback_days_from_env
+
+    lookback_days = max(1, inbox_lookback_days_from_env())
 
     append_unsynced_text_threads_to_bundle(db_path, bundle)
-
-    lookback_raw = (os.getenv("FIVELANES_LOOKBACK_DAYS") or "14").strip()
-    try:
-        lookback_days = max(1, int(lookback_raw))
-    except ValueError:
-        lookback_days = 14
+    append_unsynced_slack_threads_to_bundle(db_path, bundle)
+    append_unsynced_email_threads_to_bundle(db_path, bundle, lookback_days=lookback_days)
     bundle["pending_message_counts"] = pending_message_counts_by_thread(
         db_path,
         lookback_days=lookback_days,
@@ -2865,6 +2732,7 @@ def save_claude_run_outputs(
     generated_at: str,
     cleaned: List[Dict[str, Any]],
     per_message: List[Dict[str, Any]],
+    replace_run_stamp: bool = True,
 ) -> None:
     """
     Persist newly segmented messages to SQLite (one successful row per message).
@@ -2872,6 +2740,9 @@ def save_claude_run_outputs(
     Skips insert when a successful row already exists for ``(thread_id, source_id)``.
     Replaces at most one prior successful row when upgrading placeholders or image stubs.
     Rows with only ``api_error`` set do not block a later successful insert.
+
+    When ``replace_run_stamp`` is False, existing rows for this ``run_stamp`` are kept
+    (for incremental per-thread writes within one pipeline run).
     """
     db_file = Path(db_path)
     summary_by_key: Dict[tuple[str, str, str], Dict[str, Any]] = {}
@@ -2887,7 +2758,8 @@ def save_claude_run_outputs(
     aggregate_json = "{}"
     with sqlite3.connect(db_file) as conn:
         _ensure_claude_outputs_schema(conn)
-        conn.execute("DELETE FROM claude_message_outputs WHERE run_stamp = ?", (run_stamp,))
+        if replace_run_stamp:
+            conn.execute("DELETE FROM claude_message_outputs WHERE run_stamp = ?", (run_stamp,))
         existing_content = _claude_outputs_latest_success_content_by_pair(conn)
         cleaned_to_insert: List[Dict[str, Any]] = []
         for row in cleaned:

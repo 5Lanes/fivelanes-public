@@ -26,6 +26,17 @@ Typical data-directory layout:
 
 Paths resolve through [`utils/runtime_paths.py`](utils/runtime_paths.py). Override individual paths in your data `.env` (`FIVELANES_PROMPTS_PATH`, `TEXTS_CONVERSATIONS_DIR`, `DATABASE_NAME`, etc.).
 
+## Features
+
+The dashboard is split into a base open-source layer and optional premium capabilities (see [`utils/features.py`](utils/features.py)).
+
+| Tier | Capabilities |
+|------|----------------|
+| **Base** | Threads, dashboard, meetings, plans, lanes, meeting prep, email-reply drafting, pipeline |
+| **Premium** | Text threads (iMessage/SMS exports), calendar availability export and open-slots UI, Slack (upcoming) |
+
+Premium features are disabled in the public repo unless unlocked (e.g. via a premium add-on or `FIVELANES_PREMIUM=1` for local development). The README documents the full product; runtime gating lives in code.
+
 ## Input sources
 
 Fivelanes accepts data through four channels. The scheduled pipeline (`fivelanes.main` / dashboard scheduler) pulls email and calendar automatically; text threads are file-based and must be selected in the dashboard before they appear on Threads.
@@ -33,9 +44,9 @@ Fivelanes accepts data through four channels. The scheduled pipeline (`fivelanes
 | Channel | How data arrives | Where it lands | Processing |
 |---------|------------------|----------------|------------|
 | **Email** | Mail to `SOURCE_ACCOUNT` (forward, Cc/Bcc, or direct To) | Gmail API → `thread_tracking`, `timeline_entries` | Segmentation + LLM summary (same as inbox pipeline) |
-| **Text** | JSON files in your data directory's `conversations/` (iMessage export shape) | `thread_tracking` (`text:` prefix) when tracked | Summary only (no email-style segmentation) |
-| **Calendar** | Google Calendar OAuth (connected accounts) | `$DATA_ROOT/out/availability_calendar_latest.json`, `meetings` table | Availability export; context for summaries and meeting prep |
-| **Dashboard** | HTTP POST to `/api/*` (tracking, plans, lanes, pipeline run, drafts) | `$DATA_ROOT/timeline.db` | User actions and on-demand LLM calls |
+| **Text** | JSON files in your data directory's `conversations/` (iMessage export shape) | `thread_tracking` (`text:` prefix) when tracked | Summary only (no email-style segmentation); **premium** |
+| **Calendar** | Google Calendar OAuth (connected accounts) | `$DATA_ROOT/out/availability_calendar_latest.json`, `meetings` table | Availability export, open-slots UI, scheduling context in summaries; **premium** |
+| **Dashboard** | HTTP POST to `/api/*` (tracking, plans, lanes, pipeline run, drafts, meeting prep, email reply) | `$DATA_ROOT/timeline.db` | User actions and on-demand LLM calls |
 
 ### Email
 
@@ -53,13 +64,13 @@ python -c "from services.email import populate_timeline; populate_timeline(lookb
 
 ### Text threads
 
-On-disk JSON under your data directory's `conversations/` folder (override with `TEXTS_CONVERSATIONS_DIR`) holds iMessage/SMS exports — one file per thread, filename stem = conversation key (e.g. `+15551234567.json`). Each file is a list of message objects with fields like `text`, `date`, `handle`, `is_from_me`, and `guid`.
+**Premium.** On-disk JSON under your data directory's `conversations/` folder (override with `TEXTS_CONVERSATIONS_DIR`) holds iMessage/SMS exports — one file per thread, filename stem = conversation key (e.g. `+15551234567.json`). Each file is a list of message objects with fields like `text`, `date`, `handle`, `is_from_me`, and `guid`.
 
 Fivelanes does not sync texts from a phone automatically. Export conversations externally, drop the JSON files into `$FIVELANES_DATA_ROOT/conversations/`, then open **Texts setup** (`/texts-setup`) to choose which threads to track. Tracked threads are registered in `thread_tracking` with `inbox_thread_id` `text:<key>` and merged into the Threads view. Summaries are generated via `/api/texts/summarize` or as part of `fivelanes.main`.
 
-### Calendar
+### Calendar and availability
 
-Google Calendar is read through the same OAuth tokens. After each pipeline run (unless `CALENDAR_AVAILABILITY_DISABLE=1`), events are exported to `$FIVELANES_DATA_ROOT/out/availability_calendar_latest.json` and synced into the `meetings` table. Optional scheduling rules in `$FIVELANES_DATA_ROOT/credentials/calendar_scheduling_rules.json` filter which calendars count and set buffers/timezone.
+**Premium.** Google Calendar is read through the same OAuth tokens. After each pipeline run (unless `CALENDAR_AVAILABILITY_DISABLE=1`), events are exported to `$FIVELANES_DATA_ROOT/out/availability_calendar_latest.json` and synced into the `meetings` table. The Threads page shows open slots from that export; thread summaries can use your calendar as scheduling context. Optional scheduling rules in `$FIVELANES_DATA_ROOT/credentials/calendar_scheduling_rules.json` filter which calendars count and set buffers/timezone.
 
 Run manually:
 
@@ -69,7 +80,7 @@ python scripts/pull_calendar_availability.py
 
 ### Dashboard and scheduler
 
-`dashboard_server.py` serves the UI and JSON API. Besides text-thread selection, the dashboard accepts snooze/remove on threads, lane and plan edits, meeting-prep and email-reply prompts (user intent → LLM), and manual pipeline runs (`POST /api/pipeline/run`).
+`dashboard_server.py` serves the UI and JSON API. Besides text-thread selection (premium), the dashboard accepts snooze/remove on threads, lane and plan edits, meeting-prep and email-reply prompts (user intent → LLM), and manual pipeline runs (`POST /api/pipeline/run`).
 
 The background scheduler (`utils/run_fivelanes_scheduler.py`, also started with the dashboard) runs the full cycle every `FIVELANES_INTERVAL_SEC` (default 15 minutes) during the active window (default 06:00–19:00 local; quiet hours 19:00–06:00 via `FIVELANES_QUIET_START_HOUR` / `FIVELANES_QUIET_END_HOUR` in `FIVELANES_SCHEDULER_TZ`).
 
@@ -140,10 +151,42 @@ Mail to/cc/bcc `SOURCE_ACCOUNT` is routed in [`services/email/inbox_process.py`]
 |-----------------|---------------------|
 | **To** `SOURCE_ACCOUNT` with subject `todo:` | Creates a standalone **Plan** (synthetic `todo:` id, not linked to a tracked thread). Marks the inbox Gmail thread removed; deleting the plan does not affect other threads. |
 | **Forward** to `SOURCE_ACCOUNT` | Tracks via inner RFC `Message-ID`, resolves the real thread in connected mailboxes, **drops** the forward-to-inbox shell from the timeline. |
-| **Cc/Bcc** `SOURCE_ACCOUNT` (inbox not in To) | Tracks via envelope RFC id, resolves the source mailbox thread, **keeps** the Cc/Bcc copy in the Fivelanes inbox in the timeline. |
+| **Cc/Bcc** `SOURCE_ACCOUNT` (inbox not in To) | Tracks via envelope RFC id, resolves the source mailbox thread for timeline content; inbox Cc/Bcc shell copies are not stored as separate timeline messages. |
 | **To** `SOURCE_ACCOUNT` directly (e.g. screenshot) | Pulls the inbox Gmail thread as the capture; OCR/vision on images; **subject line included** in prompts. |
 
 Gmail inbox search uses `(to:inbox OR cc:inbox OR bcc:inbox)` plus recipient checks on each message.
+
+### Thread identity: inbox tracking vs timeline messages
+
+Email threads use **two related ids**. Do not conflate them when changing ingestion, snooze, or the dashboard.
+
+| Layer | Table / field | What it is | Used for |
+|-------|----------------|------------|----------|
+| **Inbox tracking** | `thread_tracking.inbox_thread_id` | How this conversation was registered from the Fivelanes inbox (Gmail `threadId` on `SOURCE_ACCOUNT`, or `rfc:…` for Cc/Bcc) | Snooze, remove, plans, lanes, dashboard thread list |
+| **Inbox Gmail thread** | `thread_tracking.gmail_inbox_thread_id` | For Cc/Bcc only: the real Gmail `threadId` on the Fivelanes inbox account when `inbox_thread_id` is an RFC key | Peeking inbox deliveries, pruning inbox shell rows |
+| **Timeline grouping** | `timeline_entries.thread_id` | Same value as `inbox_thread_id` after expansion (`bind_timeline_rows_to_inbox_thread`) | Grouping messages in the UI and LLM pipeline per tracked thread |
+| **Timeline message key** | `timeline_entries.source_id` | Gmail **message** id from the mailbox thread where the conversation **lives** (resolved via RFC `Message-ID` on the forwarder's OAuth account) | Deduping messages, segmentation cache, image fetches |
+
+**Snooze and removal are unchanged by source-thread resolution.** They always target `thread_tracking.inbox_thread_id` (and the matching `timeline_entries.thread_id` / `claude_message_outputs.thread_id`). `thread_tracking.snoozed` is `0` active, `1` snoozed, `2` removed. The Fivelanes inbox delivery remains tracked even when message bodies are pulled from Personal, LHC, or another connected account.
+
+**Why `source_id` is not the inbox copy's message id:** The same physical email in Gmail has a different message id in each mailbox. A forward or Cc/Bcc to `SOURCE_ACCOUNT` gets one id in the Fivelanes inbox and another in the forwarder's sent/received thread. Fivelanes stores ids from the **source mailbox thread** (see `resolve_source_mailbox_thread` in [`services/email/thread_resolve.py`](services/email/thread_resolve.py) and `_try_expand_from_source_mailbox_thread` in [`services/email/inbox_process.py`](services/email/inbox_process.py)). Inbox forward/cc shell ids are irrelevant for `timeline_entries` and must not be used for deduplication.
+
+**End-to-end flow:**
+
+1. Inbox pull creates a `thread_tracking` row from the seed message (`build_tracking_row`).
+2. `expand_thread` resolves the conversation on the forwarder's connected account(s) and pulls bodies from that Gmail thread.
+3. `bind_timeline_rows_to_inbox_thread` sets `timeline_entries.thread_id` to the inbox tracking key so dashboard state stays aligned.
+4. `upsert_timeline_entries` dedupes on `source_id` (canonical message ids from the source thread).
+
+Implementation reference: [`utils/database.py`](utils/database.py) (schema module doc), [`services/thread_snooze.py`](services/thread_snooze.py).
+
+**One-time cleanup** after upgrading to source-thread ingestion:
+
+```bash
+python3 scripts/reconcile_timeline_inbox_duplicates.py --all
+```
+
+Use `--dry-run` to preview counts. `--refresh-inbox` needs Gmail OAuth; `--prune-content-dupes` is offline.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development notes.
 

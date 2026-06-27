@@ -1,11 +1,11 @@
 import { mergeRows, setDisplaySourceAccount } from "./thread_domain.js";
 import { isTodoPlanThreadId } from "./plan_helpers.js";
-import type { LaneSummaryView, LaneView, LooseObj, PersonSummaryView, PersonView, ThreadView, PlanView } from "./types.js";
+import type { LaneSummaryView, LaneView, LooseObj, ThreadView, PlanView } from "./types.js";
 import { str } from "./utils.js";
 
 export const SUMMARIES_BUNDLE_URL = "/api/summaries/bundle";
-const SUMMARIES_CACHE_KEY = "fivelanes_summaries_bundle_v3";
-const SUMMARIES_ETAG_KEY = "fivelanes_summaries_bundle_etag_v3";
+const SUMMARIES_CACHE_KEY = "fivelanes_summaries_bundle_v4";
+const SUMMARIES_ETAG_KEY = "fivelanes_summaries_bundle_etag_v4";
 
 let currentData: LooseObj | null = null;
 let currentSourceLabel = "";
@@ -34,9 +34,6 @@ export function normalizeBundle(data: LooseObj): LooseObj {
   if (!Array.isArray(data.lanes)) data.lanes = [];
   if (!data.lane_threads || typeof data.lane_threads !== "object") data.lane_threads = {};
   if (!data.lane_summaries || typeof data.lane_summaries !== "object") data.lane_summaries = {};
-  if (!Array.isArray(data.people)) data.people = [];
-  if (!data.person_threads || typeof data.person_threads !== "object") data.person_threads = {};
-  if (!data.person_summaries || typeof data.person_summaries !== "object") data.person_summaries = {};
   if (!Array.isArray(data.thread_plans)) data.thread_plans = [];
   if (!data.pending_message_counts || typeof data.pending_message_counts !== "object") {
     data.pending_message_counts = {};
@@ -149,102 +146,6 @@ export function applyLaneRemoved(laneId: number): void {
   if (memberships && key in memberships) delete memberships[key];
   const summaries = currentData.lane_summaries as LooseObj | undefined;
   if (summaries && key in summaries) delete summaries[key];
-}
-
-export function getPeople(data: LooseObj | null): PersonView[] {
-  if (!data || !Array.isArray(data.people)) return [];
-  return (data.people as LooseObj[])
-    .map((row) => ({
-      id: Number(row.id) || 0,
-      name: str(row.name),
-      created_at: str(row.created_at),
-      updated_at: str(row.updated_at),
-    }))
-    .filter((person) => person.id > 0 && person.name);
-}
-
-export function getPersonThreadIds(data: LooseObj | null, personId: number): string[] {
-  if (!data || !data.person_threads || typeof data.person_threads !== "object") return [];
-  const bucket = (data.person_threads as LooseObj)[String(personId)];
-  if (!Array.isArray(bucket)) return [];
-  return bucket.map((id) => str(id)).filter(Boolean);
-}
-
-export function getPersonSummary(data: LooseObj | null, personId: number): PersonSummaryView | null {
-  if (!data || !data.person_summaries || typeof data.person_summaries !== "object") return null;
-  const raw = (data.person_summaries as LooseObj)[String(personId)];
-  if (!raw || typeof raw !== "object") return null;
-  const row = raw as LooseObj;
-  const summary = str(row.summary);
-  const highlights = Array.isArray(row.highlights)
-    ? row.highlights.map((x) => str(x)).filter(Boolean)
-    : [];
-  const current_priorities = Array.isArray(row.current_priorities)
-    ? row.current_priorities.map((x) => str(x)).filter(Boolean)
-    : [];
-  const waiting_on_others = Array.isArray(row.waiting_on_others)
-    ? row.waiting_on_others.map((x) => str(x)).filter(Boolean)
-    : [];
-  const tone_overview = str(row.tone_overview);
-  const updated_at = str(row.updated_at);
-  if (!summary && !highlights.length && !current_priorities.length && !waiting_on_others.length) {
-    return null;
-  }
-  return {
-    summary,
-    highlights,
-    current_priorities,
-    waiting_on_others,
-    tone_overview,
-    updated_at,
-  };
-}
-
-export function applyPersonSummary(personId: number, payload: LooseObj): void {
-  if (!currentData) return;
-  const bucket = (currentData.person_summaries ||= {}) as LooseObj;
-  bucket[String(personId)] = {
-    summary: str(payload.summary),
-    highlights: Array.isArray(payload.highlights) ? payload.highlights : [],
-    current_priorities: Array.isArray(payload.current_priorities)
-      ? payload.current_priorities
-      : [],
-    waiting_on_others: Array.isArray(payload.waiting_on_others) ? payload.waiting_on_others : [],
-    tone_overview: str(payload.tone_overview),
-    updated_at: str(payload.summary_updated_at) || str(payload.updated_at),
-  };
-}
-
-export function applyPersonCreated(person: PersonView): void {
-  if (!currentData) return;
-  const people = Array.isArray(currentData.people) ? (currentData.people as LooseObj[]) : [];
-  if (!people.some((row) => Number(row.id) === person.id)) {
-    people.push({ ...person });
-    people.sort((a, b) => str(a.name).localeCompare(str(b.name)));
-    currentData.people = people;
-  }
-  const memberships = (currentData.person_threads ||= {}) as LooseObj;
-  if (!Array.isArray(memberships[String(person.id)])) memberships[String(person.id)] = [];
-}
-
-export function applyPersonThreadMembership(
-  personId: number,
-  threadId: string,
-  assigned: boolean,
-): void {
-  if (!currentData) return;
-  const key = String(personId);
-  const memberships = (currentData.person_threads ||= {}) as LooseObj;
-  const existing = Array.isArray(memberships[key])
-    ? (memberships[key] as unknown[]).map((id) => str(id)).filter(Boolean)
-    : [];
-  if (assigned) {
-    if (!existing.includes(threadId)) existing.push(threadId);
-  } else {
-    memberships[key] = existing.filter((id) => id !== threadId);
-    return;
-  }
-  memberships[key] = existing;
 }
 
 export function getThreadPlans(data: LooseObj | null): PlanView[] {

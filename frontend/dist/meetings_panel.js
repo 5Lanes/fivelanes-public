@@ -3,6 +3,7 @@
  * Source: ``/api/meetings`` (timeline.db meetings table), else out/availability_calendar_latest.json.
  */
 import { dayHeadingLabelLong, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdLocal } from "./shared/time_ui.js";
+import { isFeatureEnabled } from "./shared/features.js";
 import { escapeHtml } from "./shared/utils.js";
 export const MEETINGS_LOOKAHEAD_DAYS = 14;
 const MEETINGS_CACHE_KEY = "fivelanes_meetings_cache";
@@ -207,6 +208,9 @@ export async function loadMeetings(days) {
     }
     catch {
         /* fall through to JSON */
+    }
+    if (!isFeatureEnabled("availability")) {
+        return { error: "No meetings from API. Calendar availability export requires premium." };
     }
     try {
         const res = await fetch("/out/availability_calendar_latest.json", {

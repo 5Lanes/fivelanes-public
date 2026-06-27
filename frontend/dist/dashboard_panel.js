@@ -7,6 +7,7 @@ import { formatPlanByWhen, sortPlansByDueDate, planLinkedThreadLabel, } from "./
 import { renderMentionAwareText, } from "./shared/thread_domain.js";
 import { dayHeadingLabelLong, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdLocal } from "./shared/time_ui.js";
 import { ensureAvailabilityDocLoaded } from "./shared/availability_windows.js";
+import { isFeatureEnabled } from "./shared/features.js";
 import { escapeHtml } from "./shared/utils.js";
 export function renderDashboardPlans(plansEl, plans, labelForThreadId) {
     plansEl.hidden = false;
@@ -233,7 +234,9 @@ function renderMatchedAgendaHtml(matched, tz, days) {
     return `<div class="dash-avail-agenda">${sections.join("")}</div>`;
 }
 export async function refreshDashboard(threads, opts) {
-    await ensureAvailabilityDocLoaded();
+    if (isFeatureEnabled("availability")) {
+        await ensureAvailabilityDocLoaded();
+    }
     const tracking = threads.filter((t) => {
         const snooze = Number(t.messages[0]?.summary?.snoozed || 0);
         return snooze === 0 || snooze === 1;

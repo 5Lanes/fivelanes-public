@@ -20,10 +20,6 @@
       "system": "<your system prompt for describing an image from email; output description and visible_text JSON>",
       "user": "<your user prompt; must include {context} placeholder>"
     },
-    "person_summary": {
-      "system": "<your system prompt for producing a person-level summary across threads; must include {person_name}; output summary, highlights, current_priorities, waiting_on_others, tone_overview JSON>",
-      "user": "<your user prompt; must include {summary_datetime} and {thread_summaries} placeholders>"
-    },
     "lane_summary": {
       "system": "<your system prompt for producing a lane-level summary across threads; must include {lane_name}; output summary, highlights, current_priorities, waiting_on_others, tone_overview JSON>",
       "user": "<your user prompt; must include {summary_datetime} and {thread_summaries} placeholders>"
@@ -33,16 +29,17 @@
       "user": "<your user prompt; must include {meeting_title}, {meeting_start}, {meeting_end}, {meeting_location}, {meeting_attendees}, {thread_label}, and {thread_messages} placeholders>"
     },
     "thread_message_block": "<template string for rendering one message block; must include {index}, {datetime}, {sender}, {recipients}, {subject}, {content} placeholders>",
-    "thread_summary_block": "<template string for rendering one thread summary block; must include {index}, {label}, {status}, {tone}, {last_sender}, {latest_updates_block}, {next_steps_block} placeholders>",
-    "lane_thread_summary_block": "<template string for rendering one lane thread summary block; must include {index}, {label}, {datetime}, {status}, {tone}, {last_sender}, {latest_updates_block}, {next_steps_block} placeholders>"
+    "chat_thread_message_block": "--- Turn {index} ---\n{datetime} | {sender}\n{content}",
+    "thread_summary_block": "<template string for rendering one thread summary block; must include {index}, {label}, {tone}, {last_sender}, {latest_updates_block}, {next_steps_block} placeholders>",
+    "lane_thread_summary_block": "<template string for rendering one lane thread summary block; must include {index}, {label}, {datetime}, {tone}, {last_sender}, {latest_updates_block}, {next_steps_block} placeholders>"
   },
   "settings": {
     "prompt_version": "3",
     "email_reply_max_messages": 3,
     "thread_summary_max_messages": 12,
+    "chat_thread_summary_max_turns": 40,
     "meeting_prep_max_messages": 10,
     "calendar_summary_max_events": 100,
-    "person_summary_max_threads": 10,
     "lane_summary_max_threads": 10
   }
 }

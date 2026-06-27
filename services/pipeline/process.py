@@ -469,14 +469,13 @@ def run_threads_llm_pipeline(
             continue
         cleaned_all.extend(cleaned_thread)
         per_message.extend(thread_per_message)
-
-    if cleaned_all:
         save_claude_run_outputs(
             db,
             run_stamp=run_stamp,
             generated_at=generated_at,
-            cleaned=cleaned_all,
-            per_message=per_message,
+            cleaned=cleaned_thread,
+            per_message=thread_per_message,
+            replace_run_stamp=False,
         )
 
     return cleaned_all, per_message

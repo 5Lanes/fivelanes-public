@@ -42,18 +42,27 @@ def pull_from_account(
     else:
         raise ValueError("Either contact_query or thread_query must be provided")
     account_email = get_account_email(service)
-    list_kw: Dict[str, Any] = {
-        "userId": "me",
-        "maxResults": min(max_results, 500),
-        "q": q,
-    }
+    messages: List[Dict[str, Any]] = []
+    page_token: Optional[str] = None
     try:
         log.info("Querying Gmail for %s", q)
-        response = service.users().messages().list(**list_kw).execute()
+        while len(messages) < max_results:
+            list_kw: Dict[str, Any] = {
+                "userId": "me",
+                "maxResults": min(max_results - len(messages), 500),
+                "q": q,
+            }
+            if page_token:
+                list_kw["pageToken"] = page_token
+            response = service.users().messages().list(**list_kw).execute()
+            batch = response.get("messages") or []
+            messages.extend(batch)
+            page_token = (response.get("nextPageToken") or "").strip() or None
+            if not batch or not page_token:
+                break
     except HttpError as e:
         log.error("Gmail list error for %s: %s", account_id, e)
         raise
-    messages = response.get("messages", [])
     log.info("Account %s: API returned %d message refs", account_id, len(messages))
 
     result = []

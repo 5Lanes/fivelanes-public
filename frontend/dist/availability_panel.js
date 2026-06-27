@@ -3,6 +3,7 @@
  * and shows likely-open / virtual-only windows for the next 7 calendar days (document TZ).
  */
 import { dayHeadingLabelShort, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdInTz } from "./shared/time_ui.js";
+import { isFeatureEnabled } from "./shared/features.js";
 import { escapeHtml } from "./shared/utils.js";
 function str(v) {
     return typeof v === "string" ? v : "";
@@ -254,6 +255,8 @@ export async function refreshAvailabilityPanel() {
     const metaEl = document.getElementById("availability-meta");
     const agendaEl = document.getElementById("availability-agenda");
     if (!section || !metaEl || !agendaEl)
+        return;
+    if (!isFeatureEnabled("availability"))
         return;
     const url = `/out/availability_calendar_latest.json?cb=${Date.now()}`;
     try {

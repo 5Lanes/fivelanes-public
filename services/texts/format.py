@@ -208,18 +208,9 @@ def rows_for_thread(
     display_label = f"{label} · {service}" if service else label
     cleaned = cleaned_rows_for_conversation(conversation_key, thread_id, messages)
     summary: List[Dict[str, Any]] = []
-    latest_preview = ""
-    for row in cleaned:
-        body = str(row.get("cleaned_content") or "")
-        if body and body != "(attachment)":
-            latest_preview = body
     if not cleaned:
         return cleaned, summary
 
-    latest = cleaned[-1]
-    preview = latest_preview or latest.get("cleaned_content") or ""
-    if len(preview) > 240:
-        preview = preview[:237] + "…"
     for row in cleaned:
         summary.append(
             {
@@ -229,8 +220,8 @@ def rows_for_thread(
                 "sender": row["sender"],
                 "subject": label,
                 "suggested_thread_label": display_label,
-                "latest_updates": [preview] if preview and row is latest else [],
-                "latest_status": preview if row is latest else "",
+                "latest_updates": [],
+                "latest_status": "",
                 "snoozed": snoozed,
                 "channel": "text",
                 "cleaned_content": row["cleaned_content"],

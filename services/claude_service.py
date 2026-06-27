@@ -235,13 +235,13 @@ def submit_email_reply_prompt(
     return call_claude_json(prompt, model=model, max_tokens=max_tokens)
 
 
-def submit_person_summary_prompt(
+def submit_lane_summary_prompt(
     prompt: str | PromptMessages,
     *,
     model: str = MODEL_SUMMARY,
     max_tokens: int = 1500,
 ) -> Dict[str, Any]:
-    """Roll-up summary across threads assigned to one person."""
+    """Roll-up summary across threads assigned to one lane."""
     return call_claude_json(prompt, model=model, max_tokens=max_tokens)
 
 

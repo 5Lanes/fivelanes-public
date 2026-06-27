@@ -21,7 +21,7 @@ class LlmBackend(Protocol):
 
     def submit_meeting_prep(self, prompt: PromptMessages) -> Dict[str, Any]: ...
 
-    def submit_person_summary(self, prompt: PromptMessages) -> Dict[str, Any]: ...
+    def submit_lane_summary(self, prompt: PromptMessages) -> Dict[str, Any]: ...
 
 
 class _ClaudeBackend:
@@ -52,10 +52,10 @@ class _ClaudeBackend:
 
         return claude_service.submit_meeting_prep_prompt(prompt)
 
-    def submit_person_summary(self, prompt: PromptMessages) -> Dict[str, Any]:
+    def submit_lane_summary(self, prompt: PromptMessages) -> Dict[str, Any]:
         from services import claude_service
 
-        return claude_service.submit_person_summary_prompt(prompt)
+        return claude_service.submit_lane_summary_prompt(prompt)
 
 
 class _LlamaBackend:
@@ -89,10 +89,10 @@ class _LlamaBackend:
 
         return llama_service.submit_meeting_prep_prompt(prompt, env_path=self._env_path)
 
-    def submit_person_summary(self, prompt: PromptMessages) -> Dict[str, Any]:
+    def submit_lane_summary(self, prompt: PromptMessages) -> Dict[str, Any]:
         from services import llama_service
 
-        return llama_service.submit_person_summary_prompt(prompt, env_path=self._env_path)
+        return llama_service.submit_lane_summary_prompt(prompt, env_path=self._env_path)
 
 
 def get_llm_backend(*, backend: Optional[str] = None, env_path: str = ".env") -> LlmBackend:

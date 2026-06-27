@@ -24,6 +24,7 @@ import {
 } from "./shared/thread_domain.js";
 import { dayHeadingLabelLong, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdLocal } from "./shared/time_ui.js";
 import { ensureAvailabilityDocLoaded } from "./shared/availability_windows.js";
+import { isFeatureEnabled } from "./shared/features.js";
 import { escapeHtml } from "./shared/utils.js";
 
 type LooseObj = Record<string, unknown>;
@@ -309,7 +310,9 @@ export async function refreshDashboard(
     onMeetingPrepSaved?: (cacheKey: string, prep: LooseObj) => void;
   },
 ): Promise<{ matchedMeetingCount: number; trackingThreadCount: number; planCount: number }> {
-  await ensureAvailabilityDocLoaded();
+  if (isFeatureEnabled("availability")) {
+    await ensureAvailabilityDocLoaded();
+  }
   const tracking = threads.filter((t) => {
     const snooze = Number(t.messages[0]?.summary?.snoozed || 0);
     return snooze === 0 || snooze === 1;

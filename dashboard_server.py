@@ -40,24 +40,20 @@ from services.pipeline.fingerprint import (
     lane_summary_fingerprint,
     meeting_prep_fingerprint,
     messages_cache_keys,
-    person_summary_fingerprint,
 )
 from services.prompts import (
     EMAIL_REPLY_MAX_MESSAGES,
     format_email_reply_prompt,
     format_lane_summary_prompt,
     format_meeting_prep_prompt,
-    format_person_summary_prompt,
 )
 from utils.database import (
     _meeting_dedupe_key,
     add_thread_to_lane,
-    add_thread_to_person,
     aggregate_thread_chronological_anchor,
     build_summaries_bundle,
     build_thread_draft_payload,
     create_lane,
-    create_person,
     create_thread_plan,
     delete_lane,
     delete_thread_plan,
@@ -66,21 +62,24 @@ from utils.database import (
     load_lane_summary,
     load_lane_thread_summaries,
     load_meeting_prep,
-    load_person_summary,
-    load_person_thread_summaries,
     load_thread_draft_reply,
     normalize_lane_summary_payload,
     normalize_meeting_prep_payload,
-    normalize_person_summary_payload,
     remove_thread_from_lane,
-    remove_thread_from_person,
     save_lane_summary,
     save_meeting_prep,
-    save_person_summary,
     save_thread_draft_reply,
 )
 from services.thread_snooze import remove_thread_tracking, set_thread_snooze
 from utils.logging import configure_logging
+from services.slack import (
+    SLACK_DMS_DIR,
+    fetch_tracked_conversation_keys as fetch_tracked_slack_keys,
+    list_conversation_catalog as list_slack_catalog,
+    pull_slack_dms,
+    set_tracked_conversation_keys as set_tracked_slack_keys,
+)
+from services.slack.summarize import summarize_tracked_slack_threads
 from services.texts import (
     CONVERSATIONS_DIR,
     fetch_tracked_conversation_keys,
@@ -88,7 +87,11 @@ from services.texts import (
     set_tracked_conversation_keys,
 )
 from services.texts.summarize import summarize_tracked_text_threads
-from utils.run_fivelanes_scheduler import run_fivelanes_cycle, scheduler_loop
+from utils.run_fivelanes_scheduler import (
+    pipeline_run_in_progress,
+    run_fivelanes_cycle,
+    scheduler_loop,
+)
 
 
 DB_PATH = database_path()
@@ -181,7 +184,7 @@ def _run_lane_summary_worker(
     try:
         llm = get_llm_backend(env_path=str(env_file()))
         prompt = format_lane_summary_prompt(lane_name, summaries, db_path=DB_PATH)
-        result = llm.submit_person_summary(prompt)
+        result = llm.submit_lane_summary(prompt)
         summary, err = _finalize_lane_summary_from_llm(result if isinstance(result, dict) else {})
         if err:
             raise RuntimeError(err)
@@ -270,7 +273,7 @@ def _start_pipeline_run() -> tuple[bool, Optional[str]]:
     def _worker() -> None:
         try:
             apply_backend(get_backend())
-            run_fivelanes_cycle(trigger="manual")
+            run_fivelanes_cycle(trigger="manual", blocking=True)
         except Exception as exc:
             log.exception("Manual fivelanes run failed")
             with _pipeline_lock:
@@ -292,15 +295,21 @@ def _pipeline_status_payload() -> Dict[str, Any]:
     from utils.pipeline_run_log import load_last_pipeline_run
 
     with _pipeline_lock:
-        payload: Dict[str, Any] = {
-            "ok": True,
-            "running": bool(_pipeline_state["running"]),
-            "error": _pipeline_state["error"],
-            "started_at": _pipeline_state["started_at"],
-            "finished_at": _pipeline_state["finished_at"],
-            "backend": get_backend(),
-        }
-    payload["last_run"] = load_last_pipeline_run()
+        manual = dict(_pipeline_state)
+    last_run = load_last_pipeline_run()
+    running = pipeline_run_in_progress()
+    payload: Dict[str, Any] = {
+        "ok": True,
+        "running": running,
+        "error": manual.get("error"),
+        "started_at": manual.get("started_at"),
+        "finished_at": manual.get("finished_at"),
+        "backend": get_backend(),
+    }
+    if running and last_run and str(last_run.get("status") or "") == "running":
+        payload["started_at"] = last_run.get("started_at") or payload["started_at"]
+        payload["error"] = last_run.get("error") or payload["error"]
+    payload["last_run"] = last_run
     return payload
 
 
@@ -460,6 +469,97 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         threading.Thread(
             target=_summarize_worker,
             name="texts-summarize",
+            daemon=True,
+        ).start()
+        result["summarize"] = "started"
+        self._json_response(HTTPStatus.OK, result)
+
+    def _post_slack_pull(self) -> None:
+        try:
+            result = pull_slack_dms()
+        except Exception as exc:
+            log.exception("slack pull failed")
+            self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"ok": False, "error": str(exc)},
+            )
+            return
+        self._json_response(HTTPStatus.OK, result)
+
+    def _post_slack_summarize(self, body: Dict[str, Any]) -> None:
+        if not Path(DB_PATH).is_file():
+            self._json_response(
+                HTTPStatus.NOT_FOUND, {"ok": False, "error": "database_not_found"}
+            )
+            return
+        raw = body.get("conversation_keys")
+        force = bool(body.get("force"))
+        try:
+            result = summarize_tracked_slack_threads(
+                DB_PATH,
+                conversation_keys=raw if isinstance(raw, list) else None,
+                force=force,
+            )
+        except Exception as exc:
+            log.exception("slack summarize failed")
+            self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"ok": False, "error": str(exc)},
+            )
+            return
+        self._json_response(HTTPStatus.OK, result)
+
+    def _get_slack_catalog(self) -> None:
+        catalog = list_slack_catalog()
+        tracked = fetch_tracked_slack_keys(DB_PATH) if Path(DB_PATH).is_file() else []
+        self._json_response(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "slack_dms_dir": str(SLACK_DMS_DIR),
+                "catalog": catalog,
+                "tracked": tracked,
+            },
+        )
+
+    def _post_slack_track(self, body: Dict[str, Any]) -> None:
+        if not Path(DB_PATH).is_file():
+            self._json_response(
+                HTTPStatus.NOT_FOUND, {"ok": False, "error": "database_not_found"}
+            )
+            return
+        raw = body.get("conversation_keys")
+        if raw is None:
+            raw = body.get("tracked")
+        if not isinstance(raw, list):
+            self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"ok": False, "error": "missing_conversation_keys"},
+            )
+            return
+        try:
+            result = set_tracked_slack_keys(DB_PATH, raw)
+        except Exception as exc:
+            log.exception("slack track failed")
+            self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"ok": False, "error": str(exc)},
+            )
+            return
+
+        keys = result.get("tracked") if isinstance(result.get("tracked"), list) else raw
+
+        def _summarize_worker() -> None:
+            try:
+                summarize_tracked_slack_threads(
+                    DB_PATH, conversation_keys=keys, force=True
+                )
+            except Exception:
+                log.exception("Background Slack summarization failed")
+
+        threading.Thread(
+            target=_summarize_worker,
+            name="slack-summarize",
             daemon=True,
         ).start()
         result["summarize"] = "started"
@@ -859,175 +959,6 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
         self._json_response(HTTPStatus.OK, out)
 
-    def _post_person_create(self, body: Dict[str, Any]) -> None:
-        name = str(body.get("name") or "").strip()
-        if not name:
-            self._json_response(
-                HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_person_name"}
-            )
-            return
-        try:
-            person = create_person(DB_PATH, name=name)
-        except ValueError as exc:
-            self._json_response(
-                HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)}
-            )
-            return
-        except Exception as exc:
-            log.exception("person create failed")
-            self._json_response(
-                HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": str(exc)}
-            )
-            return
-        self._json_response(HTTPStatus.OK, {"ok": True, "person": person})
-
-    def _post_person_add_thread(self, body: Dict[str, Any]) -> None:
-        try:
-            person_id = int(body.get("person_id") or 0)
-        except (TypeError, ValueError):
-            person_id = 0
-        thread_id = str(body.get("thread_id") or body.get("inbox_thread_id") or "").strip()
-        if person_id <= 0:
-            self._json_response(
-                HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_person_id"}
-            )
-            return
-        if not thread_id:
-            self._json_response(
-                HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_thread_id"}
-            )
-            return
-        ok = add_thread_to_person(DB_PATH, person_id=person_id, inbox_thread_id=thread_id)
-        if not ok:
-            self._json_response(
-                HTTPStatus.NOT_FOUND, {"ok": False, "error": "person_not_found"}
-            )
-            return
-        self._json_response(
-            HTTPStatus.OK,
-            {"ok": True, "person_id": person_id, "inbox_thread_id": thread_id},
-        )
-
-    def _post_person_remove_thread(self, body: Dict[str, Any]) -> None:
-        try:
-            person_id = int(body.get("person_id") or 0)
-        except (TypeError, ValueError):
-            person_id = 0
-        thread_id = str(body.get("thread_id") or body.get("inbox_thread_id") or "").strip()
-        if person_id <= 0:
-            self._json_response(
-                HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_person_id"}
-            )
-            return
-        if not thread_id:
-            self._json_response(
-                HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_thread_id"}
-            )
-            return
-        ok = remove_thread_from_person(
-            DB_PATH, person_id=person_id, inbox_thread_id=thread_id
-        )
-        if not ok:
-            self._json_response(
-                HTTPStatus.NOT_FOUND, {"ok": False, "error": "person_not_found"}
-            )
-            return
-        self._json_response(
-            HTTPStatus.OK,
-            {"ok": True, "person_id": person_id, "inbox_thread_id": thread_id},
-        )
-
-    def _post_person_summary(self, body: Dict[str, Any]) -> None:
-        try:
-            person_id = int(body.get("person_id") or 0)
-        except (TypeError, ValueError):
-            person_id = 0
-        person_name = str(body.get("person_name") or "").strip()
-        force = bool(body.get("force"))
-
-        person, summaries = load_person_thread_summaries(
-            DB_PATH,
-            person_name=person_name or None,
-            person_id=person_id if person_id > 0 else None,
-        )
-        if not person:
-            self._json_response(
-                HTTPStatus.NOT_FOUND, {"ok": False, "error": "person_not_found"}
-            )
-            return
-        pid = int(person.get("id") or 0)
-        name = str(person.get("name") or "").strip()
-        if not summaries:
-            self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"ok": False, "error": "no_thread_summaries", "person_id": pid},
-            )
-            return
-
-        llm = get_llm_backend(env_path=str(env_file()))
-        thread_ids = [str(s.get("thread_id") or "").strip() for s in summaries]
-        summary_datetimes = [
-            aggregate_thread_chronological_anchor(DB_PATH, s) for s in summaries
-        ]
-        fp = person_summary_fingerprint(
-            person_id=pid,
-            thread_ids=thread_ids,
-            summary_datetimes=summary_datetimes,
-            backend=llm.name,
-        )
-        if not force:
-            cached = load_person_summary(DB_PATH, person_id=pid)
-            if cached and str(cached.get("input_fingerprint") or "") == fp:
-                out: Dict[str, Any] = {
-                    "ok": True,
-                    "person_id": pid,
-                    "person_name": name,
-                    "cached": True,
-                    "summary_updated_at": cached.get("updated_at"),
-                }
-                out.update({k: v for k, v in cached.items() if k != "input_fingerprint"})
-                self._json_response(HTTPStatus.OK, out)
-                return
-
-        try:
-            prompt = format_person_summary_prompt(name, summaries, db_path=DB_PATH)
-            result = llm.submit_person_summary(prompt)
-        except ValueError as exc:
-            self._json_response(
-                HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc) or "bad_request"}
-            )
-            return
-        except RuntimeError as exc:
-            self._json_response(
-                HTTPStatus.BAD_GATEWAY, {"ok": False, "error": str(exc)}
-            )
-            return
-        except Exception as exc:
-            log.exception("person summary failed")
-            self._json_response(
-                HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": str(exc)}
-            )
-            return
-
-        summary = normalize_person_summary_payload(result) if isinstance(result, dict) else {}
-        summary["input_fingerprint"] = fp
-        try:
-            updated_at = save_person_summary(DB_PATH, person_id=pid, summary=summary)
-        except ValueError as exc:
-            self._json_response(
-                HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc) or "bad_request"}
-            )
-            return
-        out = {
-            "ok": True,
-            "person_id": pid,
-            "person_name": name,
-            "cached": False,
-            "summary_updated_at": updated_at,
-        }
-        out.update(summary)
-        self._json_response(HTTPStatus.OK, out)
-
     def _post_plan_create(self, body: Dict[str, Any]) -> None:
         thread_id = str(body.get("thread_id") or body.get("inbox_thread_id") or "").strip()
         action = str(body.get("action") or "").strip()
@@ -1423,11 +1354,30 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         )
 
     def _get_config(self) -> None:
+        from utils.features import features_config_payload
         from utils.owner_config import public_config_payload
 
         payload = {"ok": True, "backend": get_backend()}
         payload.update(public_config_payload())
+        payload.update(features_config_payload())
         self._json_response(HTTPStatus.OK, payload)
+
+    def _feature_gate_response(self, method: str, path: str) -> bool:
+        """Return True if the request was blocked due to a missing feature."""
+        from utils.features import required_feature_for_route
+
+        feature_id = required_feature_for_route(method, path)
+        if not feature_id:
+            return False
+        from utils.features import is_enabled
+
+        if is_enabled(feature_id):
+            return False
+        self._json_response(
+            HTTPStatus.FORBIDDEN,
+            {"ok": False, "error": "feature_unavailable", "feature": feature_id},
+        )
+        return True
 
     def _get_pipeline_status(self) -> None:
         self._json_response(HTTPStatus.OK, _pipeline_status_payload())
@@ -1502,6 +1452,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = self._request_path()
+        if self._feature_gate_response("GET", path):
+            return
         if path == "/api/summaries/bundle":
             self._get_summaries_bundle()
             return
@@ -1520,6 +1472,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if path == "/api/texts/catalog":
             self._get_texts_catalog()
             return
+        if path == "/api/slack/catalog":
+            self._get_slack_catalog()
+            return
         if path == "/timeline.db":
             self._get_timeline_db()
             return
@@ -1532,15 +1487,20 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "/threads",
             "/meetings",
             "/lanes",
-            "/people",
             "/plans",
             "/texts-setup",
+            "/slack-setup",
         ):
             self._serve_app_shell()
             return
         if path == "/summaries.html":
             self.send_response(HTTPStatus.MOVED_PERMANENTLY)
             self.send_header("Location", "/threads")
+            self.end_headers()
+            return
+        if path == "/people":
+            self.send_response(HTTPStatus.MOVED_PERMANENTLY)
+            self.send_header("Location", "/lanes")
             self.end_headers()
             return
         super().do_GET()
@@ -1552,6 +1512,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
         assert body is not None
         path = self._request_path()
+        if self._feature_gate_response("POST", path):
+            return
         if path == "/api/thread-tracking/snooze":
             self._post_snooze(body)
         elif path == "/api/thread-tracking/remove":
@@ -1574,14 +1536,6 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._post_lane_delete(body)
         elif path == "/api/lanes/summary":
             self._post_lane_summary(body)
-        elif path == "/api/people/create":
-            self._post_person_create(body)
-        elif path == "/api/people/add-thread":
-            self._post_person_add_thread(body)
-        elif path == "/api/people/remove-thread":
-            self._post_person_remove_thread(body)
-        elif path == "/api/people/summary":
-            self._post_person_summary(body)
         elif path == "/api/plans/create":
             self._post_plan_create(body)
         elif path == "/api/plans/update":
@@ -1596,6 +1550,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._post_texts_track(body)
         elif path == "/api/texts/summarize":
             self._post_texts_summarize(body)
+        elif path == "/api/slack/pull":
+            self._post_slack_pull()
+        elif path == "/api/slack/track":
+            self._post_slack_track(body)
+        elif path == "/api/slack/summarize":
+            self._post_slack_summarize(body)
         else:
             log.warning("POST %s not handled (raw path=%r)", path, self.path)
             self._json_response(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not_found"})

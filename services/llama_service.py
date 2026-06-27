@@ -207,7 +207,7 @@ THREAD_SUMMARY_RESPONSE_FORMAT: Dict[str, Any] = {
     },
     "required": ["latest_updates"],
 }
-PERSON_SUMMARY_RESPONSE_FORMAT: Dict[str, Any] = {
+LANE_SUMMARY_RESPONSE_FORMAT: Dict[str, Any] = {
     "type": "object",
     "properties": {
         "summary": {"type": "string"},
@@ -292,6 +292,15 @@ def describe_image_with_llava(
     return {"description": combined, "visible_text": "", "raw_text": combined}
 
 
+def _ollama_timeout_sec(env_path: str = ".env") -> int:
+    pairs = _parse_env_file(env_path)
+    raw = (pairs.get("OLLAMA_TIMEOUT_SEC") or os.getenv("OLLAMA_TIMEOUT_SEC") or "300").strip() or "300"
+    try:
+        return max(30, min(3600, int(raw)))
+    except ValueError:
+        return 300
+
+
 def _ollama_generate_text(
     *,
     base: str,
@@ -301,6 +310,7 @@ def _ollama_generate_text(
     system: str = "",
     max_tokens: int,
     response_format: Any | None,
+    env_path: str = ".env",
 ) -> str:
     url = f"{base}/api/generate"
     payload: Dict[str, Any] = {
@@ -319,9 +329,14 @@ def _ollama_generate_text(
         headers=headers,
         method="POST",
     )
+    timeout_sec = _ollama_timeout_sec(env_path)
     try:
-        with urllib.request.urlopen(request, timeout=300) as response:
+        with urllib.request.urlopen(request, timeout=timeout_sec) as response:
             raw = response.read().decode("utf-8", errors="replace")
+    except TimeoutError as exc:
+        raise RuntimeError(
+            f"Ollama timed out after {timeout_sec}s ({base}, model={model_name})"
+        ) from exc
     except urllib.error.HTTPError as exc:
         err_body = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Ollama API error ({exc.code}) for {model_name}: {err_body}") from exc
@@ -387,6 +402,7 @@ def call_ollama_json(
                 system=system,
                 max_tokens=max_tokens,
                 response_format=fmt,
+                env_path=env_path,
             )
             last_http_error = None
             break
@@ -487,21 +503,21 @@ def submit_email_reply_prompt(
     return call_ollama_json(prompt, model=resolved, max_tokens=max_tokens, env_path=env_path)
 
 
-def submit_person_summary_prompt(
+def submit_lane_summary_prompt(
     prompt: str | PromptMessages,
     *,
     model: Optional[str] = None,
     max_tokens: int = 1500,
     env_path: str = ".env",
 ) -> Dict[str, Any]:
-    """Person roll-up summaries across assigned threads."""
+    """Lane roll-up summaries across assigned threads."""
     resolved = model or _resolve_ollama_model(env_path, "OLLAMA_MODEL_SUMMARY", MODEL_SUMMARY)
     return call_ollama_json(
         prompt,
         model=resolved,
         max_tokens=max_tokens,
         env_path=env_path,
-        response_format=PERSON_SUMMARY_RESPONSE_FORMAT,
+        response_format=LANE_SUMMARY_RESPONSE_FORMAT,
     )
 
 

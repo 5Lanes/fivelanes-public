@@ -4,6 +4,7 @@
  */
 
 import { dayHeadingLabelLong, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdLocal } from "./shared/time_ui.js";
+import { isFeatureEnabled } from "./shared/features.js";
 import { escapeHtml } from "./shared/utils.js";
 
 type LooseObj = Record<string, unknown>;
@@ -231,6 +232,10 @@ export async function loadMeetings(days: number): Promise<MeetingsLoadResult | {
     if (fromApi) return fromApi;
   } catch {
     /* fall through to JSON */
+  }
+
+  if (!isFeatureEnabled("availability")) {
+    return { error: "No meetings from API. Calendar availability export requires premium." };
   }
 
   try {

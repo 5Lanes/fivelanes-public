@@ -11,6 +11,7 @@ import {
   counterpartyAvailabilityForSummary,
   counterpartyAvailabilitySectionHtml,
   formatDraftReplyMarkdown,
+  formatChatSenderLabel,
   latestUpdatesForThread,
   listSection,
   ownerNextStepsForThread,
@@ -20,6 +21,8 @@ import {
   pendingMessageCountForThread,
   pendingMessagePillHtml,
   shouldShowThreadMessageBlocks,
+  threadIsEmail,
+  threadIsSlack,
   threadIsText,
   threadLabel,
   threadMessagesForDisplay,
@@ -30,6 +33,7 @@ import {
 import type { LooseObj, ThreadView } from "../shared/types.js";
 import { escapeHtml, formatDate, formatRecipients, str, toneClass } from "../shared/utils.js";
 import { ensureAvailabilityDocLoaded } from "../shared/availability_windows.js";
+import { applyNavFeatureVisibility, isFeatureEnabled } from "../shared/features.js";
 import { refreshAvailabilityPanel } from "../availability_panel.js";
 
 const PAGE_HTML = `
@@ -42,7 +46,7 @@ const PAGE_HTML = `
     <div id="lanes" class="lanes-grid" hidden></div>
     <div id="cards" class="cards"></div>
   </div>
-  <aside class="availability-rail" id="availability-rail" aria-label="Your availability">
+  <aside class="availability-rail" id="availability-rail" aria-label="Your availability" data-feature="availability">
     <section id="availability-section" class="availability-section" aria-labelledby="availability-heading" hidden>
       <h2 id="availability-heading" class="availability-section-title">Open slots · next 7 days</h2>
       <p class="availability-meta" id="availability-meta"></p>
@@ -52,7 +56,7 @@ const PAGE_HTML = `
 </div>`;
 
 let threadViewMode: "active" | "snoozed" | "removed" = "active";
-let threadChannelFilter: "all" | "text" | "email" = "all";
+let threadChannelFilter: "all" | "text" | "slack" | "email" = "all";
 let navObserver: IntersectionObserver | null = null;
 let interactionsBound = false;
 
@@ -92,13 +96,14 @@ async function requestEmailReplyDraft(
 function filterThreadsByChannel(threads: ThreadView[]): ThreadView[] {
   if (threadChannelFilter === "all") return threads;
   if (threadChannelFilter === "text") return threads.filter(threadIsText);
-  return threads.filter((thread) => !threadIsText(thread));
+  if (threadChannelFilter === "slack") return threads.filter(threadIsSlack);
+  return threads.filter(threadIsEmail);
 }
 
 function channelFilterEmptyMessage(): string {
   if (threadChannelFilter === "text") return "No text threads in this view.";
-  if (threadChannelFilter === "email") return "No email threads in this view.";
-  return 'No threads in this bundle. Expected <code>cleaned</code> and/or <code>summary</code> arrays with messages.';
+  if (threadChannelFilter === "slack") return "No Slack threads in this view.";
+  return "No email threads in this view.";
 }
 
 function renderCards(threads: ThreadView[]): void {
@@ -124,6 +129,7 @@ function renderCards(threads: ThreadView[]): void {
     const nMsg = thread.messages.length;
     const pendingCount = pendingMessageCountForThread(thread, data);
     const isText = threadIsText(thread);
+    const isSlack = threadIsSlack(thread);
     const updates = latestUpdatesForThread(thread);
     const nextSteps = ownerNextStepsForThread(thread);
     const counterpartySlots = counterpartyAvailabilityForSummary(s);
@@ -159,7 +165,7 @@ function renderCards(threads: ThreadView[]): void {
       `<div class="card-top"><time datetime="${escapeHtml(dt)}">${formatDate(dt)}</time>${
         tone ? `<span class="tone ${toneClass(tone)}">${escapeHtml(tone)}</span>` : ""
       }<span class="count-pill">${nMsg} msg${nMsg > 1 ? " (thread)" : ""}</span>${pendingMessagePillHtml(pendingCount)}${
-        isText ? `<span class="count-pill channel-text">Text</span>` : ""
+        isText ? `<span class="count-pill channel-text">Text</span>` : isSlack ? `<span class="count-pill channel-slack">Slack</span>` : ""
       }` +
       `<div class="card-actions">` +
       `<button type="button" class="thread-refresh-summary-btn" data-refresh-thread-id="${escapeHtml(thread.id)}">Refresh summary</button>` +
@@ -183,7 +189,9 @@ function renderCards(threads: ThreadView[]): void {
       `<textarea class="draft-markdown-output" readonly ${showSavedOut ? "" : "hidden"} rows="12" spellcheck="false">${escapeHtml(savedMd)}</textarea>` +
       `</div>` +
       (str(cLatest.sender)
-        ? `<div class="meta"><strong>${nMsg > 1 ? "Latest from" : "From"}</strong> ${escapeHtml(str(cLatest.sender))}</div>`
+        ? `<div class="meta"><strong>${nMsg > 1 ? "Latest from" : "From"}</strong> ${escapeHtml(
+            isText || isSlack ? formatChatSenderLabel(str(cLatest.sender)) : str(cLatest.sender),
+          )}</div>`
         : "") +
       threadSummaryErrorHtml(s) +
       listSection("Latest updates", updates.length ? updates : s.latest_updates, counterpartySlots) +
@@ -198,7 +206,7 @@ function renderNav(
   threads: ThreadView[],
   snoozedCount: number,
   removedCount: number,
-  channelCounts: { all: number; text: number; email: number },
+  channelCounts: { all: number; text: number; slack: number; email: number },
 ): void {
   const list = navListEl();
   list.innerHTML = "";
@@ -247,6 +255,7 @@ function renderNav(
   for (const { id, label, count } of [
     { id: "all" as const, label: "All", count: channelCounts.all },
     { id: "text" as const, label: "Texts", count: channelCounts.text },
+    { id: "slack" as const, label: "Slack", count: channelCounts.slack },
     { id: "email" as const, label: "Emails", count: channelCounts.email },
   ]) {
     const btn = document.createElement("button");
@@ -374,23 +383,30 @@ export function mountThreadsPage(root: HTMLElement): void {
 export async function renderThreadsPage(): Promise<void> {
   const data = getCurrentData();
   if (!data) return;
-  await ensureAvailabilityDocLoaded();
+  applyNavFeatureVisibility();
+  if (isFeatureEnabled("availability")) {
+    await ensureAvailabilityDocLoaded();
+  }
 
   const { active, snoozed, removed, snoozedCount, removedCount } = partitionThreadsBySnooze(getCurrentThreads());
   const bySnooze = threadViewMode === "snoozed" ? snoozed : threadViewMode === "removed" ? removed : active;
   const channelCounts = {
     all: bySnooze.length,
     text: bySnooze.filter(threadIsText).length,
-    email: bySnooze.filter((thread) => !threadIsText(thread)).length,
+    slack: bySnooze.filter(threadIsSlack).length,
+    email: bySnooze.filter(threadIsEmail).length,
   };
   if (threadChannelFilter === "text" && channelCounts.text === 0) threadChannelFilter = "all";
+  else if (threadChannelFilter === "slack" && channelCounts.slack === 0) threadChannelFilter = "all";
   else if (threadChannelFilter === "email" && channelCounts.email === 0) threadChannelFilter = "all";
   const visible = filterThreadsByChannel(bySnooze);
 
   renderCards(visible);
   renderNav(visible, snoozedCount, removedCount, channelCounts);
   bindScrollNavHighlight();
-  await refreshAvailabilityPanel();
+  if (isFeatureEnabled("availability")) {
+    await refreshAvailabilityPanel();
+  }
 }
 
 export function bindThreadsInteractions(): void {

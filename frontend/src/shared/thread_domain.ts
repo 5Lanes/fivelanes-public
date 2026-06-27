@@ -108,7 +108,7 @@ export function threadMessagesForDisplay(
   sourceAccount?: string,
 ): ThreadView["messages"] {
   const inbox = (sourceAccount || "").trim().toLowerCase();
-  if (!inbox || thread.id.startsWith("text:")) {
+  if (!inbox || thread.id.startsWith("text:") || thread.id.startsWith("slack:")) {
     return [...thread.messages];
   }
   return thread.messages.filter((row) => !messageIsToSourceAccount(row, inbox));
@@ -139,20 +139,42 @@ export function formatDraftReplyMarkdown(payload: LooseObj): string {
   return lines.join("\n").trimEnd();
 }
 
-function summaryHasDisplayContent(s: LooseObj): boolean {
+function summaryHasDisplayContent(s: LooseObj, isChat = false): boolean {
   if (arr(s.latest_updates).some((x) => String(x).trim())) return true;
   if (ownerOwnedNextSteps(s).length) return true;
   if (str(s.raw_text).trim()) return true;
-  if (str(s.latest_status).trim()) return true;
+  if (!isChat && str(s.latest_status).trim()) return true;
   if (arr(s.pending_items).some((x) => String(x).trim())) return true;
   return false;
 }
 
+function chatThreadSummaryScore(s: LooseObj): number {
+  let score = 0;
+  if (arr(s.latest_updates).some((x) => String(x).trim())) score += 10;
+  if (ownerOwnedNextSteps(s).length) score += 5;
+  if (str(s.suggested_thread_label).trim()) score += 1;
+  return score;
+}
+
 export function threadSummaryForDisplay(thread: ThreadView): LooseObj {
   const rows = threadMessagesForDisplay(thread, displaySourceAccount);
+  const isChat = thread.id.startsWith("text:") || thread.id.startsWith("slack:");
+  if (isChat) {
+    let best: LooseObj | null = null;
+    let bestScore = 0;
+    for (const row of rows) {
+      const s = (row.summary || {}) as LooseObj;
+      const score = chatThreadSummaryScore(s);
+      if (score > bestScore) {
+        bestScore = score;
+        best = s;
+      }
+    }
+    if (best && bestScore > 0) return best;
+  }
   for (const row of rows) {
     const s = (row.summary || {}) as LooseObj;
-    if (summaryHasDisplayContent(s)) return s;
+    if (summaryHasDisplayContent(s, isChat)) return s;
   }
   return (rows[0]?.summary || thread.messages[0]?.summary || {}) as LooseObj;
 }
@@ -162,6 +184,17 @@ export function threadIsText(thread: ThreadView): boolean {
   const c0 = (primary.cleaned || {}) as LooseObj;
   const s = threadSummaryForDisplay(thread);
   return str(s.channel || c0.channel) === "text" || thread.id.startsWith("text:");
+}
+
+export function threadIsSlack(thread: ThreadView): boolean {
+  const primary = thread.messages[0] || { cleaned: null, summary: null };
+  const c0 = (primary.cleaned || {}) as LooseObj;
+  const s = threadSummaryForDisplay(thread);
+  return str(s.channel || c0.channel) === "slack" || thread.id.startsWith("slack:");
+}
+
+export function threadIsEmail(thread: ThreadView): boolean {
+  return !threadIsText(thread) && !threadIsSlack(thread);
 }
 
 export function threadLabel(thread: ThreadView): string {
@@ -264,7 +297,7 @@ export function latestUpdatesForThread(t: ThreadView): string[] {
     out.push(line);
   }
   const legacyStatus = str(s.latest_status).trim();
-  if (!out.length && legacyStatus) out.push(legacyStatus);
+  if (!out.length && legacyStatus && !threadIsText(t) && !threadIsSlack(t)) out.push(legacyStatus);
   for (const raw of arr(s.pending_items)) {
     const line = String(raw).trim();
     if (!line || seen.has(line)) continue;
@@ -273,6 +306,22 @@ export function latestUpdatesForThread(t: ThreadView): string[] {
   }
   const fallback = summaryFallbackProse(s);
   if (!out.length && fallback) out.push(fallback);
+  if ((threadIsText(t) || threadIsSlack(t)) && out.length) {
+    const bodies = new Set(
+      t.messages
+        .map((row) => str((row.cleaned as LooseObj | null)?.cleaned_content).trim())
+        .filter((body) => body && body !== "(attachment)"),
+    );
+    const filtered = out.filter((line) => {
+      const norm = line.trim();
+      if (bodies.has(norm)) return false;
+      for (const body of bodies) {
+        if (body.length >= 40 && norm.includes(body)) return false;
+      }
+      return true;
+    });
+    if (filtered.length) return filtered;
+  }
   return out;
 }
 
@@ -431,8 +480,16 @@ export function shouldShowThreadMessageBlocks(
   thread: ThreadView,
   displayMessages: ThreadView["messages"],
 ): boolean {
+  if (threadIsText(thread) || threadIsSlack(thread)) return false;
   if (displayMessages.length > 1) return true;
   return displayMessages.length === 1 && thread.messages.length > 1;
+}
+
+export function formatChatSenderLabel(sender: string): string {
+  const raw = sender.trim();
+  if (!raw) return "";
+  if (raw.toLowerCase() === "me") return "You";
+  return raw;
 }
 
 export function messageSourceDetailsHtml(c: LooseObj | null): string {

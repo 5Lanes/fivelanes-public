@@ -3,7 +3,8 @@
 Run the fivelanes email + LLM pipeline on a fixed interval, with nightly quiet hours.
 
 Active window defaults to 06:00–19:00 local time (no runs from 19:00 through 05:59).
-Between runs the process sleeps; during quiet hours it sleeps until the next active window.
+The scheduler waits ``FIVELANES_INTERVAL_SEC`` after each run **finishes** (manual or
+scheduled) before starting the next one. Only one pipeline run may execute at a time.
 
   python3 utils/run_fivelanes_scheduler.py
 
@@ -13,8 +14,8 @@ One shot (respects quiet hours; exits without running if currently quiet):
 
 Environment (same names as dashboard_server where applicable):
 
-  FIVELANES_INTERVAL_SEC       seconds between runs (default 900 = 15 minutes)
-  FIVELANES_LOOKBACK_DAYS      passed to fivelanes.main (default 14)
+  FIVELANES_INTERVAL_SEC       seconds after a run ends until the next (default 900)
+  FIVELANES_LOOKBACK_DAYS      passed to fivelanes.main (default 180)
   FIVELANES_QUIET_START_HOUR   inclusive start of quiet period, 0–23 (default 19)
   FIVELANES_QUIET_END_HOUR     exclusive end of quiet period, 0–24 (default 6)
   FIVELANES_SCHEDULER_TZ       IANA timezone for quiet hours (default: system local)
@@ -28,6 +29,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -41,7 +43,9 @@ load_env()
 log = logging.getLogger(__name__)
 
 FIVELANES_INTERVAL_SEC = int(os.getenv("FIVELANES_INTERVAL_SEC", "900"))
-FIVELANES_LOOKBACK_DAYS = int(os.getenv("FIVELANES_LOOKBACK_DAYS", "14"))
+from services.email.config import inbox_lookback_days_from_env
+
+FIVELANES_LOOKBACK_DAYS = inbox_lookback_days_from_env()
 FIVELANES_QUIET_START_HOUR = int(os.getenv("FIVELANES_QUIET_START_HOUR", "19"))
 FIVELANES_QUIET_END_HOUR = int(os.getenv("FIVELANES_QUIET_END_HOUR", "6"))
 
@@ -61,6 +65,25 @@ def _calendar_availability_weeks_from_env() -> int:
 
 
 CALENDAR_AVAILABILITY_WEEKS = _calendar_availability_weeks_from_env()
+
+_pipeline_run_lock = threading.Lock()
+_last_run_finished_mono: float = 0.0
+
+
+def pipeline_run_in_progress() -> bool:
+    """True while a manual or scheduled pipeline cycle holds the global run lock."""
+    return _pipeline_run_lock.locked()
+
+
+def _mark_run_finished() -> None:
+    global _last_run_finished_mono
+    _last_run_finished_mono = time.monotonic()
+
+
+def _seconds_until_next_interval() -> float:
+    if _last_run_finished_mono <= 0:
+        return 0.0
+    return max(0.0, FIVELANES_INTERVAL_SEC - (time.monotonic() - _last_run_finished_mono))
 
 
 def _scheduler_tz() -> ZoneInfo:
@@ -101,8 +124,15 @@ def seconds_until_quiet_ends(
     return max(0.0, (target - when).total_seconds())
 
 
-def run_fivelanes_cycle(*, trigger: str = "scheduler") -> None:
-    """One full scheduled cycle: pipeline and optional calendar export."""
+def run_fivelanes_cycle(*, trigger: str = "scheduler", blocking: bool = True) -> bool:
+    """
+    One full pipeline cycle: email + LLM (+ optional calendar export).
+
+    Returns False when ``blocking`` is False and another run is already in progress.
+    """
+    if not _pipeline_run_lock.acquire(blocking=blocking):
+        return False
+
     import fivelanes as fl
     from services.calendar_availability_export import run_calendar_availability_pull
     from utils.backend_config import get_backend
@@ -114,7 +144,9 @@ def run_fivelanes_cycle(*, trigger: str = "scheduler") -> None:
     err: Optional[str] = None
     try:
         fl.main(lookback_days=FIVELANES_LOOKBACK_DAYS)
-        if not CALENDAR_AVAILABILITY_DISABLE:
+        from utils.features import is_enabled
+
+        if is_enabled("availability") and not CALENDAR_AVAILABILITY_DISABLE:
             out_json = data_path("out", "availability_calendar_latest.json")
             try:
                 run_calendar_availability_pull(
@@ -136,6 +168,9 @@ def run_fivelanes_cycle(*, trigger: str = "scheduler") -> None:
             ok=err is None,
             error=err,
         )
+        _pipeline_run_lock.release()
+        _mark_run_finished()
+    return True
 
 
 def sleep_until_active(tz: ZoneInfo) -> None:
@@ -153,10 +188,28 @@ def sleep_until_active(tz: ZoneInfo) -> None:
     time.sleep(wait_s)
 
 
+def _wait_until_ready_for_scheduled_run(tz: ZoneInfo) -> None:
+    """Sleep through quiet hours, post-run interval, and any in-flight manual run."""
+    while True:
+        sleep_until_active(tz)
+        wait_s = _seconds_until_next_interval()
+        if wait_s > 0:
+            log.info(
+                "Sleeping %.0fs until next run (interval after previous run ended)",
+                wait_s,
+            )
+            time.sleep(wait_s)
+        if not pipeline_run_in_progress():
+            return
+        log.info("Pipeline run in progress; waiting for it to finish")
+        while pipeline_run_in_progress():
+            time.sleep(1)
+
+
 def scheduler_loop(*, run_immediately: bool = True) -> None:
     tz = _scheduler_tz()
     log.info(
-        "Fivelanes scheduler loop started (pid=%d, every %ds, lookback_days=%d, quiet %02d:00–%02d:00 %s)",
+        "Fivelanes scheduler loop started (pid=%d, %ds after each run ends, lookback_days=%d, quiet %02d:00–%02d:00 %s)",
         os.getpid(),
         FIVELANES_INTERVAL_SEC,
         FIVELANES_LOOKBACK_DAYS,
@@ -173,21 +226,23 @@ def scheduler_loop(*, run_immediately: bool = True) -> None:
         )
 
     if not run_immediately:
-        log.info("Waiting %ds before first run", FIVELANES_INTERVAL_SEC)
-        time.sleep(FIVELANES_INTERVAL_SEC)
+        _mark_run_finished()
+        wait_s = _seconds_until_next_interval()
+        if wait_s > 0:
+            log.info("Waiting %.0fs before first run", wait_s)
+            time.sleep(wait_s)
 
     while True:
         try:
-            sleep_until_active(tz)
+            _wait_until_ready_for_scheduled_run(tz)
             started = time.monotonic()
             log.info("Starting fivelanes run")
-            run_fivelanes_cycle()
+            if not run_fivelanes_cycle(trigger="scheduler", blocking=False):
+                continue
             elapsed = time.monotonic() - started
             log.info("Fivelanes run finished in %.1fs", elapsed)
         except Exception:
             log.exception("Scheduled fivelanes run failed")
-        log.info("Sleeping %ds until next run", FIVELANES_INTERVAL_SEC)
-        time.sleep(FIVELANES_INTERVAL_SEC)
 
 
 def main() -> int:

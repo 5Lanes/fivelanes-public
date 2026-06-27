@@ -135,11 +135,13 @@ def summarize_one_text_thread(
     service = conversation_service(messages)
     display_label = f"{label} · {service}" if service else label
 
+    from services.chat.coalesce import coalesce_chat_turns
     from services.llm_service import get_llm_backend
-    from services.pipeline.summary import summarize_thread
+    from services.pipeline.summary import summarize_chat_thread
 
+    turns = coalesce_chat_turns(merged_cleaned)
     tsumm = finalize_thread_summary(
-        summarize_thread(merged_cleaned, mode="full", db_path=db_path, backend=get_llm_backend()),
+        summarize_chat_thread(turns, backend=get_llm_backend()),
         merged_cleaned,
         display_label=display_label,
         channel="text",

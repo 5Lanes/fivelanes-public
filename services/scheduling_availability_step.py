@@ -132,5 +132,9 @@ def calendar_context_for_summary_prompt(
     """
     if _scheduling_step_disabled():
         return _NONE_BLOCK, _scheduler_tz_name()
+    from utils.features import is_enabled
+
+    if not is_enabled("availability"):
+        return _NONE_BLOCK, _scheduler_tz_name()
     events, tz_name = load_calendar_events(db_path=db_path, project_root=project_root)
     return format_calendar_events_block(events), tz_name

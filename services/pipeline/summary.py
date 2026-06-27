@@ -153,6 +153,25 @@ def summarize_thread(
     return finalize_thread_summary(summary, cleaned)
 
 
+def summarize_chat_thread(
+    cleaned: List[Dict[str, Any]],
+    *,
+    db_path: str | None = None,
+    backend: LlmBackend | None = None,
+) -> Dict[str, Any]:
+    """Full summary for a chat thread (Slack/SMS) using turn-based prompts."""
+    from services.prompts import format_chat_thread_summary_prompt
+
+    llm = backend or get_llm_backend()
+    blocks = build_summary_blocks(cleaned)
+    prompt = format_chat_thread_summary_prompt(blocks)
+    try:
+        summary = llm.submit_summary(prompt)
+    except Exception as exc:
+        summary = {"api_error": str(exc)}
+    return finalize_thread_summary(summary, cleaned)
+
+
 def resolve_thread_summary(
     db_path: str,
     thread_id: str,

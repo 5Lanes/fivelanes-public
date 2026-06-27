@@ -115,6 +115,36 @@ def _attributed_fallback_updates(cleaned: List[Dict[str, Any]]) -> List[str]:
     return []
 
 
+def _chat_attributed_fallback_updates(
+    cleaned: List[Dict[str, Any]],
+    *,
+    display_label: str = "",
+) -> List[str]:
+    """Short attribution line for chat when the model pasted message text verbatim."""
+    contact = (display_label.split(" · ")[0] if display_label else "").strip()
+    for row in reversed(cleaned):
+        sender = str(row.get("sender") or "").strip().lower()
+        body = str(row.get("cleaned_content") or "").strip()
+        if not body or body == "(attachment)":
+            continue
+        if sender == "me":
+            return [f"You messaged {contact}." if contact else "You sent a message."]
+        who = _sender_display_name(str(row.get("sender") or "")) or contact or "Contact"
+        return [f"{who} messaged you."]
+    return []
+
+
+def _chat_fallback_updates(
+    cleaned: List[Dict[str, Any]],
+    *,
+    display_label: str = "",
+    channel: str = "",
+) -> List[str]:
+    if channel in ("slack", "text"):
+        return _chat_attributed_fallback_updates(cleaned, display_label=display_label)
+    return _attributed_fallback_updates(cleaned)
+
+
 def _display_label_from_cleaned(cleaned: List[Dict[str, Any]]) -> str:
     if not cleaned:
         return ""
@@ -155,7 +185,9 @@ def normalize_thread_summary(
                 updates = filtered
                 seen = set(filtered)
             else:
-                fallback = _attributed_fallback_updates(cleaned)
+                fallback = _chat_fallback_updates(
+                    cleaned, display_label=label, channel=channel
+                )
                 if fallback:
                     updates = fallback
                     seen = set(fallback)
@@ -197,7 +229,10 @@ def normalize_thread_summary(
             _append_update(updates, seen, last_content[:240])
 
         if not updates and not incoming_api_error:
-            updates = _updates_from_cleaned(cleaned)
+            if channel in ("slack", "text"):
+                updates = _chat_attributed_fallback_updates(cleaned, display_label=label)
+            else:
+                updates = _updates_from_cleaned(cleaned)
 
     if updates:
         out["latest_updates"] = updates[:8]

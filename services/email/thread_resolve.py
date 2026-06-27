@@ -1,9 +1,14 @@
-"""Gmail thread expansion primitives and timeline population entrypoint."""
+"""Gmail thread expansion primitives and timeline population entrypoint.
+
+Canonical message ids: ``timeline_entries.source_id`` comes from the source mailbox
+thread (``resolve_source_mailbox_thread``), not from Fivelanes inbox forward/cc shells.
+Inbox ``thread_tracking.inbox_thread_id`` is unchanged and still drives snooze/removal.
+See README § "Thread identity: inbox tracking vs timeline messages".
+"""
 from __future__ import annotations
 
 import logging
 import sqlite3
-from email.utils import getaddresses
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from googleapiclient.errors import HttpError
@@ -17,19 +22,17 @@ from services.email.gmail_message import (
     row_from_full_message,
 )
 from services.email.message_body import gmail_message_is_draft
-from services.email.forwarding import primary_email_from_sender
+from services.email.forwarding import _angle_bracket_ids
 from services.email.recipients import (
     extract_emails_lower,
     recipients_contain_address,
     to_field_contains_address,
 )
-from services.email.subject import strip_subject_prefix_chain
 from services.gmail_client import (
     find_thread_id_by_rfc_message_id,
     get_all_gmail_services,
     get_gmail_services_for_account_id,
     mailbox_identity_emails,
-    normalize_gmail_address,
     oauth_account_id_for_email,
 )
 
@@ -224,6 +227,124 @@ def latest_row_datetime(rows: List[Dict[str, Any]]) -> str:
     return best
 
 
+def _normalize_rfc_message_id(ref: str) -> str:
+    return (ref or "").strip().strip("<>")
+
+
+def _rfc_ids_from_gmail_message(msg: dict) -> set[str]:
+    """RFC Message-IDs from Message-ID / In-Reply-To / References headers."""
+    hdrs = (msg.get("payload") or {}).get("headers") or []
+    found: set[str] = set()
+    for header_name in ("Message-ID", "In-Reply-To", "References"):
+        val = get_header(hdrs, header_name)
+        for rid in _angle_bracket_ids(val):
+            norm = _normalize_rfc_message_id(rid)
+            if norm and "@" in norm:
+                found.add(norm)
+    return found
+
+
+def _ingest_thread_rfc_headers(
+    service: Any, thread_id: str, *, seen_rfcs: set[str], frontier: List[str]
+) -> None:
+    try:
+        thr = (
+            service.users()
+            .threads()
+            .get(userId="me", id=thread_id, format="full")
+            .execute()
+        )
+    except HttpError as exc:
+        log.warning("RFC header fetch failed thread_id=%s: %s", thread_id, exc)
+        return
+    for msg in thr.get("messages") or []:
+        for rfc in _rfc_ids_from_gmail_message(msg):
+            if rfc not in seen_rfcs:
+                seen_rfcs.add(rfc)
+                frontier.append(rfc)
+
+
+def pull_rfc_linked_thread_rows(
+    candidate: ThreadExpansionCandidate,
+    *,
+    include_body: bool,
+    max_rfc_lookups: int = 50,
+) -> List[Dict[str, Any]]:
+    """
+    Pull Gmail threads reachable via RFC Message-ID / References / In-Reply-To only.
+
+    Does not search by sender, recipient, subject, or relay envelope addresses.
+    """
+    pairs = get_gmail_services_for_account_id(candidate.account_id)
+    if not pairs:
+        return []
+    aid, svc = pairs[0]
+    remote_tid = (candidate.remote_thread_id or "").strip()
+    if not remote_tid:
+        return []
+
+    seen_threads: set[str] = {remote_tid}
+    seen_rfcs: set[str] = set()
+    frontier: List[str] = []
+    merged: List[Dict[str, Any]] = []
+    lookups = 0
+
+    _ingest_thread_rfc_headers(svc, remote_tid, seen_rfcs=seen_rfcs, frontier=frontier)
+
+    while frontier and lookups < max_rfc_lookups:
+        rfc = frontier.pop()
+        lookups += 1
+        linked_tid = find_thread_id_by_rfc_message_id(svc, rfc)
+        if not linked_tid or linked_tid in seen_threads:
+            continue
+        seen_threads.add(linked_tid)
+        cont = pull_remote_thread_candidate(
+            aid, svc, linked_tid, include_body=include_body
+        )
+        if not cont.rows:
+            continue
+        log.info(
+            "Thread resolver RFC-linked: account=%s remote_thread_id=%s messages=%d anchor_rfc=%s",
+            aid,
+            linked_tid,
+            cont.message_count,
+            rfc,
+        )
+        merged.extend(cont.rows)
+        _ingest_thread_rfc_headers(
+            svc, linked_tid, seen_rfcs=seen_rfcs, frontier=frontier
+        )
+
+    return merged
+
+
+def resolve_source_mailbox_thread(
+    *,
+    source_email: str,
+    envelope_rfc: str,
+) -> Optional[Tuple[str, Any, str]]:
+    """
+    Locate the Gmail thread where a conversation lives (not the Fivelanes inbox copy).
+
+    Uses the forwarder's connected OAuth account and an envelope RFC Message-ID.
+    Returns ``(account_id, service, remote_thread_id)`` or ``None``.
+    """
+    rfc = (envelope_rfc or "").strip().strip("<>")
+    if not rfc:
+        return None
+    preferred = oauth_account_id_for_email(source_email)
+    if not preferred:
+        return None
+    pairs = get_gmail_services_for_account_id(preferred)
+    if not pairs:
+        return None
+    aid, svc = pairs[0]
+    remote_tid = find_thread_id_by_rfc_message_id(svc, rfc)
+    if not remote_tid:
+        return None
+    return aid, svc, remote_tid
+
+
 def bind_timeline_rows_to_inbox_thread(
     rows: List[Dict[str, Any]], inbox_thread_id: str
 ) -> List[Dict[str, Any]]:
@@ -324,163 +445,15 @@ def pick_best_thread_expansion(
     return global_best
 
 
-def anchor_metadata_from_inner_rfc(inner_rfc: str) -> Optional[Tuple[str, str]]:
-    """
-    Return ``(counterparty_email, subject_core)`` from the first connected mailbox
-    that contains the inner RFC Message-ID (used to search the forwarder's account).
-    """
-    mid = (inner_rfc or "").strip().strip("<>")
-    if not mid:
-        return None
-    q = f"rfc822msgid:{mid}"
-    for aid, svc in get_all_gmail_services():
-        try:
-            resp = (
-                svc.users()
-                .messages()
-                .list(userId="me", q=q, maxResults=1)
-                .execute()
-            )
-            refs = resp.get("messages") or []
-            if not refs or not refs[0].get("id"):
-                continue
-            meta = (
-                svc.users()
-                .messages()
-                .get(
-                    userId="me",
-                    id=refs[0]["id"],
-                    format="metadata",
-                    metadataHeaders=["From", "To", "Subject"],
-                )
-                .execute()
-            )
-        except HttpError as exc:
-            log.debug(
-                "anchor metadata fetch failed on account=%s: %s", aid, exc
-            )
-            continue
-        hdrs = (meta.get("payload") or {}).get("headers") or []
-        from_h = get_header(hdrs, "From")
-        to_h = get_header(hdrs, "To")
-        subject_core = strip_subject_prefix_chain(get_header(hdrs, "Subject") or "")
-        counterparty = ""
-        for hdr in (from_h, to_h):
-            for _, addr in getaddresses([hdr or ""]):
-                em = normalize_gmail_address(addr)
-                if em and "@" in em:
-                    counterparty = em
-                    break
-            if counterparty:
-                break
-        if not counterparty:
-            counterparty = primary_email_from_sender(from_h)
-        if counterparty:
-            log.info(
-                "Thread resolver anchor from account=%s: counterparty=%s subject_core=%r",
-                aid,
-                counterparty,
-                subject_core[:80] if subject_core else "",
-            )
-            return counterparty, subject_core
-    return None
-
-
-def gmail_thread_ids_for_correspondence(
-    service: Any,
-    counterparty_email: str,
-    subject_core: str,
-    *,
-    max_results: int = 25,
-) -> List[str]:
-    """Gmail thread ids involving ``counterparty_email`` (optional subject filter)."""
-    cp = (counterparty_email or "").strip().lower()
-    if not cp or "@" not in cp:
-        return []
-    q_parts = [f"(from:{cp} OR to:{cp})"]
-    if subject_core:
-        safe_subj = (subject_core or "").replace('"', "").strip()
-        if safe_subj:
-            q_parts.append(f'subject:"{safe_subj}"')
-    q = " ".join(q_parts)
-    try:
-        resp = (
-            service.users()
-            .messages()
-            .list(userId="me", q=q, maxResults=max_results)
-            .execute()
-        )
-    except HttpError as exc:
-        log.warning("correspondence thread search failed: %s", exc)
-        return []
-    ordered: List[str] = []
-    seen: set[str] = set()
-    for ref in resp.get("messages") or []:
-        tid = (ref.get("threadId") or "").strip()
-        if tid and tid not in seen:
-            seen.add(tid)
-            ordered.append(tid)
-    return ordered
-
-
-def add_correspondence_candidates_on_forwarder(
-    candidates: List[ThreadExpansionCandidate],
-    *,
-    preferred_account_id: str,
-    inner_rfc: str,
-    include_body: bool,
-    seen_pulls: set[Tuple[str, str]],
-    add_fn: Any,
-) -> None:
-    """
-    When the forwarder's mailbox has no (or a shorter) RFC-resolved thread, search by
-    counterparty + subject from the anchor message on another account.
-    """
-    pairs = get_gmail_services_for_account_id(preferred_account_id)
-    if not pairs:
-        return
-    pref_max = max(
-        (c.message_count for c in candidates if c.account_id == preferred_account_id),
-        default=0,
-    )
-    global_max = max((c.message_count for c in candidates), default=0)
-    if pref_max >= global_max and pref_max > 0:
-        return
-
-    anchor = anchor_metadata_from_inner_rfc(inner_rfc)
-    if not anchor:
-        return
-    counterparty, subject_core = anchor
-    aid, svc = pairs[0]
-    thread_ids = gmail_thread_ids_for_correspondence(
-        svc, counterparty, subject_core
-    )
-    log.info(
-        "Thread resolver: correspondence search on forwarder account=%s "
-        "counterparty=%s threads=%d (pref_max=%d global_max=%d)",
-        aid,
-        counterparty,
-        len(thread_ids),
-        pref_max,
-        global_max,
-    )
-    for tid in thread_ids:
-        add_fn(aid, svc, tid)
-
-
 def collect_thread_expansion_candidates(
     row: Dict[str, Any],
     *,
     include_body: bool,
 ) -> List[ThreadExpansionCandidate]:
-    """
-    Resolve ``inner_rfc_message_id`` on every connected account and pull each hit.
-    Also try a direct pull on ``resolved_oauth_account_id`` + ``inbox_thread_id`` when set.
-    """
+    """Resolve ``inner_rfc_message_id`` on every connected account and pull each hit."""
     source_email = (row.get("source_email") or "").strip()
     inbox_tid = (row.get("inbox_thread_id") or "").strip()
     inner_rfc = (row.get("inner_rfc_message_id") or "").strip() or None
-    preferred = oauth_account_id_for_email(source_email)
     candidates: List[ThreadExpansionCandidate] = []
     seen_pulls: set[Tuple[str, str]] = set()
 
@@ -501,18 +474,6 @@ def collect_thread_expansion_candidates(
                 cand.message_count,
             )
 
-    pinned_account = (row.get("resolved_oauth_account_id") or "").strip()
-    if pinned_account and inbox_tid:
-        pairs = get_gmail_services_for_account_id(pinned_account)
-        if pairs:
-            aid, svc = pairs[0]
-            log.info(
-                "Thread resolver: direct pull account=%s thread_id=%s",
-                aid,
-                inbox_tid,
-            )
-            _add_candidate(aid, svc, inbox_tid)
-
     if inner_rfc:
         for aid, svc in gmail_account_candidates(source_email):
             log.info(
@@ -523,16 +484,6 @@ def collect_thread_expansion_candidates(
             remote_tid = find_thread_id_by_rfc_message_id(svc, inner_rfc)
             if remote_tid:
                 _add_candidate(aid, svc, remote_tid)
-
-        if preferred:
-            add_correspondence_candidates_on_forwarder(
-                candidates,
-                preferred_account_id=preferred,
-                inner_rfc=inner_rfc,
-                include_body=include_body,
-                seen_pulls=seen_pulls,
-                add_fn=_add_candidate,
-            )
 
     return candidates
 

@@ -4,6 +4,7 @@
  */
 
 import { dayHeadingLabelShort, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdInTz } from "./shared/time_ui.js";
+import { isFeatureEnabled } from "./shared/features.js";
 import { escapeHtml } from "./shared/utils.js";
 
 type LooseObj = Record<string, unknown>;
@@ -292,6 +293,7 @@ export async function refreshAvailabilityPanel(): Promise<void> {
   const metaEl = document.getElementById("availability-meta");
   const agendaEl = document.getElementById("availability-agenda");
   if (!section || !metaEl || !agendaEl) return;
+  if (!isFeatureEnabled("availability")) return;
 
   const url = `/out/availability_calendar_latest.json?cb=${Date.now()}`;
   try {

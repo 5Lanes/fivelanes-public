@@ -1,4 +1,5 @@
 import { escapeHtml } from "./utils.js";
+import { isFeatureEnabled } from "./features.js";
 import { extractSlotMentions } from "./slot_mentions.js";
 import { findStructuredMentionsInText, mergeMentionLists } from "./structured_slot_mentions.js";
 import type { AvailabilityMatch, AvailabilityStatus, CounterpartySlot, LooseObj, SlotMention } from "./types.js";
@@ -295,6 +296,10 @@ function tooltipForMatch(match: AvailabilityMatch): string {
 }
 
 export async function ensureAvailabilityDocLoaded(): Promise<void> {
+  if (!isFeatureEnabled("availability")) {
+    currentDoc = null;
+    return;
+  }
   if (currentDoc) return;
   if (!availabilityPromise) {
     availabilityPromise = (async () => {

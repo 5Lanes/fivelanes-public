@@ -18,7 +18,7 @@ FIVELANES_BACKEND = os.getenv("FIVELANES_BACKEND") or "llama"
 
 
 def run_email_pipeline(
-    lookback_days: int = 14,
+    lookback_days: int = 180,
     *,
     db_path: Optional[str] = None,
     max_results: int = 500,
@@ -38,7 +38,7 @@ def run_email_pipeline(
     )
 
 def run_llm_pipeline(
-    lookback_days: int = 14,
+    lookback_days: int = 180,
     *,
     db_path: Optional[str] = None,
     backend: Optional[str] = None,
@@ -83,16 +83,28 @@ def main(
     run_email_pipeline(lookback_days=lookback_days, max_results=500)
     run_llm_pipeline(lookback_days=lookback_days)
     try:
-        from services.texts.summarize import summarize_tracked_text_threads
+        from utils.features import is_enabled
 
-        summary_result = summarize_tracked_text_threads(DATABASE_NAME)
-        log.info(
-            "Text thread summaries: %d updated, %d skipped",
-            summary_result.get("summarized", 0),
-            summary_result.get("skipped", 0),
-        )
+        if is_enabled("texts"):
+            from services.texts.summarize import summarize_tracked_text_threads
+
+            summary_result = summarize_tracked_text_threads(DATABASE_NAME)
+            log.info(
+                "Text thread summaries: %d updated, %d skipped",
+                summary_result.get("summarized", 0),
+                summary_result.get("skipped", 0),
+            )
+        if is_enabled("slack"):
+            from services.slack.summarize import summarize_tracked_slack_threads
+
+            slack_result = summarize_tracked_slack_threads(DATABASE_NAME)
+            log.info(
+                "Slack thread summaries: %d updated, %d skipped",
+                slack_result.get("summarized", 0),
+                slack_result.get("skipped", 0),
+            )
     except Exception as exc:
-        log.warning("Text thread summarization skipped: %s", exc)
+        log.warning("Text/Slack thread summarization skipped: %s", exc)
     if (os.getenv("FIVELANES_RETRY_FAILED") or "1").strip().lower() not in (
         "0",
         "false",

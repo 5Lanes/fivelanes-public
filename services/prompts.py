@@ -86,29 +86,7 @@ def _prompt_template(key: str) -> Union[str, Dict[str, str]]:
     prompts = _load_prompts()
     if key in prompts:
         return prompts[key]
-    if key == "lane_summary" and "person_summary" in prompts:
-        return _lane_summary_from_person_prompt(prompts["person_summary"])
     raise KeyError(key)
-
-
-def _lane_summary_from_person_prompt(
-    raw: Union[str, Dict[str, str]],
-) -> Union[str, Dict[str, str]]:
-    """Derive lane_summary templates from person_summary for older prompts.json files."""
-
-    def adapt(text: str) -> str:
-        return (
-            text.replace("{person_name}", "{lane_name}")
-            .replace("person-level", "lane-level")
-            .replace("person level", "lane level")
-        )
-
-    if isinstance(raw, dict):
-        return {
-            "system": adapt(str(raw.get("system") or "")),
-            "user": adapt(str(raw.get("user") or "")),
-        }
-    return adapt(str(raw))
 
 
 def _format_prompt_pair(key: str, **kwargs: Any) -> PromptMessages:
@@ -174,6 +152,14 @@ def _sanitize_summary_text(text: Any) -> str:
 
 def _thread_message_block_template() -> str:
     return str(_load_prompts()["thread_message_block"])
+
+
+def _chat_message_block_template() -> str:
+    prompts = _load_prompts()
+    return str(
+        prompts.get("chat_thread_message_block")
+        or "--- Turn {index} ---\n{datetime} | {sender}\n{content}"
+    )
 
 
 def _thread_summary_block_template() -> str:
@@ -361,6 +347,37 @@ def format_thread_summary_prompt(
     )
 
 
+def format_chat_thread_summary_prompt(
+    messages: Sequence[Dict[str, Any]],
+    *,
+    as_of: datetime | None = None,
+) -> PromptMessages:
+    """
+    Thread summary prompt for chat channels (Slack, SMS).
+
+    Uses coalesced turns and omits calendar/scheduling context.
+    """
+    settings = _load_settings()
+    max_turns = int(settings.get("chat_thread_summary_max_turns") or 40)
+    thread_messages, _ = _build_thread_message_blocks(
+        messages,
+        max_messages=max_turns,
+        message_template=_chat_message_block_template(),
+        sanitize=True,
+        chronological=True,
+    )
+    aliases = ", ".join(_summary_routing_aliases())
+    return _format_prompt_pair(
+        "email_thread_summary",
+        thread_messages=thread_messages,
+        last_message_anchor=build_last_message_anchor(messages),
+        summary_routing_aliases=aliases,
+        summary_datetime=summary_as_of_datetime(as_of=as_of),
+        calendar_events_block="(none — chat conversation; omit scheduling availability next_step)",
+        calendar_timezone="UTC",
+    )
+
+
 def format_incremental_thread_summary_prompt(
     prior_summary: Dict[str, Any],
     new_messages: Sequence[Dict[str, Any]],
@@ -385,7 +402,7 @@ def format_incremental_thread_summary_prompt(
         db_path=db_path,
         project_root=project_root,
     )
-    prior_json = json.dumps(prior_summary if isinstance(prior_summary, dict) else {}, indent=2)
+    prior_json = json.dumps(_summary_for_llm_prompt(prior_summary), indent=2)
     return _format_prompt_pair(
         "email_thread_summary_incremental",
         prior_summary_json=prior_json,
@@ -430,8 +447,34 @@ def format_image_description_prompt(*, context: str = "") -> PromptMessages:
     return _format_prompt_pair("image_description", context=(context or "").strip())
 
 
-def _thread_status_label(snoozed: Any) -> str:
-    return "snoozed" if int(snoozed or 0) == 1 else "active"
+# Dashboard-only fields — never embed in summarization model prompts.
+_LLM_SUMMARY_EXCLUDE_KEYS = frozenset(
+    {
+        "snoozed",
+        "has_plan",
+        "source_id",
+        "thread_id",
+        "datetime",
+        "sender",
+        "subject",
+        "cleaned_content",
+        "quoted_reply",
+        "signature",
+        "summary_api_error",
+        "api_error",
+        "message_count",
+        "summarized_message_count",
+        "channel",
+        "latest_status",
+    }
+)
+
+
+def _summary_for_llm_prompt(summary: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop UI/snooze metadata before embedding a thread summary in an LLM prompt."""
+    if not isinstance(summary, dict):
+        return {}
+    return {k: v for k, v in summary.items() if k not in _LLM_SUMMARY_EXCLUDE_KEYS}
 
 
 def _format_latest_updates_block(updates: Any) -> str:
@@ -540,7 +583,6 @@ def _format_thread_summary_block(
         index=index,
         label=label,
         datetime=dt,
-        status=_thread_status_label(summary.get("snoozed")),
         tone=str(summary.get("tone") or "").strip() or "(unknown)",
         last_sender=str(summary.get("last_sender") or "").strip(),
         latest_updates_block=_format_latest_updates_block(summary.get("latest_updates")),
@@ -556,7 +598,7 @@ def _build_aggregate_thread_summary_blocks(
     db_path: str | None = None,
 ) -> str:
     """
-    Format existing thread summaries for lane/person aggregate prompts.
+    Format existing thread summaries for lane aggregate prompts.
 
     Threads are sorted by earliest email datetime ascending. When over the cap,
     only the most recent threads are included, still shown in chronological order.
@@ -592,37 +634,6 @@ def _build_aggregate_thread_summary_blocks(
     return "\n\n".join(blocks)
 
 
-def format_person_summary_prompt(
-    person_name: str,
-    thread_summaries: Sequence[Dict[str, Any]],
-    *,
-    block_template: str | None = None,
-    as_of: datetime | None = None,
-    db_path: str | None = None,
-) -> PromptMessages:
-    """
-    Build a person-level summary prompt from existing thread summaries (not raw email).
-
-    Each summary dict should include fields produced by thread summarization, such as
-    ``datetime``, ``latest_updates``, ``next_steps``, ``tone``, ``suggested_thread_label``,
-    and ``snoozed``.
-    """
-    settings = _load_settings()
-    max_threads = int(settings.get("person_summary_max_threads") or 10)
-    thread_summaries_text = _build_aggregate_thread_summary_blocks(
-        thread_summaries,
-        max_threads=max_threads,
-        block_template=block_template,
-        db_path=db_path,
-    )
-    return _format_prompt_pair(
-        "person_summary",
-        person_name=(person_name or "").strip() or "(unnamed person)",
-        thread_summaries=thread_summaries_text,
-        summary_datetime=summary_as_of_datetime(as_of=as_of),
-    )
-
-
 def format_lane_summary_prompt(
     lane_name: str,
     thread_summaries: Sequence[Dict[str, Any]],
@@ -635,15 +646,10 @@ def format_lane_summary_prompt(
     Build a lane-level summary prompt from existing thread summaries (not raw email).
 
     Each summary dict should include fields produced by thread summarization, such as
-    ``datetime``, ``latest_updates``, ``next_steps``, ``tone``, ``suggested_thread_label``,
-    and ``snoozed``.
+    ``datetime``, ``latest_updates``, ``next_steps``, ``tone``, and ``suggested_thread_label``.
     """
     settings = _load_settings()
-    max_threads = int(
-        settings.get("lane_summary_max_threads")
-        or settings.get("person_summary_max_threads")
-        or 10
-    )
+    max_threads = int(settings.get("lane_summary_max_threads") or 10)
     thread_summaries_text = _build_aggregate_thread_summary_blocks(
         thread_summaries,
         max_threads=max_threads,

@@ -2,14 +2,15 @@ import { bindPipelineControls } from "./pipeline_controls.js";
 import { MEETINGS_LOOKAHEAD_DAYS, prefetchMeetings } from "./meetings_panel.js";
 import { bindDashboardInteractions, mountDashboardPage, renderDashboardPage, } from "./pages/dashboard_page.js";
 import { bindLanesInteractions, mountLanesPage, renderLanesPage } from "./pages/lanes_page.js";
-import { bindPeopleInteractions, mountPeoplePage, renderPeoplePage } from "./pages/people_page.js";
 import { mountMeetingsPage, renderMeetingsPage } from "./pages/meetings_page.js";
 import { bindPlansInteractions, mountPlansPage, renderPlansPage } from "./pages/plans_page.js";
 import { bindThreadsInteractions, mountThreadsPage, renderThreadsPage } from "./pages/threads_page.js";
+import { bindSlackSetupInteractions, mountSlackSetupPage, renderSlackSetupPage, } from "./pages/slack_setup_page.js";
 import { bindTextsSetupInteractions, mountTextsSetupPage, renderTextsSetupPage, } from "./pages/texts_setup_page.js";
 import { refreshPipelineRunMeta } from "./pipeline_run_meta.js";
 import { loadLatestBundle, setBundle } from "./shared/summaries_store.js";
-import { ensureOwnerConfigLoaded } from "./shared/owner_config.js";
+import { applyNavFeatureVisibility, isFeatureEnabled, setFeaturesConfigForTests } from "./shared/features.js";
+import { setOwnerConfigForTests } from "./shared/owner_config.js";
 import { setDisplaySourceAccount } from "./shared/thread_domain.js";
 import { escapeHtml } from "./shared/utils.js";
 const runMetaEl = document.getElementById("run-meta");
@@ -25,12 +26,12 @@ export function routeFromPathname(pathname) {
         return "meetings";
     if (path === "/lanes")
         return "lanes";
-    if (path === "/people")
-        return "people";
     if (path === "/plans")
         return "plans";
     if (path === "/texts-setup")
         return "texts-setup";
+    if (path === "/slack-setup")
+        return "slack-setup";
     if (path === "/threads" || path === "/" || path === "/summaries.html")
         return "threads";
     return "threads";
@@ -43,9 +44,19 @@ function setActiveNav(route) {
 function showBootstrapError(message) {
     pageRoot.innerHTML = `<div class="view-empty"><p class="empty-state">${escapeHtml(message)}</p></div>`;
 }
+const ROUTE_FEATURES = {
+    "texts-setup": "texts",
+    "slack-setup": "slack",
+};
 async function renderPage(route) {
     setActiveNav(route);
     pageRoot.innerHTML = "";
+    const requiredFeature = ROUTE_FEATURES[route];
+    if (requiredFeature && !isFeatureEnabled(requiredFeature)) {
+        pageRoot.innerHTML =
+            '<div class="view-empty"><p class="empty-state">This feature requires Fivelanes Premium.</p></div>';
+        return;
+    }
     if (route === "dashboard") {
         mountDashboardPage(pageRoot);
         bindDashboardInteractions();
@@ -64,12 +75,6 @@ async function renderPage(route) {
         await renderLanesPage();
         return;
     }
-    if (route === "people") {
-        mountPeoplePage(pageRoot);
-        bindPeopleInteractions();
-        await renderPeoplePage();
-        return;
-    }
     if (route === "plans") {
         mountPlansPage(pageRoot);
         bindPlansInteractions();
@@ -80,6 +85,12 @@ async function renderPage(route) {
         mountTextsSetupPage(pageRoot);
         bindTextsSetupInteractions();
         await renderTextsSetupPage();
+        return;
+    }
+    if (route === "slack-setup") {
+        mountSlackSetupPage(pageRoot);
+        bindSlackSetupInteractions();
+        await renderSlackSetupPage();
         return;
     }
     mountThreadsPage(pageRoot);
@@ -99,15 +110,17 @@ async function bootstrap() {
     });
     const route = routeFromPathname(location.pathname);
     try {
-        await ensureOwnerConfigLoaded();
         const configRes = await fetch("/api/config", { credentials: "same-origin" });
-        if (configRes.ok) {
-            const config = (await configRes.json());
-            const source = typeof config.source_account === "string" ? config.source_account : "";
-            if (source)
-                setDisplaySourceAccount(source);
-        }
-        if (route !== "texts-setup") {
+        if (!configRes.ok)
+            throw new Error(`Config load failed (${configRes.status})`);
+        const config = (await configRes.json());
+        setOwnerConfigForTests(config);
+        setFeaturesConfigForTests(config);
+        applyNavFeatureVisibility();
+        const source = typeof config.source_account === "string" ? config.source_account : "";
+        if (source)
+            setDisplaySourceAccount(source);
+        if (route !== "texts-setup" && route !== "slack-setup") {
             const { data, label } = await loadLatestBundle();
             setBundle(data, label);
         }

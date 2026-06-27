@@ -6,10 +6,14 @@ import {
   renderDashboardPage,
 } from "./pages/dashboard_page.js";
 import { bindLanesInteractions, mountLanesPage, renderLanesPage } from "./pages/lanes_page.js";
-import { bindPeopleInteractions, mountPeoplePage, renderPeoplePage } from "./pages/people_page.js";
 import { mountMeetingsPage, renderMeetingsPage } from "./pages/meetings_page.js";
 import { bindPlansInteractions, mountPlansPage, renderPlansPage } from "./pages/plans_page.js";
 import { bindThreadsInteractions, mountThreadsPage, renderThreadsPage } from "./pages/threads_page.js";
+import {
+  bindSlackSetupInteractions,
+  mountSlackSetupPage,
+  renderSlackSetupPage,
+} from "./pages/slack_setup_page.js";
 import {
   bindTextsSetupInteractions,
   mountTextsSetupPage,
@@ -17,7 +21,8 @@ import {
 } from "./pages/texts_setup_page.js";
 import { refreshPipelineRunMeta } from "./pipeline_run_meta.js";
 import { clearSummariesBundleCache, loadLatestBundle, setBundle } from "./shared/summaries_store.js";
-import { ensureOwnerConfigLoaded } from "./shared/owner_config.js";
+import { applyNavFeatureVisibility, isFeatureEnabled, setFeaturesConfigForTests } from "./shared/features.js";
+import { setOwnerConfigForTests } from "./shared/owner_config.js";
 import { setDisplaySourceAccount } from "./shared/thread_domain.js";
 import type { AppRoute } from "./shared/types.js";
 import { escapeHtml } from "./shared/utils.js";
@@ -34,9 +39,9 @@ export function routeFromPathname(pathname: string): AppRoute {
   if (path === "/dashboard") return "dashboard";
   if (path === "/meetings") return "meetings";
   if (path === "/lanes") return "lanes";
-  if (path === "/people") return "people";
   if (path === "/plans") return "plans";
   if (path === "/texts-setup") return "texts-setup";
+  if (path === "/slack-setup") return "slack-setup";
   if (path === "/threads" || path === "/" || path === "/summaries.html") return "threads";
   return "threads";
 }
@@ -51,9 +56,21 @@ function showBootstrapError(message: string): void {
   pageRoot.innerHTML = `<div class="view-empty"><p class="empty-state">${escapeHtml(message)}</p></div>`;
 }
 
+const ROUTE_FEATURES: Partial<Record<AppRoute, string>> = {
+  "texts-setup": "texts",
+  "slack-setup": "slack",
+};
+
 async function renderPage(route: AppRoute): Promise<void> {
   setActiveNav(route);
   pageRoot.innerHTML = "";
+
+  const requiredFeature = ROUTE_FEATURES[route];
+  if (requiredFeature && !isFeatureEnabled(requiredFeature)) {
+    pageRoot.innerHTML =
+      '<div class="view-empty"><p class="empty-state">This feature requires Fivelanes Premium.</p></div>';
+    return;
+  }
 
   if (route === "dashboard") {
     mountDashboardPage(pageRoot);
@@ -76,13 +93,6 @@ async function renderPage(route: AppRoute): Promise<void> {
     return;
   }
 
-  if (route === "people") {
-    mountPeoplePage(pageRoot);
-    bindPeopleInteractions();
-    await renderPeoplePage();
-    return;
-  }
-
   if (route === "plans") {
     mountPlansPage(pageRoot);
     bindPlansInteractions();
@@ -94,6 +104,13 @@ async function renderPage(route: AppRoute): Promise<void> {
     mountTextsSetupPage(pageRoot);
     bindTextsSetupInteractions();
     await renderTextsSetupPage();
+    return;
+  }
+
+  if (route === "slack-setup") {
+    mountSlackSetupPage(pageRoot);
+    bindSlackSetupInteractions();
+    await renderSlackSetupPage();
     return;
   }
 
@@ -118,14 +135,15 @@ async function bootstrap(): Promise<void> {
   });
   const route = routeFromPathname(location.pathname);
   try {
-    await ensureOwnerConfigLoaded();
     const configRes = await fetch("/api/config", { credentials: "same-origin" });
-    if (configRes.ok) {
-      const config = (await configRes.json()) as Record<string, unknown>;
-      const source = typeof config.source_account === "string" ? config.source_account : "";
-      if (source) setDisplaySourceAccount(source);
-    }
-    if (route !== "texts-setup") {
+    if (!configRes.ok) throw new Error(`Config load failed (${configRes.status})`);
+    const config = (await configRes.json()) as Record<string, unknown>;
+    setOwnerConfigForTests(config);
+    setFeaturesConfigForTests(config);
+    applyNavFeatureVisibility();
+    const source = typeof config.source_account === "string" ? config.source_account : "";
+    if (source) setDisplaySourceAccount(source);
+    if (route !== "texts-setup" && route !== "slack-setup") {
       const { data, label } = await loadLatestBundle();
       setBundle(data, label);
     }

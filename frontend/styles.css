@@ -1020,16 +1020,14 @@ header p.run-meta {
   padding: 1.25rem 1.35rem 1.5rem;
 }
 
-.view-lanes,
-.view-people {
+.view-lanes {
   display: flex;
   flex-direction: column;
   gap: 1rem;
   min-width: 0;
 }
 
-.lanes-toolbar,
-.people-toolbar {
+.lanes-toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
@@ -1037,12 +1035,9 @@ header p.run-meta {
 }
 
 .create-lane-btn,
-.create-person-btn,
 .create-lane-form button,
-.create-person-form button,
 .lane-edit-threads-btn,
-.person-edit-threads-btn,
-.person-refresh-summary-btn {
+.lane-refresh-summary-btn {
   font-size: 0.85rem;
   font-family: system-ui, sans-serif;
   padding: 0.45rem 0.75rem;
@@ -1054,22 +1049,18 @@ header p.run-meta {
 }
 
 .create-lane-btn:hover,
-.create-person-btn:hover,
 .create-lane-form button:hover,
-.create-person-form button:hover,
 .lane-edit-threads-btn:hover,
-.person-edit-threads-btn:hover,
-.person-refresh-summary-btn:hover:not(:disabled) {
+.lane-refresh-summary-btn:hover:not(:disabled) {
   background: var(--hover);
 }
 
-.person-refresh-summary-btn:disabled {
+.lane-refresh-summary-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
-.create-lane-form,
-.create-person-form {
+.create-lane-form {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
@@ -1080,8 +1071,7 @@ header p.run-meta {
   padding: 0.85rem 1rem;
 }
 
-.create-lane-form input,
-.create-person-form input {
+.create-lane-form input {
   flex: 1 1 12rem;
   min-width: 0;
   padding: 0.45rem 0.55rem;
@@ -1093,14 +1083,12 @@ header p.run-meta {
   color: var(--text);
 }
 
-.create-lane-cancel,
-.create-person-cancel {
+.create-lane-cancel {
   background: var(--elevated) !important;
   color: var(--text) !important;
 }
 
-.lane-create-error,
-.person-create-error {
+.lane-create-error {
   margin: 0.35rem 0 0;
   width: 100%;
   flex-basis: 100%;
@@ -1109,15 +1097,13 @@ header p.run-meta {
   font-family: system-ui, sans-serif;
 }
 
-.lanes-list,
-.people-list {
+.lanes-list {
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
 }
 
-.lanes-empty,
-.people-empty {
+.lanes-empty {
   margin: 0;
   padding: 2rem 1.25rem;
   text-align: center;
@@ -1128,16 +1114,14 @@ header p.run-meta {
   border-radius: 10px;
 }
 
-.user-lane-card,
-.user-person-card {
+.user-lane-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 1rem 1.15rem 1.1rem;
 }
 
-.user-lane-header,
-.user-person-header {
+.user-lane-header {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem 0.75rem;
@@ -1145,42 +1129,36 @@ header p.run-meta {
   margin-bottom: 0.65rem;
 }
 
-.user-lane-header h2,
-.user-person-header h2 {
+.user-lane-header h2 {
   margin: 0;
   font-size: 1.05rem;
   font-weight: 600;
   font-family: system-ui, sans-serif;
 }
 
-.lane-count-pill,
-.person-count-pill {
+.lane-count-pill {
   font-size: 0.75rem;
   font-family: system-ui, sans-serif;
   color: var(--muted);
 }
 
-.lane-assigned-threads,
-.person-assigned-threads {
+.lane-assigned-threads {
   margin: 0 0 0.75rem;
   padding-left: 1.1rem;
   font-size: 0.92rem;
 }
 
-.lane-assigned-threads li,
-.person-assigned-threads li {
+.lane-assigned-threads li {
   margin-bottom: 0.35rem;
 }
 
-.lane-empty-threads,
-.person-empty-threads {
+.lane-empty-threads {
   margin: 0 0 0.75rem;
   font-size: 0.88rem;
   color: var(--muted);
   font-family: system-ui, sans-serif;
 }
 
-.person-summary,
 .lane-summary {
   margin: 0 0 0.85rem;
   padding: 0.75rem 0.85rem;
@@ -1189,7 +1167,6 @@ header p.run-meta {
   background: rgba(255, 255, 255, 0.02);
 }
 
-.person-summary-meta,
 .lane-summary-meta {
   margin: 0 0 0.45rem;
   font-size: 0.78rem;
@@ -1197,14 +1174,12 @@ header p.run-meta {
   font-family: system-ui, sans-serif;
 }
 
-.person-summary-text,
 .lane-summary-text {
   margin: 0 0 0.65rem;
   font-size: 0.92rem;
   line-height: 1.45;
 }
 
-.person-summary-empty,
 .lane-summary-empty {
   margin: 0 0 0.85rem;
   font-size: 0.88rem;
@@ -1223,12 +1198,10 @@ header p.run-meta {
   font-family: system-ui, sans-serif;
 }
 
-.person-summary .section,
 .lane-summary .section {
   margin-top: 0.55rem;
 }
 
-.person-summary .section h4,
 .lane-summary .section h4 {
   margin: 0 0 0.35rem;
   font-size: 0.78rem;
@@ -1238,25 +1211,21 @@ header p.run-meta {
   font-weight: 600;
 }
 
-.person-summary .section ul,
 .lane-summary .section ul {
   margin: 0;
   padding-left: 1.1rem;
   font-size: 0.9rem;
 }
 
-.person-summary .section li,
 .lane-summary .section li {
   margin-bottom: 0.3rem;
 }
 
-.person-refresh-summary-btn,
 .lane-refresh-summary-btn {
   margin-right: 0.5rem;
 }
 
-.lane-thread-picker,
-.person-thread-picker {
+.lane-thread-picker {
   margin: 0 0 0.75rem;
   padding: 0.75rem 0.85rem;
   border: 1px solid var(--border);
@@ -1264,8 +1233,7 @@ header p.run-meta {
   background: rgba(255, 255, 255, 0.03);
 }
 
-.lane-thread-picker-title,
-.person-thread-picker-title {
+.lane-thread-picker-title {
   margin: 0 0 0.55rem;
   font-size: 0.78rem;
   text-transform: uppercase;
@@ -1275,8 +1243,7 @@ header p.run-meta {
   font-weight: 600;
 }
 
-.lane-thread-options,
-.person-thread-options {
+.lane-thread-options {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -1284,8 +1251,7 @@ header p.run-meta {
   overflow: auto;
 }
 
-.lane-thread-option,
-.person-thread-option {
+.lane-thread-option {
   display: flex;
   gap: 0.5rem;
   align-items: flex-start;
@@ -1294,22 +1260,19 @@ header p.run-meta {
   cursor: pointer;
 }
 
-.lane-thread-option input,
-.person-thread-option input {
+.lane-thread-option input {
   margin-top: 0.15rem;
   flex: 0 0 auto;
 }
 
-.lane-thread-picker-empty,
-.person-thread-picker-empty {
+.lane-thread-picker-empty {
   margin: 0;
   font-size: 0.88rem;
   color: var(--muted);
   font-family: system-ui, sans-serif;
 }
 
-.user-lane-actions,
-.user-person-actions {
+.user-lane-actions {
   display: flex;
   gap: 0.5rem;
 }
@@ -2348,7 +2311,6 @@ details.body-detail summary {
   .view-empty,
   .view-plans,
   .user-lane-card,
-  .user-person-card,
   .plan-card {
     padding: 0.85rem 0.9rem;
   }
@@ -2516,30 +2478,24 @@ details.body-detail summary {
   }
 
   .create-lane-form input,
-  .create-lane-form button,
-  .create-person-form input,
-  .create-person-form button {
+  .create-lane-form button {
     width: 100%;
   }
 
-  .lanes-toolbar,
-  .people-toolbar {
+  .lanes-toolbar {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .lanes-toolbar .create-lane-btn,
-  .people-toolbar .create-person-btn {
+  .lanes-toolbar .create-lane-btn {
     width: 100%;
   }
 
-  .user-lane-actions,
-  .user-person-actions {
+  .user-lane-actions {
     flex-wrap: wrap;
   }
 
-  .user-lane-actions button,
-  .user-person-actions button {
+  .user-lane-actions button {
     flex: 1 1 auto;
     min-width: 0;
   }

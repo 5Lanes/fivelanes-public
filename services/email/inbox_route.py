@@ -75,6 +75,14 @@ def route_inbox_message(m: dict, inbox_lower: str) -> InboxRoute:
     return InboxRoute.DIRECT_TO
 
 
+RFC_THREAD_PREFIX = "rfc:"
+
+
+def normalize_rfc_message_ref(ref: str) -> str:
+    """Canonical form for comparing RFC Message-ID values."""
+    return (ref or "").strip().strip("<>").lower()
+
+
 def resolve_ref_id(m: dict, route: InboxRoute) -> str:
     """RFC Message-ID used to resolve the source mailbox thread."""
     if route not in (InboxRoute.FORWARD_TO, InboxRoute.CC_BCC):
@@ -83,6 +91,48 @@ def resolve_ref_id(m: dict, route: InboxRoute) -> str:
     inner_body = extract_inner_rfc_message_id(body) or ""
     inner_env = extract_envelope_rfc_message_id(m) if isinstance(m, dict) else ""
     return inner_body or inner_env
+
+
+def inbox_cc_delivery_ref_id(m: dict) -> str:
+    """RFC ref for one Cc/Bcc inbox delivery (same rules as ``resolve_ref_id``)."""
+    return resolve_ref_id(m, InboxRoute.CC_BCC)
+
+
+def inbox_cc_delivery_matches_ref(m: dict, match_rfc: str) -> bool:
+    """True when a Cc/Bcc inbox delivery resolves to ``match_rfc``."""
+    want = normalize_rfc_message_ref(match_rfc)
+    if not want:
+        return False
+    got = normalize_rfc_message_ref(inbox_cc_delivery_ref_id(m))
+    return bool(got) and got == want
+
+
+def cc_bcc_fivelanes_thread_id(inner_rfc: str) -> str:
+    """
+    Stable dashboard ``thread_id`` for one inbox-delivered conversation (Cc/Bcc or forward).
+
+    Gmail may group unrelated deliveries into one inbox thread; Fivelanes keys each
+    conversation by the resolved RFC Message-ID instead.
+    """
+    ref = normalize_rfc_message_ref(inner_rfc)
+    if not ref:
+        return ""
+    return f"{RFC_THREAD_PREFIX}{ref}"
+
+
+def is_rfc_fivelanes_thread_id(thread_id: str) -> bool:
+    return str(thread_id or "").strip().startswith(RFC_THREAD_PREFIX)
+
+
+def gmail_inbox_thread_id_for_tracking(row: Dict[str, Any]) -> str:
+    """Gmail thread id on the Fivelanes inbox account (for pulling Cc shells)."""
+    stored = str(row.get("gmail_inbox_thread_id") or "").strip()
+    if stored:
+        return stored
+    tid = str(row.get("inbox_thread_id") or "").strip()
+    if is_rfc_fivelanes_thread_id(tid):
+        return ""
+    return tid
 
 
 def route_from_tracking(row: Dict[str, Any]) -> InboxRoute:
@@ -147,7 +197,7 @@ def purge_tracked_todo_only_threads(db_path: str) -> int:
     purged = 0
     for row in fetch_thread_tracking_rows(db_path):
         tid = str(row.get("inbox_thread_id") or "").strip()
-        if not tid or tid.startswith("text:"):
+        if not tid or tid.startswith("text:") or tid.startswith("slack:"):
             continue
         kind = str(row.get("inbox_delivery_kind") or "").strip()
         if kind == InboxRoute.TODO_PLAN.value:

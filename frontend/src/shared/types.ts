@@ -10,9 +10,9 @@ export type AppRoute =
   | "threads"
   | "meetings"
   | "lanes"
-  | "people"
   | "plans"
-  | "texts-setup";
+  | "texts-setup"
+  | "slack-setup";
 
 export type LaneView = {
   id: number;
@@ -22,22 +22,6 @@ export type LaneView = {
 };
 
 export type LaneSummaryView = {
-  summary: string;
-  highlights: string[];
-  current_priorities: string[];
-  waiting_on_others: string[];
-  tone_overview: string;
-  updated_at: string;
-};
-
-export type PersonView = {
-  id: number;
-  name: string;
-  created_at: string;
-  updated_at: string;
-};
-
-export type PersonSummaryView = {
   summary: string;
   highlights: string[];
   current_priorities: string[];
