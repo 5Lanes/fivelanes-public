@@ -1,18 +1,20 @@
 :root {
   color-scheme: dark;
 
-  /* Five-lane logo palette */
+  /* Lane logo palette (rainbow) */
+  --lane-coral: #e88b7f;
+  --lane-orange: #f0a04b;
+  --lane-yellow: #e8c547;
   --lane-teal: #3dbfb0;
   --lane-blue: #5b8fd9;
   --lane-purple: #9b7ec8;
-  --lane-orange: #f0a04b;
-  --lane-coral: #e88b7f;
 
+  --lane-coral-soft: color-mix(in srgb, var(--lane-coral) 16%, transparent);
+  --lane-orange-soft: color-mix(in srgb, var(--lane-orange) 16%, transparent);
+  --lane-yellow-soft: color-mix(in srgb, var(--lane-yellow) 16%, transparent);
   --lane-teal-soft: color-mix(in srgb, var(--lane-teal) 16%, transparent);
   --lane-blue-soft: color-mix(in srgb, var(--lane-blue) 16%, transparent);
   --lane-purple-soft: color-mix(in srgb, var(--lane-purple) 16%, transparent);
-  --lane-orange-soft: color-mix(in srgb, var(--lane-orange) 16%, transparent);
-  --lane-coral-soft: color-mix(in srgb, var(--lane-coral) 16%, transparent);
 
   /* Surfaces */
   --bg: #101216;
@@ -261,23 +263,27 @@ header {
 }
 
 .brand-lanes span:nth-child(1) {
-  background: var(--lane-teal);
+  background: var(--lane-coral);
 }
 
 .brand-lanes span:nth-child(2) {
-  background: var(--lane-blue);
-}
-
-.brand-lanes span:nth-child(3) {
-  background: var(--lane-purple);
-}
-
-.brand-lanes span:nth-child(4) {
   background: var(--lane-orange);
 }
 
+.brand-lanes span:nth-child(3) {
+  background: var(--lane-yellow);
+}
+
+.brand-lanes span:nth-child(4) {
+  background: var(--lane-teal);
+}
+
 .brand-lanes span:nth-child(5) {
-  background: var(--lane-coral);
+  background: var(--lane-blue);
+}
+
+.brand-lanes span:nth-child(6) {
+  background: var(--lane-purple);
 }
 
 header p.run-meta {
@@ -345,6 +351,31 @@ header p.run-meta {
 
 .dashboard-lanes-toolbar {
   margin: 0;
+}
+
+.lanes-sort-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  font-family: system-ui, sans-serif;
+  color: var(--muted);
+}
+
+.lanes-sort-label {
+  white-space: nowrap;
+}
+
+.lanes-sort-select {
+  font-size: 0.85rem;
+  font-family: system-ui, sans-serif;
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--elevated);
+  color: var(--text);
+  cursor: pointer;
+  min-width: 9.5rem;
 }
 
 .dashboard-lanes-list {
@@ -939,22 +970,30 @@ header p.run-meta {
 }
 
 .app-nav a[data-route="dashboard"] {
-  --nav-lane: var(--lane-teal);
+  --nav-lane: var(--lane-coral);
 }
 
 .app-nav a[data-route="threads"] {
-  --nav-lane: var(--lane-blue);
-}
-
-.app-nav a[data-route="meetings"] {
-  --nav-lane: var(--lane-purple);
-}
-
-.app-nav a[data-route="lanes"] {
   --nav-lane: var(--lane-orange);
 }
 
+.app-nav a[data-route="meetings"] {
+  --nav-lane: var(--lane-yellow);
+}
+
+.app-nav a[data-route="lanes"] {
+  --nav-lane: var(--lane-teal);
+}
+
 .app-nav a[data-route="plans"] {
+  --nav-lane: var(--lane-blue);
+}
+
+.app-nav a[data-route="texts-setup"] {
+  --nav-lane: var(--lane-purple);
+}
+
+.app-nav a[data-route="slack-setup"] {
   --nav-lane: var(--lane-coral);
 }
 

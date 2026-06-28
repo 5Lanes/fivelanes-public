@@ -21,7 +21,7 @@
       "user": "<your user prompt; must include {context} placeholder>"
     },
     "lane_summary": {
-      "system": "<your system prompt for producing a lane-level summary across threads; must include {lane_name}; output summary, highlights, current_priorities, waiting_on_others, tone_overview JSON>",
+      "system": "<your system prompt for producing a lane-level summary across threads; must include {lane_name}; output summary, highlights, current_priorities, waiting_on_others, tone_overview JSON. Compare event dates to the as-of date: never describe past meetings as upcoming or say the user is preparing for events that already occurred>",
       "user": "<your user prompt; must include {summary_datetime} and {thread_summaries} placeholders>"
     },
     "meeting_prep": {

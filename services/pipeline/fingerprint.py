@@ -6,7 +6,7 @@ import hashlib
 import json
 from typing import Any, Dict, List, Sequence, Set, Tuple
 
-from services.prompts import prompt_version
+from services.prompts import prompt_version, summary_as_of_date
 
 
 def cleaned_fingerprint(rows: List[Dict[str, Any]]) -> Set[Tuple[str, str]]:
@@ -36,6 +36,7 @@ def summary_input_fingerprint(
     calendar_timezone: str = "",
     backend: str = "",
     version: str | None = None,
+    as_of_date: str | None = None,
 ) -> str:
     """Stable hash of summary inputs for cache invalidation."""
     fp = cleaned_fingerprint(cleaned_rows)
@@ -45,6 +46,7 @@ def summary_input_fingerprint(
         {
             "messages": parts,
             "calendar": cal_hash,
+            "as_of_date": (as_of_date or summary_as_of_date()).strip(),
             "prompt_version": version or prompt_version(),
             "backend": (backend or "").strip().lower(),
         },
@@ -101,12 +103,14 @@ def lane_summary_fingerprint(
     summary_datetimes: List[str],
     backend: str = "",
     version: str | None = None,
+    as_of_date: str | None = None,
 ) -> str:
     payload = json.dumps(
         {
             "lane_id": int(lane_id),
             "thread_ids": [s.strip() for s in thread_ids if s.strip()],
             "summary_datetimes": [s.strip() for s in summary_datetimes if s.strip()],
+            "as_of_date": (as_of_date or summary_as_of_date()).strip(),
             "prompt_version": version or prompt_version(),
             "backend": (backend or "").strip().lower(),
         },

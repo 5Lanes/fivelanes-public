@@ -1251,6 +1251,29 @@ def load_all_thread_plans(db_path: str) -> List[Dict[str, Any]]:
     ]
 
 
+def _parse_meeting_iso_utc(iso: str) -> Optional[datetime]:
+    """Parse a calendar ISO timestamp to UTC (returns ``None`` when invalid/empty)."""
+    if not (iso or "").strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _meeting_bounds_utc(start_iso: str, end_iso: str) -> Optional[Tuple[datetime, datetime]]:
+    start = _parse_meeting_iso_utc(start_iso)
+    if start is None:
+        return None
+    end = _parse_meeting_iso_utc(end_iso)
+    if end is None or end <= start:
+        end = start + timedelta(hours=1)
+    return start, end
+
+
 def fetch_meetings_rows(db_path: str, *, days: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Return meeting rows (attendees parsed from JSON).
@@ -1260,34 +1283,30 @@ def fetch_meetings_rows(db_path: str, *, days: Optional[int] = None) -> List[Dic
     """
     db_file = Path(db_path)
     now = datetime.now(timezone.utc)
-    params: List[str] = []
-    where = ""
-    if days is not None and days > 0:
-        horizon = (now + timedelta(days=days)).isoformat()
-        now_iso = now.isoformat()
-        where = """
-            WHERE start_iso != ''
-              AND start_iso < ?
-              AND (
-                end_iso IS NULL OR trim(end_iso) = '' OR end_iso >= ?
-              )
-        """
-        params = [horizon, now_iso]
+    horizon = now + timedelta(days=days) if days is not None and days > 0 else None
     with sqlite3.connect(db_file) as conn:
         _ensure_meetings_schema(conn)
         cur = conn.execute(
-            f"""
+            """
             SELECT dedupe_key, summary, start_iso, end_iso, location, html_link,
                    kind, calendar_summary, account_id, week_local, attendees_json,
                    exported_at, timezone, updated_at
             FROM meetings
-            {where}
+            WHERE start_iso != ''
             ORDER BY start_iso ASC
             """,
-            params,
         )
         out: List[Dict[str, Any]] = []
         for r in cur.fetchall():
+            start_iso = r[2] or ""
+            end_iso = r[3] or ""
+            if horizon is not None:
+                bounds = _meeting_bounds_utc(start_iso, end_iso)
+                if bounds is None:
+                    continue
+                start_u, end_u = bounds
+                if start_u >= horizon or end_u < now:
+                    continue
             attendees: List[str] = []
             try:
                 parsed = json.loads(r[10] or "[]")
@@ -1299,8 +1318,8 @@ def fetch_meetings_rows(db_path: str, *, days: Optional[int] = None) -> List[Dic
                 {
                     "dedupe_key": r[0] or "",
                     "summary": r[1] or "",
-                    "start_iso": r[2] or "",
-                    "end_iso": r[3] or "",
+                    "start_iso": start_iso,
+                    "end_iso": end_iso,
                     "location": r[4] or "",
                     "html_link": r[5] or "",
                     "kind": r[6] or "",

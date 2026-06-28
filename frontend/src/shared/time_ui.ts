@@ -62,3 +62,25 @@ export function nextNDaysFromYmd(startYmd: string, n: number): string[] {
   }
   return out;
 }
+
+/** UTC instant of local midnight at the start of ``dateKey`` in ``timeZone``. */
+export function startOfDayInZone(dateKey: string, timeZone: string): Date {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  if (!y || !m || !d) return new Date(`${dateKey}T00:00:00`);
+  let lo = Date.UTC(y, m - 1, d - 1, 0, 0, 0);
+  let hi = Date.UTC(y, m - 1, d + 1, 0, 0, 0);
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const key = isoToYmdInZone(new Date(mid).toISOString(), timeZone);
+    if (key < dateKey) lo = mid + 1;
+    else hi = mid;
+  }
+  return new Date(lo);
+}
+
+/** UTC instant of the last millisecond of ``dateKey`` in ``timeZone``. */
+export function endOfDayInZone(dateKey: string, timeZone: string): Date {
+  const next = addDaysToYmd(dateKey, 1);
+  if (!next) return new Date(`${dateKey}T23:59:59.999`);
+  return new Date(startOfDayInZone(next, timeZone).getTime() - 1);
+}

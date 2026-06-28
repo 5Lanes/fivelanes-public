@@ -3,7 +3,15 @@
  * and shows likely-open / virtual-only windows for the next 7 calendar days (document TZ).
  */
 
-import { dayHeadingLabelShort, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdInTz } from "./shared/time_ui.js";
+import {
+  dayHeadingLabelShort,
+  endOfDayInZone,
+  formatTimeRangeInTz,
+  isoToYmdInZone,
+  nextNDaysFromYmd,
+  startOfDayInZone,
+  todayYmdInTz,
+} from "./shared/time_ui.js";
 import { isFeatureEnabled } from "./shared/features.js";
 import { escapeHtml } from "./shared/utils.js";
 
@@ -69,11 +77,9 @@ function segmentIsoIntervalForDay(
     return { start: new Date(isoStart), end: new Date(isoEnd) };
   }
   if (startDay === dayKey) {
-    const dayEnd = new Date(`${dayKey}T23:59:59.999`);
-    return { start: new Date(isoStart), end: dayEnd };
+    return { start: new Date(isoStart), end: endOfDayInZone(dayKey, tz) };
   }
-  const dayStart = new Date(`${dayKey}T00:00:00`);
-  return { start: dayStart, end: new Date(isoEnd) };
+  return { start: startOfDayInZone(dayKey, tz), end: new Date(isoEnd) };
 }
 
 function formatDatePairInTz(a: Date, b: Date, timeZone: string): string {
@@ -107,13 +113,18 @@ interface CommitmentRow {
   _note?: string;
 }
 
-function commitmentRangeOnDay(c: CommitmentRow, dateKey: string): { start: Date; end: Date } | null {
+function commitmentRangeOnDay(
+  c: CommitmentRow,
+  dateKey: string,
+  tz: string,
+): { start: Date; end: Date } | null {
   if (c.date !== dateKey) return null;
   const sm = parseHm(c.start_local);
   const em = parseHm(c.assumed_end_local);
   if (!sm || !em) return null;
-  const start = new Date(`${dateKey}T${String(sm.h).padStart(2, "0")}:${String(sm.m).padStart(2, "0")}:00`);
-  const end = new Date(`${dateKey}T${String(em.h).padStart(2, "0")}:${String(em.m).padStart(2, "0")}:00`);
+  const dayStart = startOfDayInZone(dateKey, tz);
+  const start = new Date(dayStart.getTime() + (sm.h * 60 + sm.m) * 60_000);
+  const end = new Date(dayStart.getTime() + (em.h * 60 + em.m) * 60_000);
   if (!(end.getTime() > start.getTime())) return null;
   return { start, end };
 }
@@ -205,18 +216,20 @@ function buildDayAgenda(dateKey: string, data: LooseObj): AgendaItem[] {
   for (const w of (openDay?.likely_open_windows as LooseObj[]) ?? []) {
     const seg = segmentIsoIntervalForDay(str(w.start), str(w.end), dateKey, tz);
     if (!seg) continue;
+    if (seg.end.getTime() <= now.getTime()) continue;
+    const start = seg.start.getTime() < now.getTime() ? now : seg.start;
     items.push({
       layer: "open",
-      start: seg.start,
+      start,
       end: seg.end,
-      timeLine: formatDatePairInTz(seg.start, seg.end, tz),
+      timeLine: formatDatePairInTz(start, seg.end, tz),
       title: "Open",
       detail: str(w._note),
     });
   }
 
   for (const c of commitments) {
-    const seg = commitmentRangeOnDay(c, dateKey);
+    const seg = commitmentRangeOnDay(c, dateKey, tz);
     if (!seg) continue;
     const hint = c.location_hint ? `${c.kind ?? ""} · ${c.location_hint}`.trim() : (c.kind ?? "");
     items.push({

@@ -89,7 +89,11 @@ def thread_needs_summary(
     if str(cached.get("input_fingerprint") or "") != expected_fp:
         return True
     summary = cached.get("thread_summary") if isinstance(cached.get("thread_summary"), dict) else {}
-    return not thread_summary_is_valid(summary, cleaned=merged_cleaned)
+    if not thread_summary_is_valid(summary, cleaned=merged_cleaned):
+        return True
+    from utils.summary_timeliness import summary_is_temporally_stale
+
+    return summary_is_temporally_stale(summary)
 
 
 def new_messages_since_db(

@@ -6,21 +6,20 @@ import { applyPlanDeleted, applyPlanUpdated, getCurrentData, getCurrentSourceLab
 import { str } from "../shared/utils.js";
 const PAGE_HTML = `
 <div class="view-dashboard">
-  <div class="dashboard-top-row">
-    <section class="dashboard-plans-section" aria-labelledby="dashboard-plans-heading">
-      <h2 id="dashboard-plans-heading" class="dashboard-section-title">Plans</h2>
-      <div id="dashboard-plans-list" class="dashboard-plans-list"></div>
-    </section>
-    <section class="dashboard-meetings-section" aria-labelledby="dashboard-meetings-heading">
-      <h2 id="dashboard-meetings-heading" class="dashboard-section-title">Upcoming meetings</h2>
-      <p class="dashboard-meetings-meta" id="dashboard-meetings-meta">Loading meetings…</p>
-      <div id="dashboard-meetings-agenda" class="meetings-agenda"></div>
-    </section>
-  </div>
   <section class="dashboard-lanes-section" aria-labelledby="dashboard-lanes-heading">
     <div class="dashboard-lanes-header">
       <h2 id="dashboard-lanes-heading" class="dashboard-section-title">Lanes</h2>
       <div class="lanes-toolbar dashboard-lanes-toolbar">
+        <label class="lanes-sort-control">
+          <span class="lanes-sort-label">Sort</span>
+          <select id="lanes-sort" class="lanes-sort-select" aria-label="Sort lanes">
+            <option value="name-asc">Name (A–Z)</option>
+            <option value="name-desc">Name (Z–A)</option>
+            <option value="threads-desc">Most threads</option>
+            <option value="threads-asc">Fewest threads</option>
+            <option value="updated-desc">Recently updated</option>
+          </select>
+        </label>
         <button type="button" class="create-lane-btn" id="create-lane-btn">Create lane</button>
       </div>
     </div>
@@ -32,6 +31,17 @@ const PAGE_HTML = `
     </form>
     <div id="lanes-list" class="lanes-list dashboard-lanes-list"></div>
   </section>
+  <div class="dashboard-top-row">
+    <section class="dashboard-plans-section" aria-labelledby="dashboard-plans-heading">
+      <h2 id="dashboard-plans-heading" class="dashboard-section-title">Plans</h2>
+      <div id="dashboard-plans-list" class="dashboard-plans-list"></div>
+    </section>
+    <section class="dashboard-meetings-section" aria-labelledby="dashboard-meetings-heading">
+      <h2 id="dashboard-meetings-heading" class="dashboard-section-title">Upcoming meetings</h2>
+      <p class="dashboard-meetings-meta" id="dashboard-meetings-meta">Loading meetings…</p>
+      <div id="dashboard-meetings-agenda" class="meetings-agenda"></div>
+    </section>
+  </div>
 </div>`;
 let interactionsBound = false;
 export function mountDashboardPage(root) {

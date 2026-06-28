@@ -335,6 +335,13 @@ def finalize_thread_summary(
             )
     elif str(out.get("api_error") or "").strip():
         out.pop("api_error", None)
+    else:
+        from utils.summary_timeliness import summary_is_temporally_stale
+
+        if summary_is_temporally_stale(out):
+            out["api_error"] = (
+                "Summary treats a past event as upcoming; re-run with today's as-of date."
+            )
 
     out["message_count"] = len(cleaned)
     out["summarized_message_count"] = len(cleaned)

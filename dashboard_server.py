@@ -120,6 +120,12 @@ def _lane_summary_has_content(payload: Dict[str, Any]) -> bool:
     return False
 
 
+def _lane_summary_is_fresh(payload: Dict[str, Any]) -> bool:
+    from utils.summary_timeliness import summary_is_temporally_stale
+
+    return _lane_summary_has_content(payload) and not summary_is_temporally_stale(payload)
+
+
 def _finalize_lane_summary_from_llm(result: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[str]]:
     api_error = str(result.get("api_error") or "").strip()
     summary = normalize_lane_summary_payload(result) if isinstance(result, dict) else {}
@@ -131,6 +137,10 @@ def _finalize_lane_summary_from_llm(result: Dict[str, Any]) -> tuple[Dict[str, A
             return {}, api_error
         else:
             return {}, "Lane summary model returned no usable content"
+    from utils.summary_timeliness import summary_is_temporally_stale
+
+    if summary_is_temporally_stale(summary):
+        return {}, "Lane summary treats a past event as upcoming; re-run with today's as-of date."
     return summary, None
 
 
@@ -226,7 +236,7 @@ def _start_lane_summary_job(
         if (
             cached
             and str(cached.get("input_fingerprint") or "") == input_fingerprint
-            and _lane_summary_has_content(cached)
+            and _lane_summary_is_fresh(cached)
         ):
             return _lane_summary_http_payload(
                 lane_id=lane_id,
@@ -882,7 +892,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
 
         cached = load_lane_summary(DB_PATH, lane_id=lid)
-        if cached and _lane_summary_has_content(cached):
+        if cached and _lane_summary_is_fresh(cached):
             self._json_response(
                 HTTPStatus.OK,
                 _lane_summary_http_payload(

@@ -1,9 +1,20 @@
 import { listSection, partitionThreadsBySnooze, threadEmailSubject, } from "../shared/thread_domain.js";
 import { applyLaneCreated, applyLaneRemoved, applyLaneSummary, applyLaneThreadMembership, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getLaneSummary, getLaneThreadIds, getLanes, loadLatestBundle, normalizeBundle, setBundle, } from "../shared/summaries_store.js";
 import { escapeHtml, str } from "../shared/utils.js";
+const LANES_SORT_KEY = "fivelanes_lanes_sort_v1";
 const PAGE_HTML = `
 <div class="view-lanes">
   <div class="lanes-toolbar">
+    <label class="lanes-sort-control">
+      <span class="lanes-sort-label">Sort</span>
+      <select id="lanes-sort" class="lanes-sort-select" aria-label="Sort lanes">
+        <option value="name-asc">Name (A–Z)</option>
+        <option value="name-desc">Name (Z–A)</option>
+        <option value="threads-desc">Most threads</option>
+        <option value="threads-asc">Fewest threads</option>
+        <option value="updated-desc">Recently updated</option>
+      </select>
+    </label>
     <button type="button" class="create-lane-btn" id="create-lane-btn">Create lane</button>
   </div>
   <form class="create-lane-form" id="create-lane-form" hidden>
@@ -36,6 +47,60 @@ function laneSummaryHasContent(body) {
 }
 function isDashboardLanesList(listEl) {
     return !!listEl.closest(".view-dashboard");
+}
+function isLaneSortMode(value) {
+    return (value === "name-asc" ||
+        value === "name-desc" ||
+        value === "threads-desc" ||
+        value === "threads-asc" ||
+        value === "updated-desc");
+}
+export function getLaneSortMode() {
+    try {
+        const stored = localStorage.getItem(LANES_SORT_KEY);
+        if (stored && isLaneSortMode(stored))
+            return stored;
+    }
+    catch {
+        /* ignore storage errors */
+    }
+    return "name-asc";
+}
+export function setLaneSortMode(mode) {
+    try {
+        localStorage.setItem(LANES_SORT_KEY, mode);
+    }
+    catch {
+        /* ignore storage errors */
+    }
+}
+function laneThreadCount(data, laneId) {
+    return getLaneThreadIds(data, laneId).length;
+}
+function compareLaneNames(a, b) {
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+}
+export function sortLanes(lanes, mode, data) {
+    const copy = [...lanes];
+    switch (mode) {
+        case "name-desc":
+            return copy.sort((a, b) => compareLaneNames(b, a));
+        case "threads-desc":
+            return copy.sort((a, b) => laneThreadCount(data, b.id) - laneThreadCount(data, a.id) || compareLaneNames(a, b));
+        case "threads-asc":
+            return copy.sort((a, b) => laneThreadCount(data, a.id) - laneThreadCount(data, b.id) || compareLaneNames(a, b));
+        case "updated-desc":
+            return copy.sort((a, b) => str(b.updated_at).localeCompare(str(a.updated_at)) || compareLaneNames(a, b));
+        case "name-asc":
+        default:
+            return copy.sort(compareLaneNames);
+    }
+}
+function syncLaneSortSelect() {
+    const select = document.getElementById("lanes-sort");
+    if (!select)
+        return;
+    select.value = getLaneSortMode();
 }
 function trackingThreads() {
     const { active, snoozed } = partitionThreadsBySnooze(getCurrentThreads());
@@ -170,7 +235,8 @@ function renderLanesList() {
     const data = getCurrentData();
     if (!listEl || !data)
         return;
-    const lanes = getLanes(data);
+    const lanes = sortLanes(getLanes(data), getLaneSortMode(), data);
+    syncLaneSortSelect();
     if (!lanes.length) {
         listEl.innerHTML = `<p class="lanes-empty">No lanes yet. Create one to group threads.</p>`;
         activeLaneTabId = null;
@@ -464,6 +530,15 @@ export function bindLanesInteractions() {
         })();
     });
     document.addEventListener("change", (ev) => {
+        const sortSelect = ev.target?.closest("#lanes-sort");
+        if (sortSelect && isLaneUi(sortSelect)) {
+            const mode = sortSelect.value;
+            if (isLaneSortMode(mode)) {
+                setLaneSortMode(mode);
+                renderLanesList();
+            }
+            return;
+        }
         const checkbox = ev.target?.closest(".lane-thread-checkbox");
         if (!checkbox || !isLaneUi(checkbox))
             return;

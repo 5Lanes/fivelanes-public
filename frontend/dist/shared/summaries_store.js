@@ -67,7 +67,6 @@ export function applyLaneCreated(lane) {
     const lanes = Array.isArray(currentData.lanes) ? currentData.lanes : [];
     if (!lanes.some((row) => Number(row.id) === lane.id)) {
         lanes.push({ ...lane });
-        lanes.sort((a, b) => str(a.name).localeCompare(str(b.name)));
         currentData.lanes = lanes;
     }
     const memberships = (currentData.lane_threads || (currentData.lane_threads = {}));

@@ -107,8 +107,8 @@ def _scheduler_tz_name() -> str:
     return (os.getenv("FIVELANES_SCHEDULER_TZ") or "America/New_York").strip() or "America/New_York"
 
 
-def summary_as_of_datetime(*, as_of: datetime | None = None) -> str:
-    """Human-readable as-of stamp for summary prompts (scheduler timezone)."""
+def _summary_now(*, as_of: datetime | None = None) -> Tuple[datetime, str]:
+    """Localized clock time and timezone name for summary prompts."""
     tz_name = _scheduler_tz_name()
     tz: Any
     if ZoneInfo is not None:
@@ -126,7 +126,30 @@ def summary_as_of_datetime(*, as_of: datetime | None = None) -> str:
         now = as_of.replace(tzinfo=tz)
     else:
         now = as_of.astimezone(tz)
+    return now, tz_name
+
+
+def summary_as_of_datetime(*, as_of: datetime | None = None) -> str:
+    """Human-readable as-of stamp for summary prompts (scheduler timezone)."""
+    now, tz_name = _summary_now(as_of=as_of)
     return f"{now.strftime('%Y-%m-%d %H:%M')} ({tz_name})"
+
+
+def summary_as_of_date(*, as_of: datetime | None = None) -> str:
+    """Calendar date (YYYY-MM-DD) in scheduler timezone for summary cache keys."""
+    now, _ = _summary_now(as_of=as_of)
+    return now.strftime("%Y-%m-%d")
+
+
+def _with_summary_as_of(messages: PromptMessages, *, as_of: datetime | None = None) -> PromptMessages:
+    """Ensure today's date reaches the model even when a template omits {summary_datetime}."""
+    stamp = summary_as_of_datetime(as_of=as_of)
+    user = messages.user or ""
+    system = messages.system or ""
+    if stamp in user or stamp in system:
+        return messages
+    prefix = f"As of: {stamp} (today's date for judging deadlines and timeliness)\n\n"
+    return PromptMessages(system=system, user=prefix + user)
 
 
 def _summary_routing_aliases() -> List[str]:
@@ -336,14 +359,17 @@ def format_thread_summary_prompt(
         db_path=db_path,
         project_root=project_root,
     )
-    return _format_prompt_pair(
-        "email_thread_summary",
-        thread_messages=thread_messages,
-        last_message_anchor=build_last_message_anchor(messages),
-        summary_routing_aliases=aliases,
-        summary_datetime=summary_as_of_datetime(as_of=as_of),
-        calendar_events_block=calendar_events_block,
-        calendar_timezone=calendar_timezone,
+    return _with_summary_as_of(
+        _format_prompt_pair(
+            "email_thread_summary",
+            thread_messages=thread_messages,
+            last_message_anchor=build_last_message_anchor(messages),
+            summary_routing_aliases=aliases,
+            summary_datetime=summary_as_of_datetime(as_of=as_of),
+            calendar_events_block=calendar_events_block,
+            calendar_timezone=calendar_timezone,
+        ),
+        as_of=as_of,
     )
 
 
@@ -367,14 +393,17 @@ def format_chat_thread_summary_prompt(
         chronological=True,
     )
     aliases = ", ".join(_summary_routing_aliases())
-    return _format_prompt_pair(
-        "email_thread_summary",
-        thread_messages=thread_messages,
-        last_message_anchor=build_last_message_anchor(messages),
-        summary_routing_aliases=aliases,
-        summary_datetime=summary_as_of_datetime(as_of=as_of),
-        calendar_events_block="(none — chat conversation; omit scheduling availability next_step)",
-        calendar_timezone="UTC",
+    return _with_summary_as_of(
+        _format_prompt_pair(
+            "email_thread_summary",
+            thread_messages=thread_messages,
+            last_message_anchor=build_last_message_anchor(messages),
+            summary_routing_aliases=aliases,
+            summary_datetime=summary_as_of_datetime(as_of=as_of),
+            calendar_events_block="(none — chat conversation; omit scheduling availability next_step)",
+            calendar_timezone="UTC",
+        ),
+        as_of=as_of,
     )
 
 
@@ -403,14 +432,17 @@ def format_incremental_thread_summary_prompt(
         project_root=project_root,
     )
     prior_json = json.dumps(_summary_for_llm_prompt(prior_summary), indent=2)
-    return _format_prompt_pair(
-        "email_thread_summary_incremental",
-        prior_summary_json=prior_json,
-        new_thread_messages=new_thread_messages,
-        summary_routing_aliases=aliases,
-        summary_datetime=summary_as_of_datetime(as_of=as_of),
-        calendar_events_block=calendar_events_block,
-        calendar_timezone=calendar_timezone,
+    return _with_summary_as_of(
+        _format_prompt_pair(
+            "email_thread_summary_incremental",
+            prior_summary_json=prior_json,
+            new_thread_messages=new_thread_messages,
+            summary_routing_aliases=aliases,
+            summary_datetime=summary_as_of_datetime(as_of=as_of),
+            calendar_events_block=calendar_events_block,
+            calendar_timezone=calendar_timezone,
+        ),
+        as_of=as_of,
     )
 
 
@@ -656,11 +688,14 @@ def format_lane_summary_prompt(
         block_template=block_template,
         db_path=db_path,
     )
-    return _format_prompt_pair(
-        "lane_summary",
-        lane_name=(lane_name or "").strip() or "(unnamed lane)",
-        thread_summaries=thread_summaries_text,
-        summary_datetime=summary_as_of_datetime(as_of=as_of),
+    return _with_summary_as_of(
+        _format_prompt_pair(
+            "lane_summary",
+            lane_name=(lane_name or "").strip() or "(unnamed lane)",
+            thread_summaries=thread_summaries_text,
+            summary_datetime=summary_as_of_datetime(as_of=as_of),
+        ),
+        as_of=as_of,
     )
 
 
