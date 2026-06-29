@@ -3,6 +3,7 @@ import { counterpartyAvailabilityForSummary, counterpartyAvailabilitySectionHtml
 import { escapeHtml, formatDate, formatRecipients, str, toneClass } from "../shared/utils.js";
 import { ensureAvailabilityDocLoaded } from "../shared/availability_windows.js";
 import { applyNavFeatureVisibility, isFeatureEnabled } from "../shared/features.js";
+import { threadPlanCompletionPromptsHtml } from "../shared/plan_completion_prompts.js";
 import { refreshAvailabilityPanel } from "../availability_panel.js";
 const PAGE_HTML = `
 <div class="dashboard-layout dashboard-layout--threads">
@@ -26,6 +27,9 @@ let threadViewMode = "active";
 let threadChannelFilter = "all";
 let navObserver = null;
 let interactionsBound = false;
+let cardsRenderToken = 0;
+const INITIAL_CARD_BATCH = 10;
+const CARD_BATCH_SIZE = 10;
 function cardsEl() {
     return document.getElementById("cards");
 }
@@ -69,89 +73,117 @@ function channelFilterEmptyMessage() {
         return "No Slack threads in this view.";
     return "No email threads in this view.";
 }
+function buildThreadCard(thread) {
+    const data = getCurrentData();
+    const primary = thread.messages[0] || { cleaned: null, summary: null };
+    const c0 = (primary.cleaned || {});
+    const s = threadSummaryForDisplay(thread);
+    const sourceAccount = str(data?.source_account);
+    const displayMessages = threadMessagesForDisplay(thread, sourceAccount);
+    const latestDisplay = displayMessages[0] || primary;
+    const cLatest = (latestDisplay.cleaned || {});
+    const dt = str(cLatest.datetime || s.datetime);
+    const tone = str(s.tone);
+    const title = str(cLatest.subject) || str(c0.subject) || "(No subject)";
+    const label = threadLabel(thread);
+    const nMsg = thread.messages.length;
+    const pendingCount = pendingMessageCountForThread(thread, data);
+    const isText = threadIsText(thread);
+    const isSlack = threadIsSlack(thread);
+    const updates = latestUpdatesForThread(thread);
+    const nextSteps = ownerNextStepsForThread(thread);
+    const counterpartySlots = counterpartyAvailabilityForSummary(s);
+    const showMessageBlocks = shouldShowThreadMessageBlocks(thread, displayMessages);
+    const planCompletionHtml = threadPlanCompletionPromptsHtml(thread.id);
+    const messagesHtml = showMessageBlocks
+        ? `<div class="thread-messages">${displayMessages
+            .map((row) => {
+            const c = row.cleaned || {};
+            const msgDt = str(c.datetime || row.summary?.datetime);
+            const subj = str(c.subject) || "(No subject)";
+            const fromLine = str(c.sender)
+                ? `<div class="meta"><strong>From</strong> ${escapeHtml(str(c.sender))}</div>`
+                : "";
+            const rec = formatRecipients(c.recipients);
+            const recLine = rec
+                ? `<div class="meta"><strong>Recipients</strong> ${escapeHtml(rec)}</div>`
+                : "";
+            return `<div class="message-block"><div class="card-top"><time datetime="${escapeHtml(msgDt)}">${formatDate(msgDt)}</time></div><h4 class="msg-subject">${escapeHtml(subj)}</h4>${fromLine}${recLine}${messageSourceDetailsHtml(c)}</div>`;
+        })
+            .join("")}</div>`
+        : "";
+    const drafts = (data?.thread_drafts || {});
+    const savedDraft = drafts[thread.id];
+    const savedIntent = savedDraft ? str(savedDraft.response_intent) : "";
+    const savedMd = savedDraft ? str(savedDraft.markdown) : "";
+    const showSavedOut = Boolean(savedMd);
+    const art = document.createElement("article");
+    art.className = "card";
+    art.id = `thread-${thread.id}`;
+    art.innerHTML =
+        `<div class="card-top"><time datetime="${escapeHtml(dt)}">${formatDate(dt)}</time>${tone ? `<span class="tone ${toneClass(tone)}">${escapeHtml(tone)}</span>` : ""}<span class="count-pill">${nMsg} msg${nMsg > 1 ? " (thread)" : ""}</span>${pendingMessagePillHtml(pendingCount)}${isText ? `<span class="count-pill channel-text">Text</span>` : isSlack ? `<span class="count-pill channel-slack">Slack</span>` : ""}` +
+            `<div class="card-actions">` +
+            `<a href="/plans?thread=${encodeURIComponent(thread.id)}" class="create-plan-link">Create a plan</a>` +
+            `<button type="button" class="thread-refresh-summary-btn" data-refresh-thread-id="${escapeHtml(thread.id)}">Refresh summary</button>` +
+            `<button type="button" class="draft-reply-toggle" data-draft-thread-id="${escapeHtml(thread.id)}">Draft reply</button>` +
+            `<button type="button" class="snooze-btn" data-snooze-thread-id="${escapeHtml(thread.id)}">${Number(s.snoozed || 0) === 1 ? "Unsnooze" : "Snooze"}</button>` +
+            `<button type="button" class="remove-thread-btn" data-remove-thread-id="${escapeHtml(thread.id)}">${Number(s.snoozed || 0) === 2 ? "Unremove" : "Remove tracking"}</button>` +
+            `</div></div>` +
+            `<h3>${escapeHtml(title)}</h3><p class="thread-label">${escapeHtml(label)}</p>` +
+            `<div class="draft-reply-panel" hidden>` +
+            `<p class="draft-reply-hint">What should this reply communicate? (Required — keeps the draft aligned with what you want.)</p>` +
+            `<textarea class="draft-intent-input" rows="2" autocomplete="off" placeholder="e.g. I want to meet next week · interested, need more information · don't want to meet">${escapeHtml(savedIntent)}</textarea>` +
+            `<div class="draft-reply-actions">` +
+            `<button type="button" class="draft-generate-btn" data-draft-thread-id="${escapeHtml(thread.id)}">Generate</button>` +
+            `</div>` +
+            `<p class="draft-reply-error" hidden></p>` +
+            `<label class="draft-output-label">Markdown — copy below</label>` +
+            `<textarea class="draft-markdown-output" readonly ${showSavedOut ? "" : "hidden"} rows="12" spellcheck="false">${escapeHtml(savedMd)}</textarea>` +
+            `</div>` +
+            (str(cLatest.sender)
+                ? `<div class="meta"><strong>${nMsg > 1 ? "Latest from" : "From"}</strong> ${escapeHtml(isText || isSlack ? formatChatSenderLabel(str(cLatest.sender)) : str(cLatest.sender))}</div>`
+                : "") +
+            threadSummaryErrorHtml(s) +
+            planCompletionHtml +
+            listSection("Latest updates", updates.length ? updates : s.latest_updates, counterpartySlots) +
+            counterpartyAvailabilitySectionHtml(counterpartySlots) +
+            nextStepsSectionHtml(nextSteps, counterpartySlots) +
+            messagesHtml;
+    return art;
+}
 function renderCards(threads) {
+    const token = ++cardsRenderToken;
     const el = cardsEl();
     el.innerHTML = "";
     if (!threads.length) {
         el.innerHTML = `<p class="empty-state">${channelFilterEmptyMessage()}</p>`;
         return;
     }
-    const data = getCurrentData();
-    for (const thread of threads) {
-        const primary = thread.messages[0] || { cleaned: null, summary: null };
-        const c0 = (primary.cleaned || {});
-        const s = threadSummaryForDisplay(thread);
-        const sourceAccount = str(data?.source_account);
-        const displayMessages = threadMessagesForDisplay(thread, sourceAccount);
-        const latestDisplay = displayMessages[0] || primary;
-        const cLatest = (latestDisplay.cleaned || {});
-        const dt = str(cLatest.datetime || s.datetime);
-        const tone = str(s.tone);
-        const title = str(cLatest.subject) || str(c0.subject) || "(No subject)";
-        const label = threadLabel(thread);
-        const nMsg = thread.messages.length;
-        const pendingCount = pendingMessageCountForThread(thread, data);
-        const isText = threadIsText(thread);
-        const isSlack = threadIsSlack(thread);
-        const updates = latestUpdatesForThread(thread);
-        const nextSteps = ownerNextStepsForThread(thread);
-        const counterpartySlots = counterpartyAvailabilityForSummary(s);
-        const showMessageBlocks = shouldShowThreadMessageBlocks(thread, displayMessages);
-        const messagesHtml = showMessageBlocks
-            ? `<div class="thread-messages">${displayMessages
-                .map((row) => {
-                const c = row.cleaned || {};
-                const msgDt = str(c.datetime || row.summary?.datetime);
-                const subj = str(c.subject) || "(No subject)";
-                const fromLine = str(c.sender)
-                    ? `<div class="meta"><strong>From</strong> ${escapeHtml(str(c.sender))}</div>`
-                    : "";
-                const rec = formatRecipients(c.recipients);
-                const recLine = rec
-                    ? `<div class="meta"><strong>Recipients</strong> ${escapeHtml(rec)}</div>`
-                    : "";
-                return `<div class="message-block"><div class="card-top"><time datetime="${escapeHtml(msgDt)}">${formatDate(msgDt)}</time></div><h4 class="msg-subject">${escapeHtml(subj)}</h4>${fromLine}${recLine}${messageSourceDetailsHtml(c)}</div>`;
-            })
-                .join("")}</div>`
-            : "";
-        const drafts = (data?.thread_drafts || {});
-        const savedDraft = drafts[thread.id];
-        const savedIntent = savedDraft ? str(savedDraft.response_intent) : "";
-        const savedMd = savedDraft ? str(savedDraft.markdown) : "";
-        const showSavedOut = Boolean(savedMd);
-        const art = document.createElement("article");
-        art.className = "card";
-        art.id = `thread-${thread.id}`;
-        art.innerHTML =
-            `<div class="card-top"><time datetime="${escapeHtml(dt)}">${formatDate(dt)}</time>${tone ? `<span class="tone ${toneClass(tone)}">${escapeHtml(tone)}</span>` : ""}<span class="count-pill">${nMsg} msg${nMsg > 1 ? " (thread)" : ""}</span>${pendingMessagePillHtml(pendingCount)}${isText ? `<span class="count-pill channel-text">Text</span>` : isSlack ? `<span class="count-pill channel-slack">Slack</span>` : ""}` +
-                `<div class="card-actions">` +
-                `<a href="/plans?thread=${encodeURIComponent(thread.id)}" class="create-plan-link">Create a plan</a>` +
-                `<button type="button" class="thread-refresh-summary-btn" data-refresh-thread-id="${escapeHtml(thread.id)}">Refresh summary</button>` +
-                `<button type="button" class="draft-reply-toggle" data-draft-thread-id="${escapeHtml(thread.id)}">Draft reply</button>` +
-                `<button type="button" class="snooze-btn" data-snooze-thread-id="${escapeHtml(thread.id)}">${Number(s.snoozed || 0) === 1 ? "Unsnooze" : "Snooze"}</button>` +
-                `<button type="button" class="remove-thread-btn" data-remove-thread-id="${escapeHtml(thread.id)}">${Number(s.snoozed || 0) === 2 ? "Unremove" : "Remove tracking"}</button>` +
-                `</div></div>` +
-                `<h3>${escapeHtml(title)}</h3><p class="thread-label">${escapeHtml(label)}</p>` +
-                `<div class="draft-reply-panel" hidden>` +
-                `<p class="draft-reply-hint">What should this reply communicate? (Required — keeps the draft aligned with what you want.)</p>` +
-                `<textarea class="draft-intent-input" rows="2" autocomplete="off" placeholder="e.g. I want to meet next week · interested, need more information · don't want to meet">${escapeHtml(savedIntent)}</textarea>` +
-                `<div class="draft-reply-actions">` +
-                `<button type="button" class="draft-generate-btn" data-draft-thread-id="${escapeHtml(thread.id)}">Generate</button>` +
-                `</div>` +
-                `<p class="draft-reply-error" hidden></p>` +
-                `<label class="draft-output-label">Markdown — copy below</label>` +
-                `<textarea class="draft-markdown-output" readonly ${showSavedOut ? "" : "hidden"} rows="12" spellcheck="false">${escapeHtml(savedMd)}</textarea>` +
-                `</div>` +
-                (str(cLatest.sender)
-                    ? `<div class="meta"><strong>${nMsg > 1 ? "Latest from" : "From"}</strong> ${escapeHtml(isText || isSlack ? formatChatSenderLabel(str(cLatest.sender)) : str(cLatest.sender))}</div>`
-                    : "") +
-                threadSummaryErrorHtml(s) +
-                listSection("Latest updates", updates.length ? updates : s.latest_updates, counterpartySlots) +
-                counterpartyAvailabilitySectionHtml(counterpartySlots) +
-                nextStepsSectionHtml(nextSteps, counterpartySlots) +
-                messagesHtml;
-        el.appendChild(art);
-    }
+    let index = 0;
+    const renderBatch = (batchSize) => {
+        if (token !== cardsRenderToken)
+            return;
+        const end = Math.min(index + batchSize, threads.length);
+        for (; index < end; index++) {
+            const card = buildThreadCard(threads[index]);
+            el.appendChild(card);
+            observeThreadCard(card);
+        }
+        if (index < threads.length)
+            scheduleRemainingCards();
+    };
+    const scheduleRemainingCards = () => {
+        if (token !== cardsRenderToken)
+            return;
+        const run = () => renderBatch(CARD_BATCH_SIZE);
+        if (typeof requestIdleCallback === "function") {
+            requestIdleCallback(run, { timeout: 200 });
+        }
+        else {
+            setTimeout(run, 0);
+        }
+    };
+    renderBatch(INITIAL_CARD_BATCH);
 }
 function renderNav(threads, snoozedCount, removedCount, channelCounts) {
     const list = navListEl();
@@ -244,13 +276,8 @@ function renderNav(threads, snoozedCount, removedCount, channelCounts) {
         list.appendChild(li);
     }
 }
-function bindScrollNavHighlight() {
-    if (navObserver) {
-        navObserver.disconnect();
-        navObserver = null;
-    }
-    const cards = Array.from(document.querySelectorAll("article.card"));
-    if (!cards.length)
+function ensureNavObserver() {
+    if (navObserver)
         return;
     navObserver = new IntersectionObserver((entries) => {
         let topVisible = null;
@@ -271,6 +298,20 @@ function bindScrollNavHighlight() {
             btn.classList.toggle("active", btn.dataset.threadId === topVisible);
         });
     }, { root: null, rootMargin: "0px 0px -70% 0px", threshold: [0.1, 0.5, 1] });
+}
+function observeThreadCard(card) {
+    ensureNavObserver();
+    navObserver?.observe(card);
+}
+function bindScrollNavHighlight() {
+    if (navObserver) {
+        navObserver.disconnect();
+        navObserver = null;
+    }
+    const cards = Array.from(document.querySelectorAll("article.card"));
+    if (!cards.length)
+        return;
+    ensureNavObserver();
     cards.forEach((c) => navObserver?.observe(c));
 }
 async function persistThreadSnooze(threadId, snoozed) {
@@ -478,5 +519,10 @@ export function bindThreadsInteractions() {
         persistThreadSnooze(threadId, !currentlySnoozed)
             .then(() => clearSummariesBundleCache())
             .catch((err) => console.error(err));
+    });
+    document.addEventListener("fivelanes:plans-changed", () => {
+        if (!document.getElementById("cards"))
+            return;
+        void renderThreadsPage();
     });
 }

@@ -2139,6 +2139,60 @@ def _claude_outputs_successful_thread_source_pairs(conn: sqlite3.Connection) -> 
     return set(_claude_outputs_latest_success_content_by_pair(conn).keys())
 
 
+def load_all_processed_cleaned_by_thread(db_path: str) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Successful cleaned messages per thread (deduped by ``source_id``), single query.
+    """
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            _ensure_claude_outputs_schema(conn)
+            rows = conn.execute(
+                """
+                WITH ranked AS (
+                    SELECT thread_id, source_id, datetime, sender, recipients, subject, raw_text,
+                           forwarded_from, cleaned_content, quoted_reply, signature, api_error,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY COALESCE(thread_id, ''), COALESCE(source_id, '')
+                               ORDER BY generated_at DESC, id DESC
+                           ) AS rn
+                    FROM claude_message_outputs
+                    WHERE COALESCE(TRIM(api_error), '') = ''
+                )
+                SELECT thread_id, source_id, datetime, sender, recipients, subject, raw_text,
+                       forwarded_from, cleaned_content, quoted_reply, signature, api_error
+                FROM ranked
+                WHERE rn = 1
+                ORDER BY thread_id, datetime ASC
+                """
+            ).fetchall()
+    except sqlite3.Error:
+        return {}
+    by_thread: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        tid = _normalize_field(row["thread_id"])
+        sid = str(row["source_id"] or "").strip()
+        if not tid or not sid:
+            continue
+        by_thread.setdefault(tid, []).append(
+            {
+                "thread_id": tid,
+                "source_id": sid,
+                "datetime": row["datetime"] or "",
+                "sender": row["sender"] or "",
+                "recipients": row["recipients"] or "",
+                "subject": row["subject"] or "",
+                "raw_text": row["raw_text"] or "",
+                "forwarded_from": row["forwarded_from"] or "",
+                "cleaned_content": row["cleaned_content"] or "",
+                "quoted_reply": row["quoted_reply"] or "",
+                "signature": row["signature"] or "",
+                "api_error": "",
+            }
+        )
+    return by_thread
+
+
 def load_processed_cleaned_for_thread(
     db_path: str, thread_id: str
 ) -> List[Dict[str, Any]]:
@@ -2607,13 +2661,14 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
         _slack_inbox_thread_id(k) for k in fetch_tracked_slack_keys(db_path)
     }
     thread_summary_cache = load_all_thread_summaries_map(db_path)
+    cleaned_by_thread = load_all_processed_cleaned_by_thread(db_path)
     finalized_by_thread: Dict[str, Dict[str, Any]] = {}
 
     def finalized_for_thread(tid: str, fallback: Dict[str, Any]) -> Dict[str, Any]:
         if tid in finalized_by_thread:
             return finalized_by_thread[tid]
         base = dict(thread_summary_cache.get(tid) or fallback)
-        cleaned_for_thread = load_processed_cleaned_for_thread(db_path, tid)
+        cleaned_for_thread = cleaned_by_thread.get(tid, [])
         finalized = finalize_thread_summary(base, cleaned_for_thread)
         finalized_by_thread[tid] = finalized
         return finalized

@@ -3,6 +3,7 @@ import { renderLanesList } from "./lanes_page.js";
 import { partitionThreadsBySnooze, threadLabel } from "../shared/thread_domain.js";
 import { dashboardPlanEditFormHtml, persistPlanDelete, persistPlanUpdate, } from "../shared/plan_helpers.js";
 import { refreshPlanNotifications } from "../shared/plan_notifications.js";
+import { refreshPlanCompletionPrompts } from "../shared/plan_completion_prompts.js";
 import { applyPlanDeleted, applyPlanUpdated, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getThreadPlans, setBundle, } from "../shared/summaries_store.js";
 import { str } from "../shared/utils.js";
 const PAGE_HTML = `
@@ -78,6 +79,7 @@ export async function renderDashboardPage() {
     });
     renderLanesList();
     refreshPlanNotifications();
+    refreshPlanCompletionPrompts();
 }
 function closeDashboardPlanEdit(row) {
     row.querySelector(".dashboard-plan-edit-form")?.remove();
@@ -110,6 +112,7 @@ function reloadDashboard() {
         setBundle(data, getCurrentSourceLabel());
         void renderDashboardPage();
         refreshPlanNotifications();
+        refreshPlanCompletionPrompts();
     }
 }
 export function bindDashboardInteractions() {
@@ -169,5 +172,10 @@ export function bindDashboardInteractions() {
                 console.error(err);
             }
         })();
+    });
+    document.addEventListener("fivelanes:plans-changed", () => {
+        if (!document.querySelector(".view-dashboard"))
+            return;
+        reloadDashboard();
     });
 }

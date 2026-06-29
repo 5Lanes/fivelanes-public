@@ -4,6 +4,69 @@ import { str } from "./utils.js";
 export const SUMMARIES_BUNDLE_URL = "/api/summaries/bundle";
 const SUMMARIES_CACHE_KEY = "fivelanes_summaries_bundle_v4";
 const SUMMARIES_ETAG_KEY = "fivelanes_summaries_bundle_etag_v4";
+const SUMMARIES_LOCAL_CACHE_KEY = "fivelanes_summaries_bundle_ls_v1";
+const SUMMARIES_LOCAL_ETAG_KEY = "fivelanes_summaries_bundle_etag_ls_v1";
+function readStorageItem(storage, key) {
+    try {
+        return storage.getItem(key) || "";
+    }
+    catch {
+        return "";
+    }
+}
+function trySetStorageItem(storage, key, value) {
+    try {
+        storage.setItem(key, value);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+function removeStorageItem(storage, key) {
+    try {
+        storage.removeItem(key);
+    }
+    catch {
+        /* private mode */
+    }
+}
+function readCachedBundleRaw() {
+    return (readStorageItem(sessionStorage, SUMMARIES_CACHE_KEY) ||
+        readStorageItem(localStorage, SUMMARIES_LOCAL_CACHE_KEY));
+}
+function readCachedBundleEtag() {
+    if (!readCachedBundleRaw()) {
+        removeStorageItem(sessionStorage, SUMMARIES_ETAG_KEY);
+        removeStorageItem(localStorage, SUMMARIES_LOCAL_ETAG_KEY);
+        return "";
+    }
+    return (readStorageItem(sessionStorage, SUMMARIES_ETAG_KEY) ||
+        readStorageItem(localStorage, SUMMARIES_LOCAL_ETAG_KEY));
+}
+function writeCachedBundle(data, etag) {
+    const raw = JSON.stringify(data);
+    if (trySetStorageItem(sessionStorage, SUMMARIES_CACHE_KEY, raw)) {
+        if (etag)
+            trySetStorageItem(sessionStorage, SUMMARIES_ETAG_KEY, etag);
+        else
+            removeStorageItem(sessionStorage, SUMMARIES_ETAG_KEY);
+    }
+    else {
+        removeStorageItem(sessionStorage, SUMMARIES_CACHE_KEY);
+        removeStorageItem(sessionStorage, SUMMARIES_ETAG_KEY);
+    }
+    if (trySetStorageItem(localStorage, SUMMARIES_LOCAL_CACHE_KEY, raw)) {
+        if (etag)
+            trySetStorageItem(localStorage, SUMMARIES_LOCAL_ETAG_KEY, etag);
+        else
+            removeStorageItem(localStorage, SUMMARIES_LOCAL_ETAG_KEY);
+    }
+    else {
+        removeStorageItem(localStorage, SUMMARIES_LOCAL_CACHE_KEY);
+        removeStorageItem(localStorage, SUMMARIES_LOCAL_ETAG_KEY);
+    }
+}
 let currentData = null;
 let currentSourceLabel = "";
 let currentThreads = [];
@@ -163,6 +226,8 @@ export function getThreadPlans(data) {
         by_when: str(row.by_when),
         created_at: str(row.created_at),
         updated_at: str(row.updated_at),
+        activity_checkpoint: str(row.activity_checkpoint),
+        needs_completion_check: Boolean(row.needs_completion_check),
     }))
         .filter((plan) => plan.id > 0 && plan.inbox_thread_id && plan.action);
 }
@@ -224,6 +289,18 @@ export function applyPlanDeleted(planId) {
         setThreadHasPlanInBundle(threadId, stillHas);
     }
 }
+export function applyPlanCompletionAcknowledged(plan) {
+    applyPlanUpdated(plan);
+}
+export function applyPlanCompletionDismissed(planId) {
+    if (!currentData || !Array.isArray(currentData.thread_plans))
+        return;
+    for (const row of currentData.thread_plans) {
+        if (Number(row.id) === planId) {
+            row.needs_completion_check = false;
+        }
+    }
+}
 export function setBundle(data, sourceLabel) {
     currentData = normalizeBundle(data);
     currentSourceLabel = sourceLabel;
@@ -269,36 +346,40 @@ export function applyThreadSummary(threadId, summary) {
     }
 }
 export function clearSummariesBundleCache() {
+    removeStorageItem(sessionStorage, SUMMARIES_CACHE_KEY);
+    removeStorageItem(sessionStorage, SUMMARIES_ETAG_KEY);
+    removeStorageItem(localStorage, SUMMARIES_LOCAL_CACHE_KEY);
+    removeStorageItem(localStorage, SUMMARIES_LOCAL_ETAG_KEY);
+}
+export function readCachedBundle() {
+    const raw = readCachedBundleRaw();
+    if (!raw)
+        return null;
     try {
-        sessionStorage.removeItem(SUMMARIES_CACHE_KEY);
-        sessionStorage.removeItem(SUMMARIES_ETAG_KEY);
+        const data = JSON.parse(raw);
+        if (!data || typeof data !== "object" || Array.isArray(data))
+            return null;
+        return { data, label: `summaries · ${str(data.run_stamp) || "latest"}` };
     }
     catch {
-        /* private mode */
+        return null;
     }
+}
+export function bundleChanged(prev, next) {
+    return (str(prev.run_stamp) !== str(next.data.run_stamp) ||
+        str(prev.generated_at) !== str(next.data.generated_at));
 }
 export async function loadLatestBundle() {
     if (location.protocol === "file:") {
         throw new Error("Summaries load is unavailable from file:// URLs.");
     }
     const headers = {};
-    try {
-        const etag = sessionStorage.getItem(SUMMARIES_ETAG_KEY);
-        if (etag)
-            headers["If-None-Match"] = etag;
-    }
-    catch {
-        /* private mode */
-    }
+    const etag = readCachedBundleEtag();
+    if (etag)
+        headers["If-None-Match"] = etag;
     const res = await fetch(SUMMARIES_BUNDLE_URL, { credentials: "same-origin", headers });
     if (res.status === 304) {
-        let raw = "";
-        try {
-            raw = sessionStorage.getItem(SUMMARIES_CACHE_KEY) || "";
-        }
-        catch {
-            /* private mode */
-        }
+        const raw = readCachedBundleRaw();
         if (!raw)
             throw new Error("Summaries bundle not in cache (304 without stored copy)");
         const data = JSON.parse(raw);
@@ -314,14 +395,6 @@ export async function loadLatestBundle() {
     if (!cleaned.length && !summary.length) {
         throw new Error("No threads found. Track text threads under Texts setup or run the email pipeline.");
     }
-    try {
-        sessionStorage.setItem(SUMMARIES_CACHE_KEY, JSON.stringify(data));
-        const etag = res.headers.get("ETag");
-        if (etag)
-            sessionStorage.setItem(SUMMARIES_ETAG_KEY, etag);
-    }
-    catch {
-        /* quota / private mode */
-    }
+    writeCachedBundle(data, res.headers.get("ETag"));
     return { data, label: `summaries · ${str(data.run_stamp) || "latest"}` };
 }

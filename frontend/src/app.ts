@@ -21,7 +21,7 @@ import {
 } from "./pages/texts_setup_page.js";
 import { refreshPipelineRunMeta } from "./pipeline_run_meta.js";
 import { refreshPlanNotifications } from "./shared/plan_notifications.js";
-import { clearSummariesBundleCache, loadLatestBundle, setBundle } from "./shared/summaries_store.js";
+import { bundleChanged, loadLatestBundle, readCachedBundle, setBundle } from "./shared/summaries_store.js";
 import { applyNavFeatureVisibility, isFeatureEnabled, setFeaturesConfigForTests } from "./shared/features.js";
 import { setOwnerConfigForTests } from "./shared/owner_config.js";
 import { setDisplaySourceAccount } from "./shared/thread_domain.js";
@@ -121,6 +121,14 @@ async function renderPage(route: AppRoute): Promise<void> {
   await renderThreadsPage();
 }
 
+function applyConfig(config: Record<string, unknown>): void {
+  setOwnerConfigForTests(config);
+  setFeaturesConfigForTests(config);
+  applyNavFeatureVisibility();
+  const source = typeof config.source_account === "string" ? config.source_account : "";
+  if (source) setDisplaySourceAccount(source);
+}
+
 async function bootstrap(): Promise<void> {
   if (location.protocol === "file:") {
     showBootstrapError(
@@ -136,26 +144,37 @@ async function bootstrap(): Promise<void> {
     void rerenderCurrentPage();
   });
   const route = routeFromPathname(location.pathname);
+  const needsBundle = route !== "texts-setup" && route !== "slack-setup";
+  const cached = needsBundle ? readCachedBundle() : null;
   try {
-    const configRes = await fetch("/api/config", { credentials: "same-origin" });
-    if (!configRes.ok) throw new Error(`Config load failed (${configRes.status})`);
-    const config = (await configRes.json()) as Record<string, unknown>;
-    setOwnerConfigForTests(config);
-    setFeaturesConfigForTests(config);
-    applyNavFeatureVisibility();
-    const source = typeof config.source_account === "string" ? config.source_account : "";
-    if (source) setDisplaySourceAccount(source);
-    if (route !== "texts-setup" && route !== "slack-setup") {
-      const { data, label } = await loadLatestBundle();
-      setBundle(data, label);
+    if (cached) {
+      setBundle(cached.data, cached.label);
+      await renderPage(route);
     }
-    await renderPage(route);
+
+    const configPromise = fetch("/api/config", { credentials: "same-origin" }).then(async (res) => {
+      if (!res.ok) throw new Error(`Config load failed (${res.status})`);
+      return (await res.json()) as Record<string, unknown>;
+    });
+    const bundlePromise = needsBundle ? loadLatestBundle() : Promise.resolve(null);
+    const [config, fresh] = await Promise.all([configPromise, bundlePromise]);
+    applyConfig(config);
+
+    if (needsBundle && fresh) {
+      if (!cached || bundleChanged(cached.data, fresh)) {
+        setBundle(fresh.data, fresh.label);
+        await renderPage(route);
+      }
+    } else if (!cached) {
+      await renderPage(route);
+    }
+
     refreshPlanNotifications();
     void refreshPipelineRunMeta(runMetaEl);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("Data load failed:", err);
-    showBootstrapError(`Data load failed: ${msg}`);
+    if (!cached) showBootstrapError(`Data load failed: ${msg}`);
   }
 }
 

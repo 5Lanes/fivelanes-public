@@ -6,6 +6,70 @@ import { str } from "./utils.js";
 export const SUMMARIES_BUNDLE_URL = "/api/summaries/bundle";
 const SUMMARIES_CACHE_KEY = "fivelanes_summaries_bundle_v4";
 const SUMMARIES_ETAG_KEY = "fivelanes_summaries_bundle_etag_v4";
+const SUMMARIES_LOCAL_CACHE_KEY = "fivelanes_summaries_bundle_ls_v1";
+const SUMMARIES_LOCAL_ETAG_KEY = "fivelanes_summaries_bundle_etag_ls_v1";
+
+function readStorageItem(storage: Storage, key: string): string {
+  try {
+    return storage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+function trySetStorageItem(storage: Storage, key: string, value: string): boolean {
+  try {
+    storage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeStorageItem(storage: Storage, key: string): void {
+  try {
+    storage.removeItem(key);
+  } catch {
+    /* private mode */
+  }
+}
+
+function readCachedBundleRaw(): string {
+  return (
+    readStorageItem(sessionStorage, SUMMARIES_CACHE_KEY) ||
+    readStorageItem(localStorage, SUMMARIES_LOCAL_CACHE_KEY)
+  );
+}
+
+function readCachedBundleEtag(): string {
+  if (!readCachedBundleRaw()) {
+    removeStorageItem(sessionStorage, SUMMARIES_ETAG_KEY);
+    removeStorageItem(localStorage, SUMMARIES_LOCAL_ETAG_KEY);
+    return "";
+  }
+  return (
+    readStorageItem(sessionStorage, SUMMARIES_ETAG_KEY) ||
+    readStorageItem(localStorage, SUMMARIES_LOCAL_ETAG_KEY)
+  );
+}
+
+function writeCachedBundle(data: LooseObj, etag: string | null): void {
+  const raw = JSON.stringify(data);
+  if (trySetStorageItem(sessionStorage, SUMMARIES_CACHE_KEY, raw)) {
+    if (etag) trySetStorageItem(sessionStorage, SUMMARIES_ETAG_KEY, etag);
+    else removeStorageItem(sessionStorage, SUMMARIES_ETAG_KEY);
+  } else {
+    removeStorageItem(sessionStorage, SUMMARIES_CACHE_KEY);
+    removeStorageItem(sessionStorage, SUMMARIES_ETAG_KEY);
+  }
+  if (trySetStorageItem(localStorage, SUMMARIES_LOCAL_CACHE_KEY, raw)) {
+    if (etag) trySetStorageItem(localStorage, SUMMARIES_LOCAL_ETAG_KEY, etag);
+    else removeStorageItem(localStorage, SUMMARIES_LOCAL_ETAG_KEY);
+  } else {
+    removeStorageItem(localStorage, SUMMARIES_LOCAL_CACHE_KEY);
+    removeStorageItem(localStorage, SUMMARIES_LOCAL_ETAG_KEY);
+  }
+}
 
 let currentData: LooseObj | null = null;
 let currentSourceLabel = "";
@@ -264,12 +328,32 @@ export function applyThreadSummary(threadId: string, summary: LooseObj): void {
 }
 
 export function clearSummariesBundleCache(): void {
+  removeStorageItem(sessionStorage, SUMMARIES_CACHE_KEY);
+  removeStorageItem(sessionStorage, SUMMARIES_ETAG_KEY);
+  removeStorageItem(localStorage, SUMMARIES_LOCAL_CACHE_KEY);
+  removeStorageItem(localStorage, SUMMARIES_LOCAL_ETAG_KEY);
+}
+
+export function readCachedBundle(): { data: LooseObj; label: string } | null {
+  const raw = readCachedBundleRaw();
+  if (!raw) return null;
   try {
-    sessionStorage.removeItem(SUMMARIES_CACHE_KEY);
-    sessionStorage.removeItem(SUMMARIES_ETAG_KEY);
+    const data = JSON.parse(raw) as LooseObj;
+    if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+    return { data, label: `summaries · ${str(data.run_stamp) || "latest"}` };
   } catch {
-    /* private mode */
+    return null;
   }
+}
+
+export function bundleChanged(
+  prev: LooseObj,
+  next: { data: LooseObj; label: string },
+): boolean {
+  return (
+    str(prev.run_stamp) !== str(next.data.run_stamp) ||
+    str(prev.generated_at) !== str(next.data.generated_at)
+  );
 }
 
 export async function loadLatestBundle(): Promise<{ data: LooseObj; label: string }> {
@@ -277,21 +361,12 @@ export async function loadLatestBundle(): Promise<{ data: LooseObj; label: strin
     throw new Error("Summaries load is unavailable from file:// URLs.");
   }
   const headers: Record<string, string> = {};
-  try {
-    const etag = sessionStorage.getItem(SUMMARIES_ETAG_KEY);
-    if (etag) headers["If-None-Match"] = etag;
-  } catch {
-    /* private mode */
-  }
+  const etag = readCachedBundleEtag();
+  if (etag) headers["If-None-Match"] = etag;
 
   const res = await fetch(SUMMARIES_BUNDLE_URL, { credentials: "same-origin", headers });
   if (res.status === 304) {
-    let raw = "";
-    try {
-      raw = sessionStorage.getItem(SUMMARIES_CACHE_KEY) || "";
-    } catch {
-      /* private mode */
-    }
+    const raw = readCachedBundleRaw();
     if (!raw) throw new Error("Summaries bundle not in cache (304 without stored copy)");
     const data = JSON.parse(raw) as LooseObj;
     return { data, label: `summaries · ${str(data.run_stamp) || "latest"}` };
@@ -306,12 +381,6 @@ export async function loadLatestBundle(): Promise<{ data: LooseObj; label: strin
   if (!cleaned.length && !summary.length) {
     throw new Error("No threads found. Track text threads under Texts setup or run the email pipeline.");
   }
-  try {
-    sessionStorage.setItem(SUMMARIES_CACHE_KEY, JSON.stringify(data));
-    const etag = res.headers.get("ETag");
-    if (etag) sessionStorage.setItem(SUMMARIES_ETAG_KEY, etag);
-  } catch {
-    /* quota / private mode */
-  }
+  writeCachedBundle(data, res.headers.get("ETag"));
   return { data, label: `summaries · ${str(data.run_stamp) || "latest"}` };
 }

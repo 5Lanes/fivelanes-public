@@ -330,6 +330,23 @@ def _db_cache_etag(db_path: str) -> Tuple[str, str]:
     return etag, last_modified
 
 
+_summaries_bundle_cache: Optional[Dict[str, Any]] = None
+
+
+def _get_cached_summaries_bundle(etag: str) -> Optional[Dict[str, Any]]:
+    cached = _summaries_bundle_cache
+    if cached and cached.get("etag") == etag:
+        bundle = cached.get("bundle")
+        if isinstance(bundle, dict):
+            return bundle
+    return None
+
+
+def _store_summaries_bundle_cache(etag: str, bundle: Dict[str, Any]) -> None:
+    global _summaries_bundle_cache
+    _summaries_bundle_cache = {"etag": etag, "bundle": bundle}
+
+
 class DashboardHandler(SimpleHTTPRequestHandler):
     def translate_path(self, path: str) -> str:
         clean = path.split("?", 1)[0]
@@ -384,15 +401,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if inm == etag:
             self._not_modified(etag, last_modified)
             return
-        try:
-            bundle = build_summaries_bundle(DB_PATH)
-        except Exception as exc:
-            log.exception("summaries bundle build failed")
-            self._json_response(
-                HTTPStatus.INTERNAL_SERVER_ERROR,
-                {"ok": False, "error": str(exc)},
-            )
-            return
+        bundle = _get_cached_summaries_bundle(etag)
+        if bundle is None:
+            try:
+                bundle = build_summaries_bundle(DB_PATH)
+            except Exception as exc:
+                log.exception("summaries bundle build failed")
+                self._json_response(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    {"ok": False, "error": str(exc)},
+                )
+                return
+            _store_summaries_bundle_cache(etag, bundle)
         if not bundle.get("cleaned") and not bundle.get("summary"):
             self._json_response(
                 HTTPStatus.NOT_FOUND,
