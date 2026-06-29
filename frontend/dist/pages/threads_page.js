@@ -3,7 +3,6 @@ import { counterpartyAvailabilityForSummary, counterpartyAvailabilitySectionHtml
 import { escapeHtml, formatDate, formatRecipients, str, toneClass } from "../shared/utils.js";
 import { ensureAvailabilityDocLoaded } from "../shared/availability_windows.js";
 import { applyNavFeatureVisibility, isFeatureEnabled } from "../shared/features.js";
-import { threadPlanCompletionPromptsHtml } from "../shared/plan_completion_prompts.js";
 import { refreshAvailabilityPanel } from "../availability_panel.js";
 const PAGE_HTML = `
 <div class="dashboard-layout dashboard-layout--threads">
@@ -94,7 +93,6 @@ function buildThreadCard(thread) {
     const nextSteps = ownerNextStepsForThread(thread);
     const counterpartySlots = counterpartyAvailabilityForSummary(s);
     const showMessageBlocks = shouldShowThreadMessageBlocks(thread, displayMessages);
-    const planCompletionHtml = threadPlanCompletionPromptsHtml(thread.id);
     const messagesHtml = showMessageBlocks
         ? `<div class="thread-messages">${displayMessages
             .map((row) => {
@@ -144,7 +142,6 @@ function buildThreadCard(thread) {
                 ? `<div class="meta"><strong>${nMsg > 1 ? "Latest from" : "From"}</strong> ${escapeHtml(isText || isSlack ? formatChatSenderLabel(str(cLatest.sender)) : str(cLatest.sender))}</div>`
                 : "") +
             threadSummaryErrorHtml(s) +
-            planCompletionHtml +
             listSection("Latest updates", updates.length ? updates : s.latest_updates, counterpartySlots) +
             counterpartyAvailabilitySectionHtml(counterpartySlots) +
             nextStepsSectionHtml(nextSteps, counterpartySlots) +
@@ -519,10 +516,5 @@ export function bindThreadsInteractions() {
         persistThreadSnooze(threadId, !currentlySnoozed)
             .then(() => clearSummariesBundleCache())
             .catch((err) => console.error(err));
-    });
-    document.addEventListener("fivelanes:plans-changed", () => {
-        if (!document.getElementById("cards"))
-            return;
-        void renderThreadsPage();
     });
 }

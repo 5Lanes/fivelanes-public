@@ -201,8 +201,6 @@ function planFromApiRow(planRaw, fallback) {
         by_when: str(planRaw.by_when ?? fallback.by_when),
         created_at: str(planRaw.created_at) || str(fallback.created_at),
         updated_at: str(planRaw.updated_at) || str(fallback.updated_at),
-        activity_checkpoint: str(planRaw.activity_checkpoint ?? fallback.activity_checkpoint),
-        needs_completion_check: Boolean(planRaw.needs_completion_check ?? fallback.needs_completion_check),
     };
 }
 export async function persistPlanUpdate(planId, threadId, action, stepType, byWhen) {
@@ -238,21 +236,4 @@ export async function persistPlanDelete(planId) {
     const body = (await res.json().catch(() => ({})));
     if (!res.ok)
         throw new Error(str(body.error) || `Delete plan failed (${res.status})`);
-}
-export async function persistPlanCompletionCheck(planId, completed) {
-    const res = await fetch("/api/plans/complete-check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan_id: planId, completed }),
-    });
-    const body = (await res.json().catch(() => ({})));
-    if (!res.ok)
-        throw new Error(str(body.error) || `Plan completion check failed (${res.status})`);
-    if (completed)
-        return null;
-    const planRaw = body.plan;
-    return planFromApiRow(planRaw, { id: planId });
-}
-export function plansNeedingCompletionCheck(plans) {
-    return plans.filter((plan) => plan.needs_completion_check);
 }

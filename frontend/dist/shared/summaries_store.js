@@ -226,8 +226,6 @@ export function getThreadPlans(data) {
         by_when: str(row.by_when),
         created_at: str(row.created_at),
         updated_at: str(row.updated_at),
-        activity_checkpoint: str(row.activity_checkpoint),
-        needs_completion_check: Boolean(row.needs_completion_check),
     }))
         .filter((plan) => plan.id > 0 && plan.inbox_thread_id && plan.action);
 }
@@ -287,18 +285,6 @@ export function applyPlanDeleted(planId) {
     if (threadId) {
         const stillHas = getThreadPlans(currentData).some((p) => p.inbox_thread_id === threadId);
         setThreadHasPlanInBundle(threadId, stillHas);
-    }
-}
-export function applyPlanCompletionAcknowledged(plan) {
-    applyPlanUpdated(plan);
-}
-export function applyPlanCompletionDismissed(planId) {
-    if (!currentData || !Array.isArray(currentData.thread_plans))
-        return;
-    for (const row of currentData.thread_plans) {
-        if (Number(row.id) === planId) {
-            row.needs_completion_check = false;
-        }
     }
 }
 export function setBundle(data, sourceLabel) {

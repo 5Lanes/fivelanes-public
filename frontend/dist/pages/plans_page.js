@@ -1,6 +1,5 @@
 import { formatPlanByWhen, sortPlansByDueDate, isTodoPlanThreadId, persistPlanCreate, persistPlanDelete, persistPlanUpdate, planEditFormHtml, planDueStatus, planDueStatusClass, planDueBadgeHtml, } from "../shared/plan_helpers.js";
 import { refreshPlanNotifications } from "../shared/plan_notifications.js";
-import { planCompletionPromptHtml, refreshPlanCompletionPrompts, } from "../shared/plan_completion_prompts.js";
 import { applyPlanCreated, applyPlanDeleted, applyPlanUpdated, applySavedThreadDraft, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getThreadPlans, setBundle, } from "../shared/summaries_store.js";
 import { formatDraftReplyMarkdown, partitionThreadsBySnooze, threadLabel, threadMessagesForReply, } from "../shared/thread_domain.js";
 import { escapeHtml, str } from "../shared/utils.js";
@@ -99,20 +98,7 @@ function planCardHtml(item) {
     const draftBtn = isTodoPlanThreadId(item.threadId)
         ? ""
         : `<button type="button" class="plan-draft-btn" data-plan-key="${escapeHtml(item.key)}">Draft email</button>`;
-    const completionPrompt = getThreadPlans(getCurrentData()).find((p) => p.id === item.planId)?.needs_completion_check
-        ? planCompletionPromptHtml({
-            id: item.planId,
-            inbox_thread_id: item.threadId,
-            action: item.action,
-            step_type: item.stepType,
-            by_when: item.byWhen,
-            created_at: "",
-            updated_at: "",
-            needs_completion_check: true,
-        })
-        : "";
     return `<article class="plan-card${dueClass ? ` ${dueClass}` : ""}" data-plan-key="${escapeHtml(item.key)}" data-plan-id="${item.planId}" data-thread-id="${escapeHtml(item.threadId)}">
-    ${completionPrompt}
     <div class="plan-card-view">
       <header class="plan-card-header">
         <div class="plan-card-title-row">
@@ -243,7 +229,6 @@ function reloadFromStore() {
         setBundle(data, getCurrentSourceLabel());
         void renderPlansPage();
         refreshPlanNotifications();
-        refreshPlanCompletionPrompts();
     }
 }
 export function mountPlansPage(root) {
@@ -262,7 +247,6 @@ export async function renderPlansPage() {
     }
     renderPlansList();
     refreshPlanNotifications();
-    refreshPlanCompletionPrompts();
 }
 export function bindPlansInteractions() {
     if (interactionsBound)
@@ -422,10 +406,5 @@ export function bindPlansInteractions() {
                 console.error(err);
             }
         })();
-    });
-    document.addEventListener("fivelanes:plans-changed", () => {
-        if (!document.getElementById("plans-list"))
-            return;
-        reloadFromStore();
     });
 }

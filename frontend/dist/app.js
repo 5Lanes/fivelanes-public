@@ -9,7 +9,6 @@ import { bindSlackSetupInteractions, mountSlackSetupPage, renderSlackSetupPage, 
 import { bindTextsSetupInteractions, mountTextsSetupPage, renderTextsSetupPage, } from "./pages/texts_setup_page.js";
 import { refreshPipelineRunMeta } from "./pipeline_run_meta.js";
 import { refreshPlanNotifications } from "./shared/plan_notifications.js";
-import { bindPlanCompletionInteractions, refreshPlanCompletionPrompts, } from "./shared/plan_completion_prompts.js";
 import { bundleChanged, loadLatestBundle, readCachedBundle, setBundle } from "./shared/summaries_store.js";
 import { applyNavFeatureVisibility, isFeatureEnabled, setFeaturesConfigForTests } from "./shared/features.js";
 import { setOwnerConfigForTests } from "./shared/owner_config.js";
@@ -20,7 +19,6 @@ const pageRoot = document.getElementById("page-root");
 async function rerenderCurrentPage() {
     await renderPage(routeFromPathname(location.pathname));
     refreshPlanNotifications();
-    refreshPlanCompletionPrompts();
 }
 export function routeFromPathname(pathname) {
     const path = pathname.replace(/\/+$/, "") || "/";
@@ -116,7 +114,6 @@ async function bootstrap() {
     }
     prefetchMeetings(MEETINGS_LOOKAHEAD_DAYS);
     void refreshPipelineRunMeta(runMetaEl);
-    bindPlanCompletionInteractions();
     bindPipelineControls(() => {
         void refreshPipelineRunMeta(runMetaEl);
         void rerenderCurrentPage();
@@ -147,7 +144,6 @@ async function bootstrap() {
             await renderPage(route);
         }
         refreshPlanNotifications();
-        refreshPlanCompletionPrompts();
         void refreshPipelineRunMeta(runMetaEl);
     }
     catch (err) {
