@@ -20,6 +20,7 @@ import {
   renderTextsSetupPage,
 } from "./pages/texts_setup_page.js";
 import { refreshPipelineRunMeta } from "./pipeline_run_meta.js";
+import { refreshPlanNotifications } from "./shared/plan_notifications.js";
 import { clearSummariesBundleCache, loadLatestBundle, setBundle } from "./shared/summaries_store.js";
 import { applyNavFeatureVisibility, isFeatureEnabled, setFeaturesConfigForTests } from "./shared/features.js";
 import { setOwnerConfigForTests } from "./shared/owner_config.js";
@@ -32,6 +33,7 @@ const pageRoot = document.getElementById("page-root") as HTMLDivElement;
 
 async function rerenderCurrentPage(): Promise<void> {
   await renderPage(routeFromPathname(location.pathname));
+  refreshPlanNotifications();
 }
 
 export function routeFromPathname(pathname: string): AppRoute {
@@ -148,6 +150,7 @@ async function bootstrap(): Promise<void> {
       setBundle(data, label);
     }
     await renderPage(route);
+    refreshPlanNotifications();
     void refreshPipelineRunMeta(runMetaEl);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

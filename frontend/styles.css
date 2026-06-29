@@ -533,6 +533,10 @@ header p.run-meta {
 .dashboard-plan-main {
   flex: 1 1 12rem;
   min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .dashboard-plan-action {
@@ -987,6 +991,178 @@ header p.run-meta {
 
 .app-nav a[data-route="plans"] {
   --nav-lane: var(--lane-blue);
+  position: relative;
+}
+
+.nav-plan-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  margin-left: 0.4rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: #101216;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.nav-plan-badge--overdue {
+  background: var(--error);
+  color: #fff;
+}
+
+.plan-notifications-banner {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+
+.plan-notifications-banner--overdue {
+  border-color: color-mix(in srgb, var(--error) 45%, var(--border));
+  background: var(--error-soft);
+}
+
+.plan-notifications-banner--due-today {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+  background: var(--warn-soft);
+}
+
+.plan-notifications-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.plan-notifications-title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.plan-notifications-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.plan-notifications-enable-btn,
+.plan-notifications-view-link,
+.plan-notifications-dismiss {
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.plan-notifications-enable-btn,
+.plan-notifications-view-link {
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.plan-notifications-enable-btn:hover,
+.plan-notifications-view-link:hover {
+  background: var(--hover);
+}
+
+.plan-notifications-dismiss {
+  padding: 0.1rem 0.45rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.plan-notifications-dismiss:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.plan-notifications-group {
+  margin-top: 0.65rem;
+}
+
+.plan-notifications-subhead {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.plan-notifications-list {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.plan-notifications-list li {
+  margin: 0.2rem 0;
+}
+
+.plan-notification-link {
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.plan-notification-link:hover {
+  text-decoration: underline;
+}
+
+.plan-notification-thread {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.plan-due-badge {
+  display: inline-block;
+  margin-right: 0.45rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.plan-due-badge--overdue {
+  background: color-mix(in srgb, var(--error) 22%, var(--surface));
+  color: var(--error);
+}
+
+.plan-due-badge--due-today {
+  background: color-mix(in srgb, var(--warn) 22%, var(--surface));
+  color: var(--warn);
+}
+
+.plan-due--overdue,
+.dashboard-plan-row.plan-due--overdue {
+  border-color: color-mix(in srgb, var(--error) 40%, var(--border));
+  background: color-mix(in srgb, var(--error) 8%, var(--surface));
+}
+
+.plan-due--due-today,
+.dashboard-plan-row.plan-due--due-today {
+  border-color: color-mix(in srgb, var(--warn) 40%, var(--border));
+  background: color-mix(in srgb, var(--warn) 8%, var(--surface));
 }
 
 .app-nav a[data-route="texts-setup"] {
@@ -1854,7 +2030,8 @@ details.body-detail summary {
 .snooze-btn,
 .draft-reply-toggle,
 .remove-thread-btn,
-.thread-refresh-summary-btn {
+.thread-refresh-summary-btn,
+.create-plan-link {
   border: 1px solid var(--border);
   background: var(--elevated);
   border-radius: 999px;
@@ -1863,12 +2040,14 @@ details.body-detail summary {
   font-size: 0.75rem;
   font-family: system-ui, sans-serif;
   color: var(--text);
+  text-decoration: none;
 }
 
 .snooze-btn:hover,
 .draft-reply-toggle:hover,
 .remove-thread-btn:hover,
-.thread-refresh-summary-btn:hover:not(:disabled) {
+.thread-refresh-summary-btn:hover:not(:disabled),
+.create-plan-link:hover {
   background: var(--hover);
 }
 
@@ -2506,6 +2685,7 @@ details.body-detail summary {
   .draft-reply-toggle,
   .remove-thread-btn,
   .thread-refresh-summary-btn,
+  .create-plan-link,
   .meeting-prep-btn {
     min-height: 2.25rem;
     padding: 0.35rem 0.65rem;

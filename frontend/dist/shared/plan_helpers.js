@@ -1,3 +1,4 @@
+import { todayYmdLocal } from "./time_ui.js";
 import { escapeHtml, str } from "./utils.js";
 export const TODO_PLAN_THREAD_PREFIX = "todo:";
 export function isTodoPlanThreadId(threadId) {
@@ -26,6 +27,59 @@ export function formatPlanByWhen(raw) {
         }
     }
     return s;
+}
+/** Normalize ``by_when`` to a local ``YYYY-MM-DD`` when parseable. */
+export function planDueYmd(byWhen) {
+    const s = byWhen.trim();
+    if (!s)
+        return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s))
+        return s;
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime()))
+        return null;
+    const yy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yy}-${mm}-${dd}`;
+}
+export function planDueStatus(byWhen, todayYmd = todayYmdLocal()) {
+    const ymd = planDueYmd(byWhen);
+    if (!ymd)
+        return "none";
+    if (ymd < todayYmd)
+        return "overdue";
+    if (ymd === todayYmd)
+        return "due-today";
+    return "upcoming";
+}
+export function planDueStatusClass(status) {
+    if (status === "overdue")
+        return "plan-due--overdue";
+    if (status === "due-today")
+        return "plan-due--due-today";
+    return "";
+}
+export function planDueBadgeHtml(status) {
+    if (status === "overdue") {
+        return `<span class="plan-due-badge plan-due-badge--overdue">Overdue</span>`;
+    }
+    if (status === "due-today") {
+        return `<span class="plan-due-badge plan-due-badge--due-today">Due today</span>`;
+    }
+    return "";
+}
+export function partitionPlansByDueStatus(plans) {
+    const overdue = [];
+    const dueToday = [];
+    for (const plan of plans) {
+        const status = planDueStatus(plan.by_when);
+        if (status === "overdue")
+            overdue.push(plan);
+        else if (status === "due-today")
+            dueToday.push(plan);
+    }
+    return { overdue, dueToday };
 }
 /** Parse ``by_when`` for sorting; ISO dates use noon local to avoid TZ drift. */
 export function planDueTimestamp(byWhen) {

@@ -2,6 +2,7 @@ import { refreshDashboard } from "../dashboard_panel.js";
 import { renderLanesList } from "./lanes_page.js";
 import { partitionThreadsBySnooze, threadLabel } from "../shared/thread_domain.js";
 import { dashboardPlanEditFormHtml, persistPlanDelete, persistPlanUpdate, } from "../shared/plan_helpers.js";
+import { refreshPlanNotifications } from "../shared/plan_notifications.js";
 import { applyPlanDeleted, applyPlanUpdated, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getThreadPlans, setBundle, } from "../shared/summaries_store.js";
 import { str } from "../shared/utils.js";
 const PAGE_HTML = `
@@ -76,6 +77,7 @@ export async function renderDashboardPage() {
         },
     });
     renderLanesList();
+    refreshPlanNotifications();
 }
 function closeDashboardPlanEdit(row) {
     row.querySelector(".dashboard-plan-edit-form")?.remove();
@@ -107,6 +109,7 @@ function reloadDashboard() {
     if (data) {
         setBundle(data, getCurrentSourceLabel());
         void renderDashboardPage();
+        refreshPlanNotifications();
     }
 }
 export function bindDashboardInteractions() {

@@ -3,7 +3,7 @@
  */
 import { MEETINGS_LOOKAHEAD_DAYS, loadMeetings, meetingDedupeKey, } from "./meetings_panel.js";
 import { buildThreadMatchContexts, findMatchingThread, } from "./thread_meeting_match.js";
-import { formatPlanByWhen, sortPlansByDueDate, planLinkedThreadLabel, } from "./shared/plan_helpers.js";
+import { formatPlanByWhen, sortPlansByDueDate, planLinkedThreadLabel, planDueStatus, planDueStatusClass, planDueBadgeHtml, } from "./shared/plan_helpers.js";
 import { renderMentionAwareText, } from "./shared/thread_domain.js";
 import { dayHeadingLabelLong, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdLocal } from "./shared/time_ui.js";
 import { ensureAvailabilityDocLoaded } from "./shared/availability_windows.js";
@@ -19,11 +19,15 @@ export function renderDashboardPlans(plansEl, plans, labelForThreadId) {
     const sorted = sortPlansByDueDate(plans, (p) => p.by_when, (p) => p.action);
     const rowHtml = (plan) => {
         const when = formatPlanByWhen(plan.by_when);
+        const dueStatus = planDueStatus(plan.by_when);
+        const dueClass = planDueStatusClass(dueStatus);
+        const badge = planDueBadgeHtml(dueStatus);
         const whenHtml = when ? `<span class="dashboard-plan-when">by ${escapeHtml(when)}</span>` : "";
         const threadLabel = escapeHtml(planLinkedThreadLabel(plan.inbox_thread_id, labelForThreadId));
-        return `<li class="dashboard-plan-row" data-plan-id="${plan.id}" data-thread-id="${escapeHtml(plan.inbox_thread_id)}" data-plan-action="${escapeHtml(plan.action)}" data-plan-step-type="${escapeHtml(plan.step_type)}" data-plan-by-when="${escapeHtml(plan.by_when)}">
+        return `<li class="dashboard-plan-row${dueClass ? ` ${dueClass}` : ""}" data-plan-id="${plan.id}" data-thread-id="${escapeHtml(plan.inbox_thread_id)}" data-plan-action="${escapeHtml(plan.action)}" data-plan-step-type="${escapeHtml(plan.step_type)}" data-plan-by-when="${escapeHtml(plan.by_when)}">
         <div class="dashboard-plan-view">
           <div class="dashboard-plan-main">
+            ${badge}
             <span class="dashboard-plan-action">${renderMentionAwareText(plan.action)}</span>
             ${whenHtml}
           </div>

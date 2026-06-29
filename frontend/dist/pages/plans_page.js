@@ -1,4 +1,5 @@
-import { formatPlanByWhen, sortPlansByDueDate, isTodoPlanThreadId, persistPlanCreate, persistPlanDelete, persistPlanUpdate, planEditFormHtml, } from "../shared/plan_helpers.js";
+import { formatPlanByWhen, sortPlansByDueDate, isTodoPlanThreadId, persistPlanCreate, persistPlanDelete, persistPlanUpdate, planEditFormHtml, planDueStatus, planDueStatusClass, planDueBadgeHtml, } from "../shared/plan_helpers.js";
+import { refreshPlanNotifications } from "../shared/plan_notifications.js";
 import { applyPlanCreated, applyPlanDeleted, applyPlanUpdated, applySavedThreadDraft, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getThreadPlans, setBundle, } from "../shared/summaries_store.js";
 import { formatDraftReplyMarkdown, partitionThreadsBySnooze, threadLabel, threadMessagesForReply, } from "../shared/thread_domain.js";
 import { escapeHtml, str } from "../shared/utils.js";
@@ -56,7 +57,12 @@ function collectPlanItems(data) {
     }));
 }
 function threadSelectOptions(selectedId = "") {
-    const threads = trackingThreads();
+    let threads = trackingThreads();
+    if (selectedId && !threads.some((thread) => thread.id === selectedId)) {
+        const extra = getCurrentThreads().find((thread) => thread.id === selectedId);
+        if (extra)
+            threads = [extra, ...threads];
+    }
     if (!threads.length) {
         return `<option value="">No active threads</option>`;
     }
@@ -81,6 +87,9 @@ function planCardHtml(item) {
             ? threadLabel(thread)
             : "(Unknown thread)";
     const whenLabel = formatPlanByWhen(item.byWhen);
+    const dueStatus = planDueStatus(item.byWhen);
+    const dueClass = planDueStatusClass(dueStatus);
+    const badge = planDueBadgeHtml(dueStatus);
     const when = whenLabel ? ` <span class="next-step-when">by ${escapeHtml(whenLabel)}</span>` : "";
     const savedDraft = savedDraftForThread(item.threadId);
     const savedIntent = savedDraft ? str(savedDraft.response_intent) : item.action;
@@ -89,10 +98,11 @@ function planCardHtml(item) {
     const draftBtn = isTodoPlanThreadId(item.threadId)
         ? ""
         : `<button type="button" class="plan-draft-btn" data-plan-key="${escapeHtml(item.key)}">Draft email</button>`;
-    return `<article class="plan-card" data-plan-key="${escapeHtml(item.key)}" data-plan-id="${item.planId}" data-thread-id="${escapeHtml(item.threadId)}">
+    return `<article class="plan-card${dueClass ? ` ${dueClass}` : ""}" data-plan-key="${escapeHtml(item.key)}" data-plan-id="${item.planId}" data-thread-id="${escapeHtml(item.threadId)}">
     <div class="plan-card-view">
       <header class="plan-card-header">
         <div class="plan-card-title-row">
+          ${badge}
           <h3 class="plan-action">${escapeHtml(item.action)}</h3>
         </div>
         <p class="plan-thread-label">${escapeHtml(label)}</p>
@@ -131,11 +141,30 @@ function renderPlansList() {
     const sorted = sortPlansByDueDate(items, (p) => p.byWhen, (p) => p.action);
     listEl.innerHTML = `<ul class="plans-due-list">${sorted.map(planCardHtml).join("")}</ul>`;
 }
-function populateThreadSelect() {
+function populateThreadSelect(selectedId = "") {
     const select = document.getElementById("plan-thread-select");
     if (!select)
         return;
-    select.innerHTML = threadSelectOptions();
+    select.innerHTML = threadSelectOptions(selectedId);
+}
+function showAddPlanForm(selectedThreadId = "") {
+    const form = document.getElementById("add-plan-form");
+    const btn = document.getElementById("add-plan-btn");
+    form?.removeAttribute("hidden");
+    btn?.setAttribute("hidden", "");
+    populateThreadSelect(selectedThreadId);
+    document.getElementById("plan-action-input")?.focus();
+}
+function consumeThreadQueryParam() {
+    const params = new URLSearchParams(location.search);
+    const threadId = params.get("thread")?.trim() ?? "";
+    if (!threadId)
+        return "";
+    const url = new URL(location.href);
+    url.searchParams.delete("thread");
+    const next = url.pathname + (url.search || "") + url.hash;
+    history.replaceState(null, "", next);
+    return threadId;
 }
 function planItemForCard(card) {
     const planId = Number(card.dataset.planId) || 0;
@@ -199,6 +228,7 @@ function reloadFromStore() {
     if (data) {
         setBundle(data, getCurrentSourceLabel());
         void renderPlansPage();
+        refreshPlanNotifications();
     }
 }
 export function mountPlansPage(root) {
@@ -208,8 +238,15 @@ export async function renderPlansPage() {
     const data = getCurrentData();
     if (!data)
         return;
-    populateThreadSelect();
+    const pendingThreadId = consumeThreadQueryParam();
+    if (pendingThreadId) {
+        showAddPlanForm(pendingThreadId);
+    }
+    else {
+        populateThreadSelect();
+    }
     renderPlansList();
+    refreshPlanNotifications();
 }
 export function bindPlansInteractions() {
     if (interactionsBound)
@@ -222,12 +259,7 @@ export function bindPlansInteractions() {
         if (!document.getElementById("page-root")?.contains(target))
             return;
         if (target.id === "add-plan-btn") {
-            const form = document.getElementById("add-plan-form");
-            const btn = document.getElementById("add-plan-btn");
-            form?.removeAttribute("hidden");
-            btn?.setAttribute("hidden", "");
-            populateThreadSelect();
-            document.getElementById("plan-action-input")?.focus();
+            showAddPlanForm();
             return;
         }
         if (target.id === "add-plan-cancel") {

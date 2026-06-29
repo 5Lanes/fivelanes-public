@@ -168,6 +168,7 @@ function renderCards(threads: ThreadView[]): void {
         isText ? `<span class="count-pill channel-text">Text</span>` : isSlack ? `<span class="count-pill channel-slack">Slack</span>` : ""
       }` +
       `<div class="card-actions">` +
+      `<a href="/plans?thread=${encodeURIComponent(thread.id)}" class="create-plan-link">Create a plan</a>` +
       `<button type="button" class="thread-refresh-summary-btn" data-refresh-thread-id="${escapeHtml(thread.id)}">Refresh summary</button>` +
       `<button type="button" class="draft-reply-toggle" data-draft-thread-id="${escapeHtml(thread.id)}">Draft reply</button>` +
       `<button type="button" class="snooze-btn" data-snooze-thread-id="${escapeHtml(thread.id)}">${

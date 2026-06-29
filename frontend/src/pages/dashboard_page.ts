@@ -6,6 +6,7 @@ import {
   persistPlanDelete,
   persistPlanUpdate,
 } from "../shared/plan_helpers.js";
+import { refreshPlanNotifications } from "../shared/plan_notifications.js";
 import {
   applyPlanDeleted,
   applyPlanUpdated,
@@ -97,6 +98,7 @@ export async function renderDashboardPage(): Promise<void> {
   );
 
   renderLanesList();
+  refreshPlanNotifications();
 }
 
 function closeDashboardPlanEdit(row: HTMLElement): void {
@@ -132,6 +134,7 @@ function reloadDashboard(): void {
   if (data) {
     setBundle(data, getCurrentSourceLabel());
     void renderDashboardPage();
+    refreshPlanNotifications();
   }
 }
 

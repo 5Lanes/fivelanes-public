@@ -8,6 +8,7 @@ import { bindThreadsInteractions, mountThreadsPage, renderThreadsPage } from "./
 import { bindSlackSetupInteractions, mountSlackSetupPage, renderSlackSetupPage, } from "./pages/slack_setup_page.js";
 import { bindTextsSetupInteractions, mountTextsSetupPage, renderTextsSetupPage, } from "./pages/texts_setup_page.js";
 import { refreshPipelineRunMeta } from "./pipeline_run_meta.js";
+import { refreshPlanNotifications } from "./shared/plan_notifications.js";
 import { loadLatestBundle, setBundle } from "./shared/summaries_store.js";
 import { applyNavFeatureVisibility, isFeatureEnabled, setFeaturesConfigForTests } from "./shared/features.js";
 import { setOwnerConfigForTests } from "./shared/owner_config.js";
@@ -17,6 +18,7 @@ const runMetaEl = document.getElementById("run-meta");
 const pageRoot = document.getElementById("page-root");
 async function rerenderCurrentPage() {
     await renderPage(routeFromPathname(location.pathname));
+    refreshPlanNotifications();
 }
 export function routeFromPathname(pathname) {
     const path = pathname.replace(/\/+$/, "") || "/";
@@ -125,6 +127,7 @@ async function bootstrap() {
             setBundle(data, label);
         }
         await renderPage(route);
+        refreshPlanNotifications();
         void refreshPipelineRunMeta(runMetaEl);
     }
     catch (err) {
