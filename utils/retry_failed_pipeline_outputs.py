@@ -13,13 +13,14 @@ from utils.api_error_detection import (
     segmentation_error_is_retryable,
     thread_summary_is_valid,
 )
+from utils.database import connect_sqlite
 
 log = logging.getLogger(__name__)
 
 
 def list_latest_failed_segmentation_pairs(db_path: str) -> List[Dict[str, Any]]:
     try:
-        with sqlite3.connect(db_path) as conn:
+        with connect_sqlite(db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
@@ -60,7 +61,7 @@ def list_thread_ids_with_recovered_segmentation(db_path: str) -> List[str]:
     later successful row (segmentation was fixed but summary may still be stale).
     """
     try:
-        with sqlite3.connect(db_path) as conn:
+        with connect_sqlite(db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
@@ -84,7 +85,7 @@ def list_thread_ids_with_recovered_segmentation(db_path: str) -> List[str]:
         if not tid or not sid:
             continue
         try:
-            with sqlite3.connect(db_path) as conn:
+            with connect_sqlite(db_path) as conn:
                 ok = conn.execute(
                     """
                     SELECT 1
@@ -106,7 +107,7 @@ def list_thread_ids_with_recovered_segmentation(db_path: str) -> List[str]:
 
 def list_thread_ids_with_bad_summary(db_path: str) -> List[str]:
     try:
-        with sqlite3.connect(db_path) as conn:
+        with connect_sqlite(db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """

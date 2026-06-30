@@ -108,7 +108,7 @@ def known_source_ids_for_thread(
     """
     Source ids already in ``timeline_entries`` or successful ``claude_message_outputs``.
     """
-    from utils.database import _normalize_field
+    from utils.database import _normalize_field, connect_sqlite
 
     clean_ids = sorted({str(x).strip() for x in candidate_source_ids if str(x).strip()})
     if not clean_ids:
@@ -119,7 +119,7 @@ def known_source_ids_for_thread(
     ph = ",".join("?" for _ in clean_ids)
     known: set[str] = set()
     try:
-        with sqlite3.connect(Path(db_path)) as conn:
+        with connect_sqlite(db_path) as conn:
             for row in conn.execute(
                 f"SELECT source_id FROM timeline_entries WHERE source_id IN ({ph})",
                 clean_ids,

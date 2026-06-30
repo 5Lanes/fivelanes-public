@@ -19,6 +19,7 @@ from services.claude_service import (
     claude_supported_image_media_type,
     describe_image_with_claude,
 )
+from utils.database import connect_sqlite
 from services.email.config import SOURCE_OAUTH_ACCOUNT_ID
 from services.email.inbox_delivery import (
     PLACEHOLDER_SUBJECTS,
@@ -73,7 +74,7 @@ def fetch_prior_cleaned_content(
     if not source_id:
         return ""
     try:
-        with sqlite3.connect(db_path) as conn:
+        with connect_sqlite(db_path) as conn:
             row = conn.execute(
                 """
                 SELECT cleaned_content

@@ -6,6 +6,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from services.llm_inference_lock import llm_inference_slot
 from services.prompts import (
     EMAIL_REPLY_MAX_MESSAGES,
     PromptMessages,
@@ -137,40 +138,41 @@ def call_claude_json(
     attempted: List[str] = []
     raw = ""
     last_error = ""
-    for model_name in models_to_try:
-        if model_name in attempted:
-            continue
-        attempted.append(model_name)
-        system, messages = _claude_prompt_parts(prompt)
-        payload: Dict[str, Any] = {
-            "model": model_name,
-            "max_tokens": max_tokens,
-            "messages": messages,
-        }
-        if system:
-            payload["system"] = system
-        request = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "content-type": "application/json",
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=120) as response:
-                raw = response.read().decode("utf-8", errors="replace")
-            break
-        except urllib.error.HTTPError as exc:
-            err_body = exc.read().decode("utf-8", errors="replace")
-            last_error = f"Claude API error ({exc.code}) for {model_name}: {err_body}"
-            if exc.code == 404:
+    with llm_inference_slot(backend="claude", kind="generate", model=model):
+        for model_name in models_to_try:
+            if model_name in attempted:
                 continue
-            raise RuntimeError(last_error) from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"Claude API request failed: {exc}") from exc
+            attempted.append(model_name)
+            system, messages = _claude_prompt_parts(prompt)
+            payload: Dict[str, Any] = {
+                "model": model_name,
+                "max_tokens": max_tokens,
+                "messages": messages,
+            }
+            if system:
+                payload["system"] = system
+            request = urllib.request.Request(
+                "https://api.anthropic.com/v1/messages",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "content-type": "application/json",
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=120) as response:
+                    raw = response.read().decode("utf-8", errors="replace")
+                break
+            except urllib.error.HTTPError as exc:
+                err_body = exc.read().decode("utf-8", errors="replace")
+                last_error = f"Claude API error ({exc.code}) for {model_name}: {err_body}"
+                if exc.code == 404:
+                    continue
+                raise RuntimeError(last_error) from exc
+            except urllib.error.URLError as exc:
+                raise RuntimeError(f"Claude API request failed: {exc}") from exc
     if not raw:
         raise RuntimeError(last_error or "Claude API request failed for all candidate models.")
 
@@ -307,37 +309,38 @@ def describe_image_with_claude(
     attempted: List[str] = []
     raw = ""
     last_error = ""
-    for model_name in models_to_try:
-        if model_name in attempted:
-            continue
-        attempted.append(model_name)
-        payload = {
-            "model": model_name,
-            "max_tokens": max_tokens,
-            "messages": [{"role": "user", "content": content_blocks}],
-        }
-        request = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "content-type": "application/json",
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=180) as response:
-                raw = response.read().decode("utf-8", errors="replace")
-            break
-        except urllib.error.HTTPError as exc:
-            err_body = exc.read().decode("utf-8", errors="replace")
-            last_error = f"Claude API error ({exc.code}) for {model_name}: {err_body}"
-            if exc.code == 404:
+    with llm_inference_slot(backend="claude", kind="vision", model=model):
+        for model_name in models_to_try:
+            if model_name in attempted:
                 continue
-            raise RuntimeError(last_error) from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"Claude API request failed: {exc}") from exc
+            attempted.append(model_name)
+            payload = {
+                "model": model_name,
+                "max_tokens": max_tokens,
+                "messages": [{"role": "user", "content": content_blocks}],
+            }
+            request = urllib.request.Request(
+                "https://api.anthropic.com/v1/messages",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "content-type": "application/json",
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=180) as response:
+                    raw = response.read().decode("utf-8", errors="replace")
+                break
+            except urllib.error.HTTPError as exc:
+                err_body = exc.read().decode("utf-8", errors="replace")
+                last_error = f"Claude API error ({exc.code}) for {model_name}: {err_body}"
+                if exc.code == 404:
+                    continue
+                raise RuntimeError(last_error) from exc
+            except urllib.error.URLError as exc:
+                raise RuntimeError(f"Claude API request failed: {exc}") from exc
 
     if not raw:
         raise RuntimeError(last_error or "Claude API request failed for all candidate models.")

@@ -30,6 +30,7 @@ let assignLaneId = null;
 let activeLaneTabId = null;
 const laneSummaryErrors = new Map();
 const laneSummaryPending = new Set();
+const laneSummaryWatching = new Set();
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -187,8 +188,8 @@ function laneCardHtml(lane, threadIds, summary, expanded, opts = {}) {
     ${threadsBlock}
     ${picker}
     <div class="user-lane-actions">
-      <button type="button" class="lane-refresh-summary-btn" data-lane-id="${lane.id}"${threadIds.length ? "" : " disabled"}>
-        Refresh summary
+      <button type="button" class="lane-refresh-summary-btn" data-lane-id="${lane.id}"${threadIds.length && !laneSummaryPending.has(lane.id) ? "" : " disabled"}>
+        ${laneSummaryPending.has(lane.id) ? "Refreshing…" : "Refresh summary"}
       </button>
       <button type="button" class="lane-edit-threads-btn" data-lane-id="${lane.id}">
         ${expanded ? "Done" : threadIds.length ? "Edit threads" : "Add threads"}
@@ -284,6 +285,27 @@ async function persistLaneThread(laneId, threadId, inLane) {
     if (!res.ok)
         throw new Error(str(body.error) || `Lane update failed (${res.status})`);
 }
+function isTransientFetchError(err) {
+    if (!(err instanceof Error))
+        return false;
+    if (err.name === "AbortError" || err.name === "NetworkError")
+        return true;
+    const msg = err.message.toLowerCase();
+    return msg.includes("networkerror") || msg.includes("failed to fetch") || msg.includes("network error");
+}
+async function fetchLaneSummaryStatusResilient(laneId, maxAttempts = 8) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            return await fetchLaneSummaryStatus(laneId);
+        }
+        catch (err) {
+            if (!isTransientFetchError(err) || attempt === maxAttempts)
+                throw err;
+            await sleep(Math.min(3000 * attempt, 15000));
+        }
+    }
+    throw new Error("Lane summary status unreachable");
+}
 async function fetchLaneSummaryStatus(laneId) {
     const res = await fetch(`/api/lanes/summary?lane_id=${laneId}`, {
         credentials: "same-origin",
@@ -296,35 +318,206 @@ async function fetchLaneSummaryStatus(laneId) {
 }
 async function waitForLaneSummary(laneId, maxWaitMs = 20 * 60 * 1000) {
     const start = Date.now();
+    let transientFailures = 0;
     while (Date.now() - start < maxWaitMs) {
-        const body = await fetchLaneSummaryStatus(laneId);
-        if (body.ok === false) {
-            throw new Error(str(body.error) || "Lane summary failed");
+        try {
+            const body = await fetchLaneSummaryStatus(laneId);
+            transientFailures = 0;
+            if (body.ok === false) {
+                throw new Error(str(body.error) || "Lane summary failed");
+            }
+            if (!body.pending && laneSummaryHasContent(body)) {
+                return body;
+            }
         }
-        if (!body.pending && laneSummaryHasContent(body)) {
-            return body;
+        catch (err) {
+            if (isTransientFetchError(err) && Date.now() - start < maxWaitMs) {
+                transientFailures += 1;
+                // #region agent log
+                fetch("http://localhost:7364/ingest/d851e417-32b1-446f-b903-fefbca196cd9", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "3d391d" },
+                    body: JSON.stringify({
+                        sessionId: "3d391d",
+                        location: "lanes_page.ts:waitForLaneSummary",
+                        message: "transient fetch error, retrying",
+                        data: { laneId, attempt: transientFailures, error: err instanceof Error ? err.message : String(err) },
+                        timestamp: Date.now(),
+                        runId: "pending-sync",
+                        hypothesisId: "NET",
+                    }),
+                }).catch(() => { });
+                // #endregion
+                await sleep(Math.min(3000 * transientFailures, 15000));
+                continue;
+            }
+            throw err;
         }
         await sleep(3000);
     }
     throw new Error("Lane summary is still running. You can leave this page and click Refresh summary again later.");
 }
-async function persistLaneSummary(laneId, force = false) {
-    const res = await fetch("/api/lanes/summary", {
+async function startLaneSummaryJob(laneId, force = false) {
+    for (let attempt = 1; attempt <= 8; attempt++) {
+        try {
+            const res = await fetch("/api/lanes/summary", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ lane_id: laneId, force }),
+            });
+            const body = (await res.json().catch(() => ({})));
+            if (!res.ok || body.ok === false) {
+                throw new Error(str(body.error) || `Lane summary failed (${res.status})`);
+            }
+            return body;
+        }
+        catch (err) {
+            if (!isTransientFetchError(err) || attempt === 8)
+                throw err;
+            await sleep(Math.min(3000 * attempt, 15000));
+        }
+    }
+    throw new Error("Lane summary start unreachable");
+}
+function resetLaneRefreshButton(laneId) {
+    const btn = document.querySelector(`.lane-refresh-summary-btn[data-lane-id="${laneId}"]`);
+    if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Refresh summary";
+    }
+}
+function handleLaneSummaryComplete(laneId, body) {
+    laneSummaryPending.delete(laneId);
+    applyLaneSummary(laneId, body);
+    clearSummariesBundleCache();
+    void reloadLanesFromServer();
+}
+function handleLaneSummaryError(laneId, err) {
+    if (isTransientFetchError(err)) {
+        laneSummaryErrors.delete(laneId);
+        laneSummaryPending.add(laneId);
+        if (!laneSummaryWatching.has(laneId)) {
+            watchLaneSummaryCompletion(laneId);
+        }
+        reloadFromStore();
+        return;
+    }
+    laneSummaryPending.delete(laneId);
+    const msg = err instanceof Error ? err.message : String(err);
+    laneSummaryErrors.set(laneId, msg);
+    // #region agent log
+    fetch("http://localhost:7364/ingest/d851e417-32b1-446f-b903-fefbca196cd9", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lane_id: laneId, force }),
-    });
-    const body = (await res.json().catch(() => ({})));
-    if (!res.ok || body.ok === false) {
-        throw new Error(str(body.error) || `Lane summary failed (${res.status})`);
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "3d391d" },
+        body: JSON.stringify({
+            sessionId: "3d391d",
+            location: "lanes_page.ts:handleLaneSummaryError",
+            message: "lane summary watch failed",
+            data: { laneId, error: msg },
+            timestamp: Date.now(),
+            runId: "pending-sync",
+            hypothesisId: "H",
+        }),
+    }).catch(() => { });
+    // #endregion
+    console.error(err);
+    reloadFromStore();
+}
+function watchLaneSummaryCompletion(laneId) {
+    laneSummaryPending.add(laneId);
+    if (laneSummaryWatching.has(laneId))
+        return;
+    laneSummaryWatching.add(laneId);
+    void (async () => {
+        try {
+            const body = await waitForLaneSummary(laneId);
+            // #region agent log
+            fetch("http://localhost:7364/ingest/d851e417-32b1-446f-b903-fefbca196cd9", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "3d391d" },
+                body: JSON.stringify({
+                    sessionId: "3d391d",
+                    location: "lanes_page.ts:watchLaneSummaryCompletion",
+                    message: "lane summary watch completed",
+                    data: { laneId, hasContent: laneSummaryHasContent(body) },
+                    timestamp: Date.now(),
+                    runId: "pending-sync",
+                    hypothesisId: "D",
+                }),
+            }).catch(() => { });
+            // #endregion
+            handleLaneSummaryComplete(laneId, body);
+        }
+        catch (err) {
+            handleLaneSummaryError(laneId, err);
+        }
+        finally {
+            laneSummaryWatching.delete(laneId);
+            resetLaneRefreshButton(laneId);
+        }
+    })();
+}
+/** Re-attach pending UI after navigation/refresh while server jobs keep running. */
+export async function syncLaneSummaryJobsFromServer() {
+    const data = getCurrentData();
+    if (!data)
+        return;
+    const lanes = getLanes(data);
+    if (!lanes.length)
+        return;
+    const restored = [];
+    const reconciled = [];
+    await Promise.all(lanes.map(async (lane) => {
+        if (laneSummaryWatching.has(lane.id)) {
+            if (!laneSummaryPending.has(lane.id)) {
+                laneSummaryPending.add(lane.id);
+                reconciled.push(lane.id);
+            }
+            return;
+        }
+        if (laneSummaryPending.has(lane.id))
+            return;
+        try {
+            const body = await fetchLaneSummaryStatusResilient(lane.id);
+            if (body.pending === true) {
+                laneSummaryErrors.delete(lane.id);
+                laneSummaryPending.add(lane.id);
+                restored.push(lane.id);
+                watchLaneSummaryCompletion(lane.id);
+            }
+        }
+        catch (err) {
+            if (isTransientFetchError(err)) {
+                laneSummaryErrors.delete(lane.id);
+                laneSummaryPending.add(lane.id);
+                restored.push(lane.id);
+                watchLaneSummaryCompletion(lane.id);
+            }
+        }
+    }));
+    // #region agent log
+    fetch("http://localhost:7364/ingest/d851e417-32b1-446f-b903-fefbca196cd9", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "3d391d" },
+        body: JSON.stringify({
+            sessionId: "3d391d",
+            location: "lanes_page.ts:syncLaneSummaryJobsFromServer",
+            message: "restored pending lane summaries",
+            data: {
+                restored,
+                reconciled,
+                watching: [...laneSummaryWatching],
+                pending: [...laneSummaryPending],
+            },
+            timestamp: Date.now(),
+            runId: "pending-sync",
+            hypothesisId: "UI",
+        }),
+    }).catch(() => { });
+    // #endregion
+    if (restored.length || reconciled.length) {
+        renderLanesList();
     }
-    if (body.pending) {
-        return waitForLaneSummary(laneId);
-    }
-    if (!laneSummaryHasContent(body)) {
-        throw new Error(str(body.error) || "Lane summary returned no content");
-    }
-    return body;
 }
 async function persistLaneDelete(laneId) {
     const res = await fetch("/api/lanes/delete", {
@@ -379,6 +572,7 @@ export async function renderLanesPage() {
     const data = getCurrentData();
     if (!data)
         return;
+    await syncLaneSummaryJobsFromServer();
     renderLanesList();
 }
 export function bindLanesInteractions() {
@@ -436,25 +630,20 @@ export function bindLanesInteractions() {
             reloadFromStore();
             void (async () => {
                 try {
-                    const body = await persistLaneSummary(laneId, true);
-                    laneSummaryPending.delete(laneId);
-                    applyLaneSummary(laneId, body);
-                    clearSummariesBundleCache();
-                    await reloadLanesFromServer();
+                    const body = await startLaneSummaryJob(laneId, true);
+                    if (body.pending) {
+                        watchLaneSummaryCompletion(laneId);
+                        return;
+                    }
+                    if (!laneSummaryHasContent(body)) {
+                        throw new Error(str(body.error) || "Lane summary returned no content");
+                    }
+                    handleLaneSummaryComplete(laneId, body);
+                    resetLaneRefreshButton(laneId);
                 }
                 catch (err) {
-                    laneSummaryPending.delete(laneId);
-                    const msg = err instanceof Error ? err.message : String(err);
-                    laneSummaryErrors.set(laneId, msg);
-                    console.error(err);
-                    reloadFromStore();
-                }
-                finally {
-                    const btn = document.querySelector(`.lane-refresh-summary-btn[data-lane-id="${laneId}"]`);
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.textContent = "Refresh summary";
-                    }
+                    handleLaneSummaryError(laneId, err);
+                    resetLaneRefreshButton(laneId);
                 }
             })();
             return;

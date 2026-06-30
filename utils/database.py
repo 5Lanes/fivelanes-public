@@ -46,11 +46,33 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
+# Wait up to 60s when another connection holds the database (pipeline + dashboard overlap).
+_SQLITE_BUSY_TIMEOUT_MS = 60_000
+
+
+def connect_sqlite(
+    db_path: str | Path,
+    *,
+    row_factory: Any = None,
+    timeout: float | None = None,
+) -> sqlite3.Connection:
+    """Open SQLite with WAL mode and a long busy timeout for concurrent dashboard + pipeline access."""
+    db_file = Path(db_path)
+    conn = sqlite3.connect(
+        db_file,
+        timeout=timeout if timeout is not None else _SQLITE_BUSY_TIMEOUT_MS / 1000.0,
+    )
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_MS}")
+    if row_factory is not None:
+        conn.row_factory = row_factory
+    return conn
+
 
 def ensure_database_schema(db_path: str) -> None:
     """Ensure active application tables exist."""
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_timeline_schema(conn)
         _ensure_thread_tracking_schema(conn)
         _ensure_meetings_schema(conn)
@@ -315,7 +337,7 @@ def replace_meetings(db_path: str, rows: List[Dict[str, Any]]) -> int:
     Returns the number of inserted rows.
     """
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_meetings_schema(conn)
         conn.execute("DELETE FROM meetings")
         if rows:
@@ -420,7 +442,7 @@ def save_meeting_prep(
     updated_at = datetime.now(timezone.utc).isoformat()
     payload = normalize_meeting_prep_payload(prep if isinstance(prep, dict) else {})
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_meeting_preps_schema(conn)
         conn.execute(
             """
@@ -445,7 +467,7 @@ def load_meeting_prep(
     if not key or not tid:
         return None
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_meeting_preps_schema(conn)
         row = conn.execute(
             "SELECT prep_json FROM meeting_preps WHERE dedupe_key = ? AND thread_id = ?",
@@ -466,7 +488,7 @@ def load_all_meeting_preps(db_path: str) -> Dict[str, Dict[str, Any]]:
     """
     db_file = Path(db_path)
     out: Dict[str, Dict[str, Any]] = {}
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_meeting_preps_schema(conn)
         rows = conn.execute(
             "SELECT dedupe_key, thread_id, prep_json FROM meeting_preps ORDER BY updated_at DESC"
@@ -523,7 +545,7 @@ def create_lane(db_path: str, *, name: str) -> Dict[str, Any]:
         raise ValueError("missing_lane_name")
     now = datetime.now(timezone.utc).isoformat()
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_lanes_schema(conn)
         cur = conn.execute(
             "INSERT INTO lanes (name, created_at, updated_at) VALUES (?, ?, ?)",
@@ -541,7 +563,7 @@ def add_thread_to_lane(db_path: str, *, lane_id: int, inbox_thread_id: str) -> b
         return False
     now = datetime.now(timezone.utc).isoformat()
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_lanes_schema(conn)
         row = conn.execute("SELECT id FROM lanes WHERE id = ?", (lane_id,)).fetchone()
         if not row:
@@ -569,7 +591,7 @@ def remove_thread_from_lane(db_path: str, *, lane_id: int, inbox_thread_id: str)
         return False
     now = datetime.now(timezone.utc).isoformat()
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_lanes_schema(conn)
         row = conn.execute("SELECT id FROM lanes WHERE id = ?", (lane_id,)).fetchone()
         if not row:
@@ -591,7 +613,7 @@ def delete_lane(db_path: str, *, lane_id: int) -> bool:
     if lane_id <= 0:
         return False
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_lanes_schema(conn)
         _ensure_lane_summaries_schema(conn)
         row = conn.execute("SELECT id FROM lanes WHERE id = ?", (lane_id,)).fetchone()
@@ -607,7 +629,7 @@ def delete_lane(db_path: str, *, lane_id: int) -> bool:
 def load_all_lanes(db_path: str) -> List[Dict[str, Any]]:
     """Return all lanes ordered by name."""
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_lanes_schema(conn)
         rows = conn.execute(
             "SELECT id, name, created_at, updated_at FROM lanes ORDER BY name COLLATE NOCASE"
@@ -627,7 +649,7 @@ def load_lane_thread_memberships(db_path: str) -> Dict[str, List[str]]:
     """Return ``lane_id`` → ordered inbox thread ids."""
     db_file = Path(db_path)
     out: Dict[str, List[str]] = {}
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_lanes_schema(conn)
         rows = conn.execute(
             """
@@ -757,7 +779,7 @@ def save_lane_summary(
     if as_of:
         payload["summary_as_of_date"] = as_of
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_lane_summaries_schema(conn)
         row = conn.execute("SELECT id FROM lanes WHERE id = ?", (lane_id,)).fetchone()
         if not row:
@@ -785,7 +807,7 @@ def load_lane_summary(db_path: str, *, lane_id: int) -> Optional[Dict[str, Any]]
     if lane_id <= 0:
         return None
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_lane_summaries_schema(conn)
         row = conn.execute(
             "SELECT summary_json, updated_at FROM lane_summaries WHERE lane_id = ?",
@@ -808,7 +830,7 @@ def load_all_lane_summaries(db_path: str) -> Dict[str, Dict[str, Any]]:
     """Return ``lane_id`` → summary payload (includes ``updated_at``)."""
     db_file = Path(db_path)
     out: Dict[str, Dict[str, Any]] = {}
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_lane_summaries_schema(conn)
         rows = conn.execute(
             "SELECT lane_id, summary_json, updated_at FROM lane_summaries ORDER BY updated_at DESC"
@@ -965,7 +987,7 @@ def dismiss_todo_plan(db_path: str, *, inbox_thread_id: str, action: str) -> Non
     if not tid or not label:
         return
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _record_dismissed_todo_plan(conn, tid, label)
         conn.commit()
 
@@ -979,7 +1001,7 @@ def todo_plan_is_dismissed(
     if not tid or not label:
         return False
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_dismissed_todo_plans_schema(conn)
         row = conn.execute(
             """
@@ -1022,7 +1044,7 @@ def plan_exists_for_thread_action(
     if not tid or not label:
         return False
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_thread_plans_schema(conn)
         row = conn.execute(
             """
@@ -1054,7 +1076,7 @@ def create_thread_plan(
     when = _normalize_field(by_when)
     now = datetime.now(timezone.utc).isoformat()
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_thread_plans_schema(conn)
         _ensure_thread_tracking_schema(conn)
         cur = conn.execute(
@@ -1092,7 +1114,7 @@ def update_thread_plan(
     if plan_id <= 0:
         return None
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_thread_plans_schema(conn)
         _ensure_thread_tracking_schema(conn)
         row = conn.execute(
@@ -1146,7 +1168,7 @@ def delete_thread_plan(db_path: str, *, plan_id: int) -> bool:
     if plan_id <= 0:
         return False
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_thread_plans_schema(conn)
         _ensure_thread_tracking_schema(conn)
         row = conn.execute(
@@ -1179,7 +1201,7 @@ def untrack_todo_plan_inbox_thread(db_path: str, *, inbox_thread_id: str) -> boo
         return False
     now = datetime.now(timezone.utc).isoformat()
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_thread_tracking_schema(conn)
         _ensure_timeline_schema(conn)
         _ensure_claude_outputs_schema(conn)
@@ -1225,7 +1247,7 @@ def load_thread_subjects(db_path: str, thread_id: str) -> List[str]:
     if not tid:
         return []
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_claude_outputs_schema(conn)
         rows = conn.execute(
             """
@@ -1240,7 +1262,7 @@ def load_thread_subjects(db_path: str, thread_id: str) -> List[str]:
 def load_all_thread_plans(db_path: str) -> List[Dict[str, Any]]:
     """Return all user plans, newest first."""
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_thread_plans_schema(conn)
         rows = conn.execute(
             """
@@ -1296,7 +1318,7 @@ def fetch_meetings_rows(db_path: str, *, days: Optional[int] = None) -> List[Dic
     db_file = Path(db_path)
     now = datetime.now(timezone.utc)
     horizon = now + timedelta(days=days) if days is not None and days > 0 else None
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_meetings_schema(conn)
         cur = conn.execute(
             """
@@ -1508,7 +1530,7 @@ def replace_timeline_entries(db_path: str, rows: List[Dict[str, Any]]) -> int:
     db_file = Path(db_path)
     deduped_rows = _dedupe_rows(rows)
 
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_timeline_schema(conn)
         conn.execute("DELETE FROM timeline_entries")
         if deduped_rows:
@@ -1551,7 +1573,7 @@ def upsert_timeline_entries(db_path: str, rows: List[Dict[str, Any]]) -> int:
     db_file = Path(db_path)
     deduped_rows = _dedupe_rows(rows)
 
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_timeline_schema(conn)
         if deduped_rows:
             conn.executemany(
@@ -1604,7 +1626,7 @@ def prune_timeline_entries_for_thread(
         return 0
     keep = sorted({str(x).strip() for x in keep_source_ids if str(x).strip()})
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_timeline_schema(conn)
         if keep:
             placeholders = ",".join("?" for _ in keep)
@@ -1634,7 +1656,7 @@ def upsert_thread_tracking(db_path: str, rows: List[Dict[str, Any]]) -> int:
     db_file = Path(db_path)
     deduped_rows = _dedupe_thread_tracking_rows(rows)
 
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_thread_tracking_schema(conn)
         if deduped_rows:
             conn.executemany(
@@ -1695,7 +1717,7 @@ def upsert_thread_tracking(db_path: str, rows: List[Dict[str, Any]]) -> int:
 def fetch_removed_inbox_thread_ids(db_path: str) -> set[str]:
     """Inbox thread ids with ``snoozed`` = 2 (removed from tracking)."""
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_thread_tracking_schema(conn)
         rows = conn.execute(
             "SELECT inbox_thread_id FROM thread_tracking WHERE snoozed = 2"
@@ -1719,7 +1741,7 @@ def retire_legacy_gmail_forward_tracking(
     tid = _normalize_field(gmail_inbox_thread_id)
     if not tid or tid.startswith(_RFC_THREAD_PREFIX):
         return False
-    with sqlite3.connect(db_path) as conn:
+    with connect_sqlite(db_path) as conn:
         _ensure_thread_tracking_schema(conn)
         row = conn.execute(
             """
@@ -1754,7 +1776,7 @@ def remap_dashboard_thread_id(db_path: str, from_tid: str, to_tid: str) -> None:
     removed = fetch_removed_inbox_thread_ids(db_path)
     if src in removed or dst in removed:
         return
-    with sqlite3.connect(db_path) as conn:
+    with connect_sqlite(db_path) as conn:
         _ensure_timeline_schema(conn)
         _ensure_claude_outputs_schema(conn)
         _ensure_thread_tracking_schema(conn)
@@ -1916,7 +1938,7 @@ def prune_inbox_shell_duplicate_entries(db_path: str) -> Tuple[int, int]:
 
     placeholders = ",".join("?" for _ in shell_ids)
     params = sorted(shell_ids)
-    with sqlite3.connect(db_path) as conn:
+    with connect_sqlite(db_path) as conn:
         _ensure_timeline_schema(conn)
         _ensure_claude_outputs_schema(conn)
         cur_t = conn.execute(
@@ -1940,7 +1962,7 @@ def prune_inbox_shell_duplicate_entries(db_path: str) -> Tuple[int, int]:
 def fetch_thread_tracking_rows(db_path: str) -> List[Dict[str, Any]]:
     """Return all thread_tracking rows (for pipeline expand step)."""
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_thread_tracking_schema(conn)
         cur = conn.execute(
             """
@@ -1981,7 +2003,7 @@ def set_thread_tracking_snoozed(
     raw = int(snoozed)
     snooze_value = raw if raw in (0, 1, 2) else 0
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_thread_tracking_schema(conn)
         cur = conn.execute(
             "UPDATE thread_tracking SET snoozed = ?, updated_at = ? "
@@ -2012,7 +2034,7 @@ def clear_snooze_only_for_threads(
     now = datetime.now(timezone.utc).isoformat()
     db_file = Path(db_path)
     ph = ",".join("?" for _ in tids)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_thread_tracking_schema(conn)
         _ensure_claude_outputs_schema(conn)
         conn.execute(
@@ -2156,7 +2178,7 @@ def load_all_processed_cleaned_by_thread(db_path: str) -> Dict[str, List[Dict[st
     Successful cleaned messages per thread (deduped by ``source_id``), single query.
     """
     try:
-        with sqlite3.connect(db_path) as conn:
+        with connect_sqlite(db_path) as conn:
             conn.row_factory = sqlite3.Row
             _ensure_claude_outputs_schema(conn)
             rows = conn.execute(
@@ -2217,7 +2239,7 @@ def load_processed_cleaned_for_thread(
     if not tid:
         return []
     try:
-        with sqlite3.connect(db_path) as conn:
+        with connect_sqlite(db_path) as conn:
             conn.row_factory = sqlite3.Row
             _ensure_claude_outputs_schema(conn)
             rows = conn.execute(
@@ -2390,7 +2412,7 @@ def save_thread_summary_cache(
         thread_summary if isinstance(thread_summary, dict) else {},
         ensure_ascii=False,
     )
-    with sqlite3.connect(db_path) as conn:
+    with connect_sqlite(db_path) as conn:
         _ensure_thread_summaries_schema(conn)
         conn.execute(
             """
@@ -2424,7 +2446,7 @@ def load_all_thread_summaries_map(db_path: str) -> Dict[str, Dict[str, Any]]:
     """All cached thread summaries keyed by ``thread_id``."""
     out: Dict[str, Dict[str, Any]] = {}
     try:
-        with sqlite3.connect(db_path) as conn:
+        with connect_sqlite(db_path) as conn:
             _ensure_thread_summaries_schema(conn)
             rows = conn.execute(
                 "SELECT thread_id, thread_summary_json FROM thread_summaries"
@@ -2444,7 +2466,7 @@ def load_cached_thread_summary(db_path: str, thread_id: str) -> Optional[Dict[st
     if not tid:
         return None
     try:
-        with sqlite3.connect(db_path) as conn:
+        with connect_sqlite(db_path) as conn:
             _ensure_thread_summaries_schema(conn)
             row = conn.execute(
                 """
@@ -2488,7 +2510,7 @@ def apply_thread_resummary_to_db(
         thread_summary if isinstance(thread_summary, dict) else {},
         ensure_ascii=False,
     )
-    with sqlite3.connect(db_path) as conn:
+    with connect_sqlite(db_path) as conn:
         _ensure_claude_outputs_schema(conn)
         cur = conn.execute(
             """
@@ -2506,7 +2528,7 @@ def apply_thread_resummary_to_db(
 def load_latest_claude_output_snapshot_rows(db_path: str) -> List[Dict[str, Any]]:
     """One row per (thread_id, source_id): latest ``generated_at`` (dashboard shape)."""
     try:
-        with sqlite3.connect(db_path) as conn:
+        with connect_sqlite(db_path) as conn:
             conn.row_factory = sqlite3.Row
             _ensure_claude_outputs_schema(conn)
             rows = conn.execute(
@@ -2548,7 +2570,7 @@ def load_all_thread_draft_replies(db_path: str) -> Dict[str, Dict[str, Any]]:
     """All saved draft replies keyed by ``thread_id`` (dashboard cache shape)."""
     db_file = Path(db_path)
     out: Dict[str, Dict[str, Any]] = {}
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_thread_draft_replies_schema(conn)
         rows = conn.execute(
             "SELECT thread_id, draft_json FROM thread_draft_replies"
@@ -2581,7 +2603,7 @@ def pending_message_counts_by_thread(
     cutoff_iso = cutoff.isoformat()
     successful: set[tuple[str, str]] = set()
     try:
-        with sqlite3.connect(db_path) as conn:
+        with connect_sqlite(db_path) as conn:
             _ensure_claude_outputs_schema(conn)
             for tid, sid in conn.execute(
                 """
@@ -2599,7 +2621,7 @@ def pending_message_counts_by_thread(
 
     counts: Dict[str, int] = {}
     try:
-        with sqlite3.connect(db_path) as conn:
+        with connect_sqlite(db_path) as conn:
             for tid, sid in conn.execute(
                 """
                 SELECT COALESCE(thread_id, ''), source_id
@@ -2794,7 +2816,7 @@ def load_processed_thread_source_pairs(db_path: str) -> Set[Tuple[str, str]]:
     re-segment and insert a new row.
     """
     try:
-        with sqlite3.connect(db_path) as conn:
+        with connect_sqlite(db_path) as conn:
             _ensure_claude_outputs_schema(conn)
             return _claude_outputs_successful_thread_source_pairs(conn)
     except sqlite3.Error:
@@ -2804,7 +2826,7 @@ def load_processed_thread_source_pairs(db_path: str) -> Set[Tuple[str, str]]:
 def load_prior_cleaned_content_by_pair(db_path: str) -> Dict[Tuple[str, str], str]:
     """Latest successful ``cleaned_content`` per ``(thread_id, source_id)``."""
     try:
-        with sqlite3.connect(db_path) as conn:
+        with connect_sqlite(db_path) as conn:
             _ensure_claude_outputs_schema(conn)
             return _claude_outputs_latest_success_content_by_pair(conn)
     except sqlite3.Error:
@@ -2842,7 +2864,7 @@ def save_claude_run_outputs(
         summary_by_key[key] = ts if isinstance(ts, dict) else {}
 
     aggregate_json = "{}"
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_claude_outputs_schema(conn)
         if replace_run_stamp:
             conn.execute("DELETE FROM claude_message_outputs WHERE run_stamp = ?", (run_stamp,))
@@ -2952,7 +2974,7 @@ def delete_claude_outputs_for_thread(db_path: str, thread_id: str) -> int:
     if not tid:
         return 0
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_claude_outputs_schema(conn)
         cur = conn.execute(
             "DELETE FROM claude_message_outputs WHERE COALESCE(thread_id, '') = ?",
@@ -2972,7 +2994,7 @@ def set_claude_outputs_thread_snoozed(
     raw = int(snoozed)
     snooze_value = raw if raw in (0, 1, 2) else 0
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_claude_outputs_schema(conn)
         cur = conn.execute(
             "UPDATE claude_message_outputs SET snoozed = ? WHERE COALESCE(thread_id, '') = ?",
@@ -3072,7 +3094,7 @@ def save_thread_draft_reply(
     payload = dict(draft)
     payload["saved_at"] = payload.get("saved_at") or updated_at
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_thread_draft_replies_schema(conn)
         conn.execute(
             """
@@ -3096,7 +3118,7 @@ def load_thread_draft_reply(
     if not tid:
         return None
     db_file = Path(db_path)
-    with sqlite3.connect(db_file) as conn:
+    with connect_sqlite(db_file) as conn:
         _ensure_thread_draft_replies_schema(conn)
         row = conn.execute(
             "SELECT draft_json FROM thread_draft_replies WHERE thread_id = ?",

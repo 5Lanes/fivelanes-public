@@ -1,5 +1,5 @@
 import { refreshDashboard } from "../dashboard_panel.js";
-import { renderLanesList } from "./lanes_page.js";
+import { renderLanesList, syncLaneSummaryJobsFromServer } from "./lanes_page.js";
 import { partitionThreadsBySnooze, threadLabel } from "../shared/thread_domain.js";
 import { dashboardPlanEditFormHtml, persistPlanDelete, persistPlanUpdate, } from "../shared/plan_helpers.js";
 import { refreshPlanNotifications } from "../shared/plan_notifications.js";
@@ -76,6 +76,7 @@ export async function renderDashboardPage() {
             bucket[cacheKey] = prep;
         },
     });
+    await syncLaneSummaryJobsFromServer();
     renderLanesList();
     refreshPlanNotifications();
 }

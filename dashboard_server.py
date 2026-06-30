@@ -106,6 +106,37 @@ _pipeline_state: Dict[str, Any] = {
 
 _lane_summary_lock = threading.Lock()
 _lane_summary_jobs: Dict[int, Dict[str, Any]] = {}
+# Only one lane summary worker runs at a time (thread refresh + lane rollup).
+_lane_summary_worker_lock = threading.Lock()
+
+# #region agent log
+_DEBUG_LOG_PATH = PROJECT_ROOT / ".cursor" / "debug-3d391d.log"
+
+
+def _agent_debug_log(
+    *,
+    location: str,
+    message: str,
+    data: Dict[str, Any],
+    hypothesis_id: str,
+) -> None:
+    try:
+        payload = {
+            "sessionId": "3d391d",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+            "runId": "serial-fix",
+        }
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, default=str) + "\n")
+    except Exception:
+        pass
+
+
+# #endregion
 
 
 def _lane_summary_has_content(payload: Dict[str, Any]) -> bool:
@@ -155,37 +186,54 @@ def _set_lane_summary_job(lane_id: int, **fields: Any) -> None:
         _lane_summary_jobs[int(lane_id)] = job
 
 
-def _lane_summary_job_running_too_long(job: Dict[str, Any]) -> bool:
-    """True when a running job has exceeded the Ollama timeout plus build buffer."""
-    if str(job.get("status") or "") != "running":
-        return False
-    started_raw = str(job.get("started_at") or "").strip()
-    if not started_raw:
-        return False
-    try:
-        started = datetime.fromisoformat(started_raw.replace("Z", "+00:00"))
-        if started.tzinfo is None:
-            started = started.replace(tzinfo=timezone.utc)
-    except ValueError:
-        return False
-    from services.llama_service import _ollama_timeout_sec
+def _refresh_lane_thread_summaries(
+    *,
+    db_path: str,
+    thread_ids: List[str],
+    llm: Any,
+    lane_id: int | None = None,
+) -> None:
+    """Refresh stale lane thread summaries one at a time (never in parallel)."""
+    from services.pipeline.process import force_resummarize_thread
+    from services.pipeline.summary import thread_needs_summary
+    from utils.database import load_processed_cleaned_for_thread
 
-    limit_sec = _ollama_timeout_sec(str(env_file())) + 120
-    elapsed = (datetime.now(timezone.utc) - started).total_seconds()
-    return elapsed > limit_sec
-
-
-def _expire_lane_summary_job_if_stale(lane_id: int) -> None:
-    with _lane_summary_lock:
-        job = _lane_summary_jobs.get(int(lane_id))
-        if not isinstance(job, dict) or not _lane_summary_job_running_too_long(job):
-            return
-        _lane_summary_jobs[int(lane_id)] = {
-            **job,
-            "status": "error",
-            "error": "lane_summary_timed_out",
-            "finished_at": _utc_now_iso(),
-        }
+    generated_at = _utc_now_iso()
+    backend = llm.name
+    attempted = 0
+    for tid in thread_ids:
+        tid = tid.strip()
+        if not tid:
+            continue
+        cleaned = load_processed_cleaned_for_thread(db_path, tid)
+        if not cleaned:
+            continue
+        if not thread_needs_summary(db_path, tid, cleaned, force=False, backend=backend):
+            continue
+        attempted += 1
+        # #region agent log
+        _agent_debug_log(
+            location="dashboard_server.py:_refresh_lane_thread_summaries",
+            message="thread refresh start",
+            data={"lane_id": lane_id, "lane_thread_index": attempted, "thread_id_len": len(tid)},
+            hypothesis_id="G",
+        )
+        # #endregion
+        ok = force_resummarize_thread(
+            db_path,
+            tid,
+            llm=llm,
+            generated_at=generated_at,
+            apply_to_outputs=True,
+        )
+        # #region agent log
+        _agent_debug_log(
+            location="dashboard_server.py:_refresh_lane_thread_summaries",
+            message="thread refresh done" if ok else "thread refresh failed",
+            data={"lane_id": lane_id, "lane_thread_index": attempted, "ok": ok},
+            hypothesis_id="H",
+        )
+        # #endregion
 
 
 def _lane_summary_http_payload(
@@ -212,6 +260,7 @@ def _run_lane_summary_worker(
     *,
     lane_id: int,
     lane_name: str,
+    thread_ids: List[str],
     summaries: List[Dict[str, Any]],
     input_fingerprint: str,
 ) -> None:
@@ -222,47 +271,87 @@ def _run_lane_summary_worker(
         started_at=_utc_now_iso(),
         finished_at=None,
     )
-    try:
-        llm = get_llm_backend(env_path=str(env_file()))
-        if not summaries:
-            raise RuntimeError("no_thread_summaries")
-        prompt = format_lane_summary_prompt(lane_name, summaries, db_path=DB_PATH)
-        result = llm.submit_lane_summary(prompt)
-        summary, err = _finalize_lane_summary_from_llm(result if isinstance(result, dict) else {})
-        if err:
-            raise RuntimeError(err)
-        from services.prompts import summary_as_of_date
+    # #region agent log
+    _agent_debug_log(
+        location="dashboard_server.py:_run_lane_summary_worker",
+        message="worker waiting for global slot",
+        data={"lane_id": lane_id},
+        hypothesis_id="G",
+    )
+    # #endregion
+    with _lane_summary_worker_lock:
+        # #region agent log
+        _agent_debug_log(
+            location="dashboard_server.py:_run_lane_summary_worker",
+            message="worker acquired global slot",
+            data={"lane_id": lane_id, "thread_count": len(thread_ids)},
+            hypothesis_id="G",
+        )
+        # #endregion
+        try:
+            llm = get_llm_backend(env_path=str(env_file()))
+            _refresh_lane_thread_summaries(
+                db_path=DB_PATH,
+                thread_ids=thread_ids,
+                llm=llm,
+                lane_id=lane_id,
+            )
+            _lane, summaries = load_lane_thread_summaries(DB_PATH, lane_id=lane_id)
+            if not summaries:
+                raise RuntimeError("no_thread_summaries")
+            prompt = format_lane_summary_prompt(lane_name, summaries, db_path=DB_PATH)
+            result = llm.submit_lane_summary(prompt)
+            summary, err = _finalize_lane_summary_from_llm(result if isinstance(result, dict) else {})
+            if err:
+                raise RuntimeError(err)
+            from services.prompts import summary_as_of_date
 
-        summary["input_fingerprint"] = input_fingerprint
-        summary["summary_as_of_date"] = summary_as_of_date()
-        updated_at = save_lane_summary(DB_PATH, lane_id=lane_id, summary=summary)
-        _set_lane_summary_job(
-            lane_id,
-            status="done",
-            error=None,
-            finished_at=_utc_now_iso(),
-            summary_updated_at=updated_at,
-        )
-        log.info("Lane summary finished for lane_id=%s (%s)", lane_id, lane_name)
-    except Exception as exc:
-        log.exception("Lane summary failed for lane_id=%s", lane_id)
-        _set_lane_summary_job(
-            lane_id,
-            status="error",
-            error=str(exc) or "lane_summary_failed",
-            finished_at=_utc_now_iso(),
-        )
+            summary["input_fingerprint"] = input_fingerprint
+            summary["summary_as_of_date"] = summary_as_of_date()
+            updated_at = save_lane_summary(DB_PATH, lane_id=lane_id, summary=summary)
+            _set_lane_summary_job(
+                lane_id,
+                status="done",
+                error=None,
+                finished_at=_utc_now_iso(),
+                summary_updated_at=updated_at,
+            )
+            # #region agent log
+            _agent_debug_log(
+                location="dashboard_server.py:_run_lane_summary_worker",
+                message="worker finished",
+                data={"lane_id": lane_id},
+                hypothesis_id="G",
+            )
+            # #endregion
+            log.info("Lane summary finished for lane_id=%s (%s)", lane_id, lane_name)
+        except Exception as exc:
+            log.exception("Lane summary failed for lane_id=%s", lane_id)
+            # #region agent log
+            _agent_debug_log(
+                location="dashboard_server.py:_run_lane_summary_worker",
+                message="worker failed",
+                data={"lane_id": lane_id, "error": str(exc) or "lane_summary_failed"},
+                hypothesis_id="H",
+            )
+            # #endregion
+            _set_lane_summary_job(
+                lane_id,
+                status="error",
+                error=str(exc) or "lane_summary_failed",
+                finished_at=_utc_now_iso(),
+            )
 
 
 def _start_lane_summary_job(
     *,
     lane_id: int,
     lane_name: str,
+    thread_ids: List[str],
     summaries: List[Dict[str, Any]],
     input_fingerprint: str,
     force: bool,
 ) -> Dict[str, Any]:
-    _expire_lane_summary_job_if_stale(lane_id)
     with _lane_summary_lock:
         job = _lane_summary_jobs.get(int(lane_id))
         if job and str(job.get("status") or "") == "running":
@@ -295,6 +384,7 @@ def _start_lane_summary_job(
         kwargs={
             "lane_id": lane_id,
             "lane_name": lane_name,
+            "thread_ids": thread_ids,
             "summaries": summaries,
             "input_fingerprint": input_fingerprint,
         },
@@ -930,9 +1020,6 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         name = str(lane.get("name") or "").strip()
 
         job = _lane_summary_job_snapshot(lid)
-        if job and _lane_summary_job_running_too_long(job):
-            _expire_lane_summary_job_if_stale(lid)
-            job = _lane_summary_job_snapshot(lid)
         if job and str(job.get("status") or "") == "running":
             self._json_response(
                 HTTPStatus.OK,
@@ -1026,6 +1113,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             out = _start_lane_summary_job(
                 lane_id=lid,
                 lane_name=name,
+                thread_ids=thread_ids,
                 summaries=summaries,
                 input_fingerprint=fp,
                 force=force,

@@ -51,9 +51,9 @@ def _latest_thread_summary(db_path: str, thread_id: str) -> Dict[str, Any]:
         import sqlite3
         from pathlib import Path
 
-        from utils.database import _ensure_claude_outputs_schema
+        from utils.database import _ensure_claude_outputs_schema, connect_sqlite
 
-        with sqlite3.connect(Path(db_path)) as conn:
+        with connect_sqlite(db_path) as conn:
             _ensure_claude_outputs_schema(conn)
             row = conn.execute(
                 """

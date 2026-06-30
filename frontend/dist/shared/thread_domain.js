@@ -179,9 +179,7 @@ export function threadIsEmail(thread) {
 export function threadLabel(thread) {
     const p = thread.messages[0] || { cleaned: null, summary: null };
     const s = threadSummaryForDisplay(thread);
-    const suggested = str(s.suggested_thread_label).trim();
-    const subject = str(p.cleaned?.subject).trim();
-    return suggested || subject || "(No subject)";
+    return str(s.suggested_thread_label).trim() || str(p.cleaned?.subject).trim() || "(No subject)";
 }
 export function threadEmailSubject(thread) {
     for (const row of thread.messages) {

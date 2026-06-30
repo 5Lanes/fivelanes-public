@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+
+from services.llm_inference_lock import llm_inference_slot
 try:
     from dotenv import load_dotenv
 
@@ -263,14 +265,15 @@ def describe_image_with_llava(
         headers=headers,
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=300) as response:
-            raw = response.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as exc:
-        err_body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Ollama API error ({exc.code}) for {model_name}: {err_body}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Ollama request failed ({base}): {exc}") from exc
+    with llm_inference_slot(backend="ollama", kind="vision", model=model_name):
+        try:
+            with urllib.request.urlopen(request, timeout=300) as response:
+                raw = response.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            err_body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Ollama API error ({exc.code}) for {model_name}: {err_body}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"Ollama request failed ({base}): {exc}") from exc
 
     try:
         parsed = json.loads(raw)
@@ -392,24 +395,25 @@ def call_ollama_json(
 
     combined = ""
     last_http_error: Optional[RuntimeError] = None
-    for fmt in formats_to_try:
-        try:
-            combined = _ollama_generate_text(
-                base=base,
-                headers=headers,
-                model_name=model_name,
-                prompt=user,
-                system=system,
-                max_tokens=max_tokens,
-                response_format=fmt,
-                env_path=env_path,
-            )
-            last_http_error = None
-            break
-        except RuntimeError as exc:
-            if fmt is formats_to_try[-1]:
-                raise
-            last_http_error = exc
+    with llm_inference_slot(backend="ollama", kind="generate", model=model_name):
+        for fmt in formats_to_try:
+            try:
+                combined = _ollama_generate_text(
+                    base=base,
+                    headers=headers,
+                    model_name=model_name,
+                    prompt=user,
+                    system=system,
+                    max_tokens=max_tokens,
+                    response_format=fmt,
+                    env_path=env_path,
+                )
+                last_http_error = None
+                break
+            except RuntimeError as exc:
+                if fmt is formats_to_try[-1]:
+                    raise
+                last_http_error = exc
     if last_http_error is not None:
         raise last_http_error
 

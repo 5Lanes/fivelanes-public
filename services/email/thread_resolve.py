@@ -35,6 +35,7 @@ from services.gmail_client import (
     mailbox_identity_emails,
     oauth_account_id_for_email,
 )
+from utils.database import connect_sqlite
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ def existing_source_ids_for_inbox_thread(
     if not tid:
         return set()
     try:
-        with sqlite3.connect(db_path) as conn:
+        with connect_sqlite(db_path) as conn:
             rows = conn.execute(
                 """
                 SELECT source_id FROM timeline_entries
@@ -137,7 +138,7 @@ def existing_source_ids_for_candidates(
     if not clean_ids:
         return set()
     try:
-        with sqlite3.connect(db_path) as conn:
+        with connect_sqlite(db_path) as conn:
             placeholders = ",".join("?" for _ in clean_ids)
             sql = (
                 "SELECT source_id FROM timeline_entries "

@@ -30,6 +30,7 @@ from services.prompts import parse_emails
 from utils.api_error_detection import thread_summary_is_valid
 from utils.database import (
     apply_thread_resummary_to_db,
+    connect_sqlite,
     load_prior_cleaned_content_by_pair,
     load_processed_cleaned_for_thread,
     load_processed_thread_source_pairs,
@@ -99,8 +100,7 @@ def load_timeline_entries_by_thread(
         datetime.now(timezone.utc) - timedelta(days=lookback_days)
     ).isoformat()
 
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
+    with connect_sqlite(db_path, row_factory=sqlite3.Row) as conn:
         rows = conn.execute(
             """
             SELECT source_id, datetime, sender, recipients, summary, body,
@@ -133,8 +133,7 @@ def load_timeline_entry_by_source_id(
     if not sid:
         return None
     try:
-        with sqlite3.connect(db_path) as conn:
-            conn.row_factory = sqlite3.Row
+        with connect_sqlite(db_path, row_factory=sqlite3.Row) as conn:
             row = conn.execute(
                 """
                 SELECT source_id, datetime, sender, recipients, summary, body,
