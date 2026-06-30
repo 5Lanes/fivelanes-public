@@ -138,10 +138,10 @@ function extractColonSeparatedSlots(text, asOf) {
             continue;
         const sentEnd = sentenceEnd(text, dateStart);
         const afterDate = text.slice(dateEnd, sentEnd);
-        const colonIdx = afterDate.indexOf(":");
-        if (colonIdx < 0)
+        const colonSep = afterDate.match(/^\s*:\s*/);
+        if (!colonSep)
             continue;
-        const scanFrom = dateEnd + colonIdx + 1;
+        const scanFrom = dateEnd + colonSep[0].length;
         const scanText = text.slice(scanFrom, sentEnd);
         for (const timeMatch of scanText.matchAll(TIME_RANGE_RE)) {
             const relStart = timeMatch.index ?? 0;
@@ -189,7 +189,7 @@ function mergeMentions(mentions) {
             continue;
         }
         const prev = out[overlapIdx];
-        if (mention.end - mention.start < prev.end - prev.start) {
+        if (mention.end - mention.start > prev.end - prev.start) {
             out[overlapIdx] = mention;
         }
     }
@@ -201,7 +201,7 @@ function minuteToHm(minute) {
     return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 export function counterpartySlotsFromText(text, asOf = new Date()) {
-    const mentions = extractColonSeparatedSlots(text, asOf);
+    const mentions = extractSlotMentions(text, asOf);
     return mentions.map((m) => ({
         date: m.date_key,
         start: minuteToHm(m.start_minute),

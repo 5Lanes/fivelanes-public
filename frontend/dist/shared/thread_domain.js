@@ -179,7 +179,9 @@ export function threadIsEmail(thread) {
 export function threadLabel(thread) {
     const p = thread.messages[0] || { cleaned: null, summary: null };
     const s = threadSummaryForDisplay(thread);
-    return str(s.suggested_thread_label).trim() || str(p.cleaned?.subject).trim() || "(No subject)";
+    const suggested = str(s.suggested_thread_label).trim();
+    const subject = str(p.cleaned?.subject).trim();
+    return suggested || subject || "(No subject)";
 }
 export function threadEmailSubject(thread) {
     for (const row of thread.messages) {
@@ -352,13 +354,20 @@ function counterpartySlotsFromSummaryField(summary) {
 export function counterpartyAvailabilityForSummary(summary) {
     const out = counterpartySlotsFromSummaryField(summary);
     const seen = new Set(out.map(counterpartySlotKey));
+    const actionLines = arr(summary.next_steps).flatMap((raw) => {
+        if (raw && typeof raw === "object")
+            return [str(raw.action)];
+        return [String(raw ?? "")];
+    });
+    const byWhenLines = arr(summary.next_steps).flatMap((raw) => {
+        if (raw && typeof raw === "object")
+            return [str(raw.by_when)];
+        return [];
+    });
     const proseSources = [
         ...arr(summary.latest_updates).map(String),
-        ...arr(summary.next_steps).flatMap((raw) => {
-            if (raw && typeof raw === "object")
-                return [str(raw.action)];
-            return [String(raw ?? "")];
-        }),
+        ...actionLines,
+        ...byWhenLines.filter(Boolean),
     ];
     for (const line of proseSources) {
         for (const inferred of counterpartySlotsFromText(line)) {
@@ -392,7 +401,9 @@ export function nextStepsSectionHtml(steps, structuredSlots = []) {
         const isFollowUp = step.type === "follow up needed";
         const label = isFollowUp ? "Follow up needed" : "Response required";
         const typeClass = isFollowUp ? "next-step-type follow-up" : "next-step-type";
-        const when = step.by_when ? ` <span class="next-step-when">(${escapeHtml(step.by_when)})</span>` : "";
+        const when = step.by_when
+            ? ` <span class="next-step-when">(${highlightMentionsHtml(step.by_when, structuredSlots)})</span>`
+            : "";
         return `<li><span class="${typeClass}">${escapeHtml(label)}</span> ${highlightMentionsHtml(step.action, structuredSlots)}${when}</li>`;
     })
         .join("");

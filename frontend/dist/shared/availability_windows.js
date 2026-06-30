@@ -163,6 +163,13 @@ function blockedDetails(doc, mention, target) {
         return blocks.join("; ");
     return "Blocked by parenting constraints.";
 }
+function dateHasExportCoverage(doc, dateKey) {
+    return ((doc.openByDate.get(dateKey)?.length ?? 0) > 0 ||
+        (doc.virtualOnlyByDate.get(dateKey)?.length ?? 0) > 0 ||
+        (doc.busyByDate.get(dateKey)?.length ?? 0) > 0 ||
+        (doc.blockedByDate.get(dateKey)?.length ?? 0) > 0 ||
+        (doc.eventsByDate.get(dateKey)?.length ?? 0) > 0);
+}
 function statusForRange(dateKey, startMinute, endMinute, doc) {
     if (!doc) {
         return {
@@ -178,15 +185,22 @@ function statusForRange(dateKey, startMinute, endMinute, doc) {
     const virtualOnly = (doc.virtualOnlyByDate.get(dateKey) || []).some((r) => intersects(target, r));
     const busy = (doc.busyByDate.get(dateKey) || []).some((r) => intersects(target, r));
     const blocked = (doc.blockedByDate.get(dateKey) || []).some((r) => intersects(target, r));
+    const eventOverlap = overlappingLabeled(doc.eventsByDate.get(dateKey), target);
+    const hasEventConflict = eventOverlap.length > 0;
     let status = "unknown";
+    let implicitOpen = false;
     if (open)
         status = "open";
     else if (virtualOnly)
         status = "virtual-only";
-    else if (busy)
+    else if (busy || hasEventConflict)
         status = "busy";
     else if (blocked)
         status = "blocked";
+    else if (dateHasExportCoverage(doc, dateKey)) {
+        status = "open";
+        implicitOpen = true;
+    }
     const mention = {
         raw: "",
         start: 0,
@@ -202,7 +216,9 @@ function statusForRange(dateKey, startMinute, endMinute, doc) {
         start_minute: startMinute,
         end_minute: endMinute,
         details: status === "open"
-            ? "Open slot available."
+            ? implicitOpen
+                ? "No calendar conflicts."
+                : "Open slot available."
             : status === "virtual-only"
                 ? "Available virtually (child-home constraint)."
                 : status === "busy"

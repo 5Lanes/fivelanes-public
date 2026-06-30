@@ -371,12 +371,18 @@ function counterpartySlotsFromSummaryField(summary: LooseObj): CounterpartySlot[
 export function counterpartyAvailabilityForSummary(summary: LooseObj): CounterpartySlot[] {
   const out = counterpartySlotsFromSummaryField(summary);
   const seen = new Set(out.map(counterpartySlotKey));
+  const actionLines = arr(summary.next_steps).flatMap((raw) => {
+    if (raw && typeof raw === "object") return [str((raw as LooseObj).action)];
+    return [String(raw ?? "")];
+  });
+  const byWhenLines = arr(summary.next_steps).flatMap((raw) => {
+    if (raw && typeof raw === "object") return [str((raw as LooseObj).by_when)];
+    return [];
+  });
   const proseSources = [
     ...arr(summary.latest_updates).map(String),
-    ...arr(summary.next_steps).flatMap((raw) => {
-      if (raw && typeof raw === "object") return [str((raw as LooseObj).action)];
-      return [String(raw ?? "")];
-    }),
+    ...actionLines,
+    ...byWhenLines.filter(Boolean),
   ];
   for (const line of proseSources) {
     for (const inferred of counterpartySlotsFromText(line)) {
@@ -409,7 +415,9 @@ export function nextStepsSectionHtml(steps: NextStep[], structuredSlots: Counter
       const isFollowUp = step.type === "follow up needed";
       const label = isFollowUp ? "Follow up needed" : "Response required";
       const typeClass = isFollowUp ? "next-step-type follow-up" : "next-step-type";
-      const when = step.by_when ? ` <span class="next-step-when">(${escapeHtml(step.by_when)})</span>` : "";
+      const when = step.by_when
+        ? ` <span class="next-step-when">(${highlightMentionsHtml(step.by_when, structuredSlots)})</span>`
+        : "";
       return `<li><span class="${typeClass}">${escapeHtml(label)}</span> ${highlightMentionsHtml(step.action, structuredSlots)}${when}</li>`;
     })
     .join("");

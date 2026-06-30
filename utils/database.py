@@ -711,7 +711,9 @@ def normalize_lane_summary_payload(raw: Dict[str, Any]) -> Dict[str, Any]:
                 out[key] = []
         else:
             out[key] = _normalize_field(val)
-    return out
+    from utils.summary_timeliness import reframe_summary_temporal_fields
+
+    return reframe_summary_temporal_fields(out)
 
 
 def _ensure_lane_summaries_schema(conn: sqlite3.Connection) -> None:
@@ -751,6 +753,9 @@ def save_lane_summary(
     fp = _normalize_field(raw.get("input_fingerprint"))
     if fp:
         payload["input_fingerprint"] = fp
+    as_of = _normalize_field(raw.get("summary_as_of_date"))
+    if as_of:
+        payload["summary_as_of_date"] = as_of
     db_file = Path(db_path)
     with sqlite3.connect(db_file) as conn:
         _ensure_lane_summaries_schema(conn)
@@ -809,6 +814,8 @@ def load_all_lane_summaries(db_path: str) -> Dict[str, Dict[str, Any]]:
             "SELECT lane_id, summary_json, updated_at FROM lane_summaries ORDER BY updated_at DESC"
         ).fetchall()
     for lane_id, summary_json, updated_at in rows:
+        from utils.summary_timeliness import lane_summary_is_stale
+
         key = str(int(lane_id))
         loaded: Dict[str, Any] = {}
         try:
@@ -820,6 +827,11 @@ def load_all_lane_summaries(db_path: str) -> Dict[str, Dict[str, Any]]:
         payload["updated_at"] = _normalize_field(updated_at)
         if loaded.get("input_fingerprint"):
             payload["input_fingerprint"] = _normalize_field(loaded.get("input_fingerprint"))
+        if loaded.get("summary_as_of_date"):
+            payload["summary_as_of_date"] = _normalize_field(loaded.get("summary_as_of_date"))
+        stale = lane_summary_is_stale(payload)
+        if stale:
+            payload = {"updated_at": payload["updated_at"]}
         out[key] = payload
     return out
 

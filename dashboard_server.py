@@ -121,9 +121,9 @@ def _lane_summary_has_content(payload: Dict[str, Any]) -> bool:
 
 
 def _lane_summary_is_fresh(payload: Dict[str, Any]) -> bool:
-    from utils.summary_timeliness import summary_is_temporally_stale
+    from utils.summary_timeliness import lane_summary_is_stale
 
-    return _lane_summary_has_content(payload) and not summary_is_temporally_stale(payload)
+    return _lane_summary_has_content(payload) and not lane_summary_is_stale(payload)
 
 
 def _finalize_lane_summary_from_llm(result: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[str]]:
@@ -137,11 +137,9 @@ def _finalize_lane_summary_from_llm(result: Dict[str, Any]) -> tuple[Dict[str, A
             return {}, api_error
         else:
             return {}, "Lane summary model returned no usable content"
-    from utils.summary_timeliness import summary_is_temporally_stale
+    from utils.summary_timeliness import reframe_summary_temporal_fields
 
-    if summary_is_temporally_stale(summary):
-        return {}, "Lane summary treats a past event as upcoming; re-run with today's as-of date."
-    return summary, None
+    return reframe_summary_temporal_fields(summary), None
 
 
 def _lane_summary_job_snapshot(lane_id: int) -> Optional[Dict[str, Any]]:
@@ -155,6 +153,39 @@ def _set_lane_summary_job(lane_id: int, **fields: Any) -> None:
         job = dict(_lane_summary_jobs.get(int(lane_id)) or {})
         job.update(fields)
         _lane_summary_jobs[int(lane_id)] = job
+
+
+def _lane_summary_job_running_too_long(job: Dict[str, Any]) -> bool:
+    """True when a running job has exceeded the Ollama timeout plus build buffer."""
+    if str(job.get("status") or "") != "running":
+        return False
+    started_raw = str(job.get("started_at") or "").strip()
+    if not started_raw:
+        return False
+    try:
+        started = datetime.fromisoformat(started_raw.replace("Z", "+00:00"))
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return False
+    from services.llama_service import _ollama_timeout_sec
+
+    limit_sec = _ollama_timeout_sec(str(env_file())) + 120
+    elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+    return elapsed > limit_sec
+
+
+def _expire_lane_summary_job_if_stale(lane_id: int) -> None:
+    with _lane_summary_lock:
+        job = _lane_summary_jobs.get(int(lane_id))
+        if not isinstance(job, dict) or not _lane_summary_job_running_too_long(job):
+            return
+        _lane_summary_jobs[int(lane_id)] = {
+            **job,
+            "status": "error",
+            "error": "lane_summary_timed_out",
+            "finished_at": _utc_now_iso(),
+        }
 
 
 def _lane_summary_http_payload(
@@ -193,12 +224,17 @@ def _run_lane_summary_worker(
     )
     try:
         llm = get_llm_backend(env_path=str(env_file()))
+        if not summaries:
+            raise RuntimeError("no_thread_summaries")
         prompt = format_lane_summary_prompt(lane_name, summaries, db_path=DB_PATH)
         result = llm.submit_lane_summary(prompt)
         summary, err = _finalize_lane_summary_from_llm(result if isinstance(result, dict) else {})
         if err:
             raise RuntimeError(err)
+        from services.prompts import summary_as_of_date
+
         summary["input_fingerprint"] = input_fingerprint
+        summary["summary_as_of_date"] = summary_as_of_date()
         updated_at = save_lane_summary(DB_PATH, lane_id=lane_id, summary=summary)
         _set_lane_summary_job(
             lane_id,
@@ -226,6 +262,7 @@ def _start_lane_summary_job(
     input_fingerprint: str,
     force: bool,
 ) -> Dict[str, Any]:
+    _expire_lane_summary_job_if_stale(lane_id)
     with _lane_summary_lock:
         job = _lane_summary_jobs.get(int(lane_id))
         if job and str(job.get("status") or "") == "running":
@@ -893,6 +930,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         name = str(lane.get("name") or "").strip()
 
         job = _lane_summary_job_snapshot(lid)
+        if job and _lane_summary_job_running_too_long(job):
+            _expire_lane_summary_job_if_stale(lid)
+            job = _lane_summary_job_snapshot(lid)
         if job and str(job.get("status") or "") == "running":
             self._json_response(
                 HTTPStatus.OK,
@@ -910,6 +950,20 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 },
             )
             return
+        if job and str(job.get("status") or "") == "done":
+            cached = load_lane_summary(DB_PATH, lane_id=lid)
+            if cached and _lane_summary_has_content(cached):
+                self._json_response(
+                    HTTPStatus.OK,
+                    _lane_summary_http_payload(
+                        lane_id=lid,
+                        lane_name=name,
+                        summary=cached,
+                        cached=True,
+                        updated_at=str(cached.get("updated_at") or ""),
+                    ),
+                )
+                return
 
         cached = load_lane_summary(DB_PATH, lane_id=lid)
         if cached and _lane_summary_is_fresh(cached):

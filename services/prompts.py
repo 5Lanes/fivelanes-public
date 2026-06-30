@@ -628,6 +628,7 @@ def _build_aggregate_thread_summary_blocks(
     max_threads: int | None = None,
     block_template: str | None = None,
     db_path: str | None = None,
+    include_thread_messages: bool = False,
 ) -> str:
     """
     Format existing thread summaries for lane aggregate prompts.
@@ -659,9 +660,10 @@ def _build_aggregate_thread_summary_blocks(
         block = _format_thread_summary_block(
             i, summary, block_template=block_tpl, include_datetime=True
         )
-        block += _chronological_thread_messages_block(
-            summary, db_path=db_path, max_messages=max_messages
-        )
+        if include_thread_messages:
+            block += _chronological_thread_messages_block(
+                summary, db_path=db_path, max_messages=max_messages
+            )
         blocks.append(block)
     return "\n\n".join(blocks)
 

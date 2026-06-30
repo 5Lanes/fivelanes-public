@@ -196,6 +196,16 @@ function blockedDetails(doc: AvailabilityDoc, mention: SlotMention, target: Minu
   return "Blocked by parenting constraints.";
 }
 
+function dateHasExportCoverage(doc: AvailabilityDoc, dateKey: string): boolean {
+  return (
+    (doc.openByDate.get(dateKey)?.length ?? 0) > 0 ||
+    (doc.virtualOnlyByDate.get(dateKey)?.length ?? 0) > 0 ||
+    (doc.busyByDate.get(dateKey)?.length ?? 0) > 0 ||
+    (doc.blockedByDate.get(dateKey)?.length ?? 0) > 0 ||
+    (doc.eventsByDate.get(dateKey)?.length ?? 0) > 0
+  );
+}
+
 function statusForRange(
   dateKey: string,
   startMinute: number,
@@ -216,11 +226,18 @@ function statusForRange(
   const virtualOnly = (doc.virtualOnlyByDate.get(dateKey) || []).some((r) => intersects(target, r));
   const busy = (doc.busyByDate.get(dateKey) || []).some((r) => intersects(target, r));
   const blocked = (doc.blockedByDate.get(dateKey) || []).some((r) => intersects(target, r));
+  const eventOverlap = overlappingLabeled(doc.eventsByDate.get(dateKey), target);
+  const hasEventConflict = eventOverlap.length > 0;
   let status: AvailabilityStatus = "unknown";
+  let implicitOpen = false;
   if (open) status = "open";
   else if (virtualOnly) status = "virtual-only";
-  else if (busy) status = "busy";
+  else if (busy || hasEventConflict) status = "busy";
   else if (blocked) status = "blocked";
+  else if (dateHasExportCoverage(doc, dateKey)) {
+    status = "open";
+    implicitOpen = true;
+  }
   const mention: SlotMention = {
     raw: "",
     start: 0,
@@ -237,7 +254,9 @@ function statusForRange(
     end_minute: endMinute,
     details:
       status === "open"
-        ? "Open slot available."
+        ? implicitOpen
+          ? "No calendar conflicts."
+          : "Open slot available."
         : status === "virtual-only"
           ? "Available virtually (child-home constraint)."
           : status === "busy"
