@@ -3119,6 +3119,11 @@ details.body-detail summary {
   color: var(--accent);
 }
 
+.count-pill.channel-linkedin {
+  background: #e8f4fc;
+  color: #0a66c2;
+}
+
 .count-pill.pending-pill {
   background: var(--warn-soft);
   color: var(--warn);

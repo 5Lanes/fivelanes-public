@@ -1197,7 +1197,7 @@ def untrack_todo_plan_inbox_thread(db_path: str, *, inbox_thread_id: str) -> boo
     ``thread_plans`` rows are kept — Todo emails should exist only as plans.
     """
     tid = _normalize_field(inbox_thread_id)
-    if not tid or tid.startswith("text:") or tid.startswith("slack:"):
+    if not tid or tid.startswith("text:") or tid.startswith("slack:") or tid.startswith("linkedin:"):
         return False
     now = datetime.now(timezone.utc).isoformat()
     db_file = Path(db_path)
@@ -2668,6 +2668,11 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
     """
     Dashboard summaries payload: latest message rows, snooze overrides, drafts, meeting preps.
     """
+    from services.linkedin.tracking import (
+        LINKEDIN_THREAD_PREFIX,
+        fetch_tracked_conversation_keys as fetch_tracked_linkedin_keys,
+        linkedin_inbox_thread_id as _linkedin_inbox_thread_id,
+    )
     from services.slack.tracking import (
         SLACK_THREAD_PREFIX,
         fetch_tracked_conversation_keys as fetch_tracked_slack_keys,
@@ -2679,6 +2684,7 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
         text_inbox_thread_id as _text_inbox_thread_id,
     )
     from services.thread_snooze import (
+        refresh_linkedin_threads_auto_unsnooze,
         refresh_slack_threads_auto_unsnooze,
         refresh_text_threads_auto_unsnooze,
         snooze_map,
@@ -2686,6 +2692,7 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
 
     refresh_text_threads_auto_unsnooze(db_path)
     refresh_slack_threads_auto_unsnooze(db_path)
+    refresh_linkedin_threads_auto_unsnooze(db_path)
     from utils.thread_summary_normalize import finalize_thread_summary
 
     tracked_text_thread_ids = {
@@ -2693,6 +2700,9 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
     }
     tracked_slack_thread_ids = {
         _slack_inbox_thread_id(k) for k in fetch_tracked_slack_keys(db_path)
+    }
+    tracked_linkedin_thread_ids = {
+        _linkedin_inbox_thread_id(k) for k in fetch_tracked_linkedin_keys(db_path)
     }
     thread_summary_cache = load_all_thread_summaries_map(db_path)
     cleaned_by_thread = load_all_processed_cleaned_by_thread(db_path)
@@ -2717,6 +2727,8 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
         if tid.startswith(TEXT_THREAD_PREFIX) and tid not in tracked_text_thread_ids:
             continue
         if tid.startswith(SLACK_THREAD_PREFIX) and tid not in tracked_slack_thread_ids:
+            continue
+        if tid.startswith(LINKEDIN_THREAD_PREFIX) and tid not in tracked_linkedin_thread_ids:
             continue
         fallback_summary = _parse_thread_summary_json(raw.get("thread_summary_json"))
         thread_summary = finalized_for_thread(tid, fallback_summary) if tid else fallback_summary
@@ -2786,6 +2798,7 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
         "thread_plans": load_all_thread_plans(db_path),
     }
     from services.email.bundle import append_unsynced_email_threads_to_bundle
+    from services.linkedin.bundle import append_unsynced_linkedin_threads_to_bundle
     from services.slack.bundle import append_unsynced_slack_threads_to_bundle
     from services.texts.bundle import append_unsynced_text_threads_to_bundle
     from services.email.config import inbox_lookback_days_from_env
@@ -2794,6 +2807,7 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
 
     append_unsynced_text_threads_to_bundle(db_path, bundle)
     append_unsynced_slack_threads_to_bundle(db_path, bundle)
+    append_unsynced_linkedin_threads_to_bundle(db_path, bundle)
     append_unsynced_email_threads_to_bundle(db_path, bundle, lookback_days=lookback_days)
     bundle["pending_message_counts"] = pending_message_counts_by_thread(
         db_path,

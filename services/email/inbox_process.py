@@ -1109,6 +1109,7 @@ def process_inbox_pipeline(
         if not is_removed(r.get("snoozed"))
         and not str(r.get("inbox_thread_id") or "").strip().startswith("text:")
         and not str(r.get("inbox_thread_id") or "").strip().startswith("slack:")
+        and not str(r.get("inbox_thread_id") or "").strip().startswith("linkedin:")
     ]
     if not tracked_rows:
         if removed_ids and not tt_list:

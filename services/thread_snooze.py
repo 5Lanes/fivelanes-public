@@ -80,7 +80,7 @@ def remove_thread_tracking(db_path: str, thread_id: str) -> bool:
     ok_tracking = set_thread_tracking_snoozed(
         db_path, inbox_thread_id=tid, snoozed=REMOVED
     )
-    if tid.startswith("text:") or tid.startswith("slack:"):
+    if tid.startswith("text:") or tid.startswith("slack:") or tid.startswith("linkedin:"):
         deleted = delete_claude_outputs_for_thread(db_path, tid)
         ok_claude = deleted > 0 or ok_tracking
     else:
@@ -282,5 +282,56 @@ def refresh_slack_threads_auto_unsnooze(db_path: str) -> int:
     cleared = 0
     for key in fetch_tracked_conversation_keys(db_path):
         if maybe_unsnooze_slack_thread(db_path, key):
+            cleared += 1
+    return cleared
+
+
+def maybe_unsnooze_linkedin_thread(db_path: str, conversation_key: str) -> bool:
+    """Unsnooze a LinkedIn thread when on-disk messages are not yet in SQLite."""
+    from services.linkedin.format import (
+        cleaned_rows_for_conversation,
+        load_messages_for_key,
+        new_cleaned_vs_existing,
+    )
+    from services.linkedin.tracking import linkedin_inbox_thread_id
+    from utils.database import fetch_thread_tracking_rows, load_processed_cleaned_for_thread
+
+    key = (conversation_key or "").strip()
+    if not key:
+        return False
+
+    thread_id = linkedin_inbox_thread_id(key)
+    tracking = next(
+        (
+            r
+            for r in fetch_thread_tracking_rows(db_path)
+            if (r.get("inbox_thread_id") or "").strip() == thread_id
+        ),
+        None,
+    )
+    if not tracking or not is_snoozed(tracking.get("snoozed")):
+        return False
+
+    messages = load_messages_for_key(key)
+    if not messages:
+        return False
+
+    file_cleaned = cleaned_rows_for_conversation(key, thread_id, messages)
+    db_cleaned = load_processed_cleaned_for_thread(db_path, thread_id)
+    if not new_cleaned_vs_existing(db_cleaned, file_cleaned):
+        return False
+
+    unsnooze_threads(db_path, [thread_id])
+    log.info("Cleared snooze for inbox_thread_id=%r (new on-disk LinkedIn messages)", thread_id)
+    return True
+
+
+def refresh_linkedin_threads_auto_unsnooze(db_path: str) -> int:
+    """Check all tracked LinkedIn threads for new on-disk messages; return count unsnoozed."""
+    from services.linkedin.tracking import fetch_tracked_conversation_keys
+
+    cleared = 0
+    for key in fetch_tracked_conversation_keys(db_path):
+        if maybe_unsnooze_linkedin_thread(db_path, key):
             cleared += 1
     return cleared

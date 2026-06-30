@@ -453,7 +453,19 @@ def run_threads_llm_pipeline(
         ),
     )
 
+    # #region agent log
+    try:
+        import json as _json, time as _time
+        with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
+            _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "B", "location": "process.py:run_threads_llm_pipeline", "message": "thread_loop_start", "data": {"thread_count": len(thread_keys), "lookback_days": lookback_days, "run_stamp": run_stamp}, "timestamp": int(_time.time() * 1000)}) + "\n")
+    except Exception:
+        pass
+    # #endregion
+
     for thread_id in thread_keys:
+        # #region agent log
+        _thread_t0 = datetime.now(timezone.utc)
+        # #endregion
         cleaned_thread, thread_per_message = process_thread_llm(
             db,
             thread_id,
@@ -464,18 +476,26 @@ def run_threads_llm_pipeline(
             llm=llm,
             generated_at=generated_at,
         )
-        if not cleaned_thread:
-            continue
-        cleaned_all.extend(cleaned_thread)
-        per_message.extend(thread_per_message)
-        save_claude_run_outputs(
-            db,
-            run_stamp=run_stamp,
-            generated_at=generated_at,
-            cleaned=cleaned_thread,
-            per_message=thread_per_message,
-            replace_run_stamp=False,
-        )
+        if cleaned_thread:
+            # #region agent log
+            try:
+                import json as _json, time as _time
+                _elapsed_ms = int((datetime.now(timezone.utc) - _thread_t0).total_seconds() * 1000)
+                with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
+                    _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "B", "location": "process.py:run_threads_llm_pipeline", "message": "thread_processed", "data": {"thread_id": thread_id[:80], "new_messages": len(cleaned_thread), "elapsed_ms": _elapsed_ms}, "timestamp": int(_time.time() * 1000)}) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            cleaned_all.extend(cleaned_thread)
+            per_message.extend(thread_per_message)
+            save_claude_run_outputs(
+                db,
+                run_stamp=run_stamp,
+                generated_at=generated_at,
+                cleaned=cleaned_thread,
+                per_message=thread_per_message,
+                replace_run_stamp=False,
+            )
 
     return cleaned_all, per_message
 

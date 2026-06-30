@@ -43,6 +43,7 @@ FEATURE_REGISTRY: dict[str, FeatureTier] = {
     # Premium — enabled when premium is unlocked
     "texts": FeatureTier.PREMIUM,
     "slack": FeatureTier.PREMIUM,
+    "linkedin": FeatureTier.PREMIUM,
     "availability": FeatureTier.PREMIUM,
 }
 
@@ -62,6 +63,9 @@ _ROUTE_FEATURES: dict[tuple[str, str], str] = {
     ("POST", "/api/slack/pull"): "slack",
     ("POST", "/api/slack/track"): "slack",
     ("POST", "/api/slack/summarize"): "slack",
+    ("GET", "/api/linkedin/catalog"): "linkedin",
+    ("POST", "/api/linkedin/track"): "linkedin",
+    ("POST", "/api/linkedin/summarize"): "linkedin",
 }
 
 _premium_unlocked = False

@@ -6,6 +6,7 @@ import { bindLanesInteractions, mountLanesPage, renderLanesPage } from "./pages/
 import { mountMeetingsPage, renderMeetingsPage } from "./pages/meetings_page.js";
 import { bindPlansInteractions, mountPlansPage, renderPlansPage } from "./pages/plans_page.js";
 import { bindThreadsInteractions, mountThreadsPage, renderThreadsPage } from "./pages/threads_page.js";
+import { bindLinkedinSetupInteractions, mountLinkedinSetupPage, renderLinkedinSetupPage, } from "./pages/linkedin_setup_page.js";
 import { bindSlackSetupInteractions, mountSlackSetupPage, renderSlackSetupPage, } from "./pages/slack_setup_page.js";
 import { bindTextsSetupInteractions, mountTextsSetupPage, renderTextsSetupPage, } from "./pages/texts_setup_page.js";
 import { refreshPipelineRunMeta } from "./pipeline_run_meta.js";
@@ -35,6 +36,8 @@ export function routeFromPathname(pathname) {
         return "texts-setup";
     if (path === "/slack-setup")
         return "slack-setup";
+    if (path === "/linkedin-setup")
+        return "linkedin-setup";
     if (path === "/threads" || path === "/" || path === "/summaries.html")
         return "threads";
     return "threads";
@@ -50,6 +53,7 @@ function showBootstrapError(message) {
 const ROUTE_FEATURES = {
     "texts-setup": "texts",
     "slack-setup": "slack",
+    "linkedin-setup": "linkedin",
 };
 async function renderPage(route) {
     setActiveNav(route);
@@ -96,6 +100,12 @@ async function renderPage(route) {
         await renderSlackSetupPage();
         return;
     }
+    if (route === "linkedin-setup") {
+        mountLinkedinSetupPage(pageRoot);
+        bindLinkedinSetupInteractions();
+        await renderLinkedinSetupPage();
+        return;
+    }
     mountThreadsPage(pageRoot);
     bindThreadsInteractions();
     await renderThreadsPage();
@@ -122,7 +132,7 @@ async function bootstrap() {
         void rerenderCurrentPage();
     });
     const route = routeFromPathname(location.pathname);
-    const needsBundle = route !== "texts-setup" && route !== "slack-setup";
+    const needsBundle = route !== "texts-setup" && route !== "slack-setup" && route !== "linkedin-setup";
     const cached = needsBundle ? readCachedBundle() : null;
     try {
         if (cached) {

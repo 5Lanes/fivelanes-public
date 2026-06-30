@@ -80,8 +80,32 @@ def main(
             dry_run=dry_run,
         )
         return
+    # #region agent log
+    try:
+        import json as _json, time as _time
+        with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
+            _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "A", "location": "fivelanes.py:main", "message": "email_phase_start", "data": {"lookback_days": lookback_days}, "timestamp": int(_time.time() * 1000)}) + "\n")
+    except Exception:
+        pass
+    # #endregion
     run_email_pipeline(lookback_days=lookback_days, max_results=500)
+    # #region agent log
+    try:
+        import json as _json, time as _time
+        with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
+            _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "A", "location": "fivelanes.py:main", "message": "llm_phase_start", "data": {"lookback_days": lookback_days}, "timestamp": int(_time.time() * 1000)}) + "\n")
+    except Exception:
+        pass
+    # #endregion
     run_llm_pipeline(lookback_days=lookback_days)
+    # #region agent log
+    try:
+        import json as _json, time as _time
+        with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
+            _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "B", "location": "fivelanes.py:main", "message": "llm_phase_done", "data": {}, "timestamp": int(_time.time() * 1000)}) + "\n")
+    except Exception:
+        pass
+    # #endregion
     try:
         from utils.features import is_enabled
 
@@ -103,8 +127,17 @@ def main(
                 slack_result.get("summarized", 0),
                 slack_result.get("skipped", 0),
             )
+        if is_enabled("linkedin"):
+            from services.linkedin.summarize import summarize_tracked_linkedin_threads
+
+            linkedin_result = summarize_tracked_linkedin_threads(DATABASE_NAME)
+            log.info(
+                "LinkedIn thread summaries: %d updated, %d skipped",
+                linkedin_result.get("summarized", 0),
+                linkedin_result.get("skipped", 0),
+            )
     except Exception as exc:
-        log.warning("Text/Slack thread summarization skipped: %s", exc)
+        log.warning("Text/Slack/LinkedIn thread summarization skipped: %s", exc)
     if (os.getenv("FIVELANES_RETRY_FAILED") or "1").strip().lower() not in (
         "0",
         "false",
@@ -120,7 +153,23 @@ def main(
             if list_latest_failed_segmentation_pairs(DATABASE_NAME) or list_thread_ids_with_bad_summary(
                 DATABASE_NAME
             ):
+                # #region agent log
+                try:
+                    import json as _json, time as _time
+                    with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
+                        _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "D", "location": "fivelanes.py:main", "message": "retry_phase_start", "data": {"failed_pairs": len(list_latest_failed_segmentation_pairs(DATABASE_NAME)), "bad_summaries": len(list_thread_ids_with_bad_summary(DATABASE_NAME))}, "timestamp": int(_time.time() * 1000)}) + "\n")
+                except Exception:
+                    pass
+                # #endregion
                 retry_failed_pipeline_outputs(db_path=DATABASE_NAME)
+                # #region agent log
+                try:
+                    import json as _json, time as _time
+                    with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
+                        _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "D", "location": "fivelanes.py:main", "message": "retry_phase_done", "data": {}, "timestamp": int(_time.time() * 1000)}) + "\n")
+                except Exception:
+                    pass
+                # #endregion
         except Exception as exc:
             log.warning("Post-pipeline retry of failed outputs skipped: %s", exc)
 

@@ -1,5 +1,5 @@
 import { applySavedThreadDraft, applyThreadSummary, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, setBundle, } from "../shared/summaries_store.js";
-import { counterpartyAvailabilityForSummary, counterpartyAvailabilitySectionHtml, formatDraftReplyMarkdown, formatChatSenderLabel, latestUpdatesForThread, listSection, ownerNextStepsForThread, messageSourceDetailsHtml, nextStepsSectionHtml, partitionThreadsBySnooze, pendingMessageCountForThread, pendingMessagePillHtml, shouldShowThreadMessageBlocks, threadIsEmail, threadIsSlack, threadIsText, threadLabel, threadMessagesForDisplay, threadMessagesForReply, threadSummaryErrorHtml, threadSummaryForDisplay, } from "../shared/thread_domain.js";
+import { counterpartyAvailabilityForSummary, counterpartyAvailabilitySectionHtml, formatDraftReplyMarkdown, formatChatSenderLabel, latestUpdatesForThread, listSection, ownerNextStepsForThread, messageSourceDetailsHtml, nextStepsSectionHtml, partitionThreadsBySnooze, pendingMessageCountForThread, pendingMessagePillHtml, shouldShowThreadMessageBlocks, threadIsEmail, threadIsLinkedin, threadIsSlack, threadIsText, threadLabel, threadMessagesForDisplay, threadMessagesForReply, threadSummaryErrorHtml, threadSummaryForDisplay, } from "../shared/thread_domain.js";
 import { escapeHtml, formatDate, formatRecipients, str, toneClass } from "../shared/utils.js";
 import { ensureAvailabilityDocLoaded } from "../shared/availability_windows.js";
 import { applyNavFeatureVisibility, isFeatureEnabled } from "../shared/features.js";
@@ -63,6 +63,8 @@ function filterThreadsByChannel(threads) {
         return threads.filter(threadIsText);
     if (threadChannelFilter === "slack")
         return threads.filter(threadIsSlack);
+    if (threadChannelFilter === "linkedin")
+        return threads.filter(threadIsLinkedin);
     return threads.filter(threadIsEmail);
 }
 function channelFilterEmptyMessage() {
@@ -70,6 +72,8 @@ function channelFilterEmptyMessage() {
         return "No text threads in this view.";
     if (threadChannelFilter === "slack")
         return "No Slack threads in this view.";
+    if (threadChannelFilter === "linkedin")
+        return "No LinkedIn threads in this view.";
     return "No email threads in this view.";
 }
 function buildThreadCard(thread) {
@@ -89,6 +93,7 @@ function buildThreadCard(thread) {
     const pendingCount = pendingMessageCountForThread(thread, data);
     const isText = threadIsText(thread);
     const isSlack = threadIsSlack(thread);
+    const isLinkedin = threadIsLinkedin(thread);
     const updates = latestUpdatesForThread(thread);
     const nextSteps = ownerNextStepsForThread(thread);
     const counterpartySlots = counterpartyAvailabilityForSummary(s);
@@ -119,7 +124,7 @@ function buildThreadCard(thread) {
     art.className = "card";
     art.id = `thread-${thread.id}`;
     art.innerHTML =
-        `<div class="card-top"><time datetime="${escapeHtml(dt)}">${formatDate(dt)}</time>${tone ? `<span class="tone ${toneClass(tone)}">${escapeHtml(tone)}</span>` : ""}<span class="count-pill">${nMsg} msg${nMsg > 1 ? " (thread)" : ""}</span>${pendingMessagePillHtml(pendingCount)}${isText ? `<span class="count-pill channel-text">Text</span>` : isSlack ? `<span class="count-pill channel-slack">Slack</span>` : ""}` +
+        `<div class="card-top"><time datetime="${escapeHtml(dt)}">${formatDate(dt)}</time>${tone ? `<span class="tone ${toneClass(tone)}">${escapeHtml(tone)}</span>` : ""}<span class="count-pill">${nMsg} msg${nMsg > 1 ? " (thread)" : ""}</span>${pendingMessagePillHtml(pendingCount)}${isText ? `<span class="count-pill channel-text">Text</span>` : isSlack ? `<span class="count-pill channel-slack">Slack</span>` : isLinkedin ? `<span class="count-pill channel-linkedin">LinkedIn</span>` : ""}` +
             `<div class="card-actions">` +
             `<a href="/plans?thread=${encodeURIComponent(thread.id)}" class="create-plan-link">Create a plan</a>` +
             `<button type="button" class="thread-refresh-summary-btn" data-refresh-thread-id="${escapeHtml(thread.id)}">Refresh summary</button>` +
@@ -139,7 +144,7 @@ function buildThreadCard(thread) {
             `<textarea class="draft-markdown-output" readonly ${showSavedOut ? "" : "hidden"} rows="12" spellcheck="false">${escapeHtml(savedMd)}</textarea>` +
             `</div>` +
             (str(cLatest.sender)
-                ? `<div class="meta"><strong>${nMsg > 1 ? "Latest from" : "From"}</strong> ${escapeHtml(isText || isSlack ? formatChatSenderLabel(str(cLatest.sender)) : str(cLatest.sender))}</div>`
+                ? `<div class="meta"><strong>${nMsg > 1 ? "Latest from" : "From"}</strong> ${escapeHtml(isText || isSlack || isLinkedin ? formatChatSenderLabel(str(cLatest.sender)) : str(cLatest.sender))}</div>`
                 : "") +
             threadSummaryErrorHtml(s) +
             listSection("Latest updates", updates.length ? updates : s.latest_updates, counterpartySlots) +
@@ -232,6 +237,7 @@ function renderNav(threads, snoozedCount, removedCount, channelCounts) {
         { id: "all", label: "All", count: channelCounts.all },
         { id: "text", label: "Texts", count: channelCounts.text },
         { id: "slack", label: "Slack", count: channelCounts.slack },
+        { id: "linkedin", label: "LinkedIn", count: channelCounts.linkedin },
         { id: "email", label: "Emails", count: channelCounts.email },
     ]) {
         const btn = document.createElement("button");
@@ -374,11 +380,14 @@ export async function renderThreadsPage() {
         all: bySnooze.length,
         text: bySnooze.filter(threadIsText).length,
         slack: bySnooze.filter(threadIsSlack).length,
+        linkedin: bySnooze.filter(threadIsLinkedin).length,
         email: bySnooze.filter(threadIsEmail).length,
     };
     if (threadChannelFilter === "text" && channelCounts.text === 0)
         threadChannelFilter = "all";
     else if (threadChannelFilter === "slack" && channelCounts.slack === 0)
+        threadChannelFilter = "all";
+    else if (threadChannelFilter === "linkedin" && channelCounts.linkedin === 0)
         threadChannelFilter = "all";
     else if (threadChannelFilter === "email" && channelCounts.email === 0)
         threadChannelFilter = "all";

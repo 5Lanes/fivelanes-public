@@ -250,7 +250,25 @@ def retry_failed_pipeline_outputs(
             log.warning("Skip summary for %s: no successful cleaned messages", tid)
             continue
         log.info("Refreshing thread summary for %s (%d message(s))", tid, len(cleaned))
+        # #region agent log
+        _retry_t0 = datetime.now(timezone.utc)
+        try:
+            import json as _json, time as _time
+            with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
+                _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "D", "location": "retry_failed_pipeline_outputs.py", "message": "retry_summary_start", "data": {"thread_id": tid[:80], "message_count": len(cleaned)}, "timestamp": int(_time.time() * 1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         tsumm = summarize_thread(cleaned, mode="full", db_path=db, backend=llm)
+        # #region agent log
+        try:
+            import json as _json, time as _time
+            _elapsed_ms = int((datetime.now(timezone.utc) - _retry_t0).total_seconds() * 1000)
+            with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
+                _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "D", "location": "retry_failed_pipeline_outputs.py", "message": "retry_summary_done", "data": {"thread_id": tid[:80], "elapsed_ms": _elapsed_ms, "valid": thread_summary_is_valid(tsumm, cleaned=cleaned)}, "timestamp": int(_time.time() * 1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         if not thread_summary_is_valid(tsumm, cleaned=cleaned):
             log.warning(
                 "Thread %s summary still looks like an error after re-run: %s",

@@ -12,7 +12,8 @@ export type AppRoute =
   | "lanes"
   | "plans"
   | "texts-setup"
-  | "slack-setup";
+  | "slack-setup"
+  | "linkedin-setup";
 
 export type LaneView = {
   id: number;

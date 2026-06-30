@@ -142,6 +142,35 @@ def resummary_single_thread(
             "skipped": bool(result.get("skipped")),
         }
 
+    from services.linkedin.tracking import LINKEDIN_THREAD_PREFIX, parse_linkedin_inbox_thread_id
+
+    if tid.startswith(LINKEDIN_THREAD_PREFIX):
+        key = parse_linkedin_inbox_thread_id(tid)
+        if not key:
+            return {"ok": False, "error": "invalid_linkedin_thread_id", "thread_id": tid}
+        from services.linkedin.summarize import _latest_thread_summary, summarize_one_linkedin_thread
+
+        result = summarize_one_linkedin_thread(db, key, force=True)
+        if not result.get("ok"):
+            return result
+        tsumm = _latest_thread_summary(db, tid)
+        cleaned = load_processed_cleaned_for_thread(db, tid)
+        if not thread_summary_is_valid(tsumm, cleaned=cleaned):
+            return {
+                "ok": False,
+                "error": "invalid_summary",
+                "thread_id": tid,
+                "api_error": str(tsumm.get("api_error") or ""),
+            }
+        cached = load_cached_thread_summary(db, tid)
+        return {
+            "ok": True,
+            "thread_id": tid,
+            "thread_summary": tsumm,
+            "summary_updated_at": (cached or {}).get("generated_at"),
+            "skipped": bool(result.get("skipped")),
+        }
+
     cleaned = load_processed_cleaned_for_thread(db, tid)
     if not cleaned:
         return {"ok": False, "error": "no_cleaned_messages", "thread_id": tid}

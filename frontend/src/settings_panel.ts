@@ -13,6 +13,8 @@ export type ScheduleConfig = {
   active_weekends: boolean;
 };
 
+const DEFAULT_LOOKBACK_DAYS = 180;
+
 const INTERVAL_OPTIONS = [
   { sec: 300, label: "5 min" },
   { sec: 600, label: "10 min" },
@@ -61,6 +63,12 @@ function parseSchedule(data: LooseObj): ScheduleConfig {
     active_weekdays: data.active_weekdays !== false,
     active_weekends: data.active_weekends !== false,
   };
+}
+
+function parseLookbackDays(data: LooseObj): number {
+  const raw = Number(data.lookback_days);
+  if (!Number.isFinite(raw) || raw < 1) return DEFAULT_LOOKBACK_DAYS;
+  return Math.min(3650, Math.floor(raw));
 }
 
 function parseBackend(data: LooseObj): BackendName {
@@ -138,6 +146,16 @@ function setEmailCaptureDisabled(disabled: boolean): void {
   });
 }
 
+function fillLookbackDaysField(days: number): void {
+  const el = dialogEl?.querySelector("#schedule-lookback-days") as HTMLInputElement | null;
+  if (el) el.value = String(days);
+}
+
+function readLookbackDaysField(): number {
+  const el = dialogEl?.querySelector("#schedule-lookback-days") as HTMLInputElement | null;
+  return parseLookbackDays({ lookback_days: el?.value ?? DEFAULT_LOOKBACK_DAYS });
+}
+
 function fillScheduleFields(config: ScheduleConfig): void {
   const intervalEl = dialogEl?.querySelector("#schedule-interval") as HTMLSelectElement | null;
   const quietStartEl = dialogEl?.querySelector("#schedule-quiet-start") as HTMLSelectElement | null;
@@ -209,6 +227,20 @@ async function setEmailCapture(mode: EmailCaptureMode): Promise<void> {
   updateEmailCaptureSwitch(parseEmailCapture(data));
 }
 
+async function saveLookbackDays(days: number): Promise<number> {
+  const res = await fetch("/api/config/lookback-days", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ lookback_days: days }),
+  });
+  const data = (await res.json().catch(() => ({}))) as LooseObj;
+  if (!res.ok) {
+    throw new Error(str(data.error) || `Lookback days update failed (${res.status})`);
+  }
+  return parseLookbackDays(data);
+}
+
 async function saveSchedule(config: ScheduleConfig): Promise<ScheduleConfig> {
   const res = await fetch("/api/config/schedule", {
     method: "POST",
@@ -228,6 +260,7 @@ async function loadSettingsIntoDialog(): Promise<void> {
   updateBackendSwitch(parseBackend(data));
   updateEmailCaptureSwitch(parseEmailCapture(data));
   fillScheduleFields(parseSchedule((data.schedule as LooseObj) ?? {}));
+  fillLookbackDaysField(parseLookbackDays(data));
 }
 
 export function mountSettingsDialog(): void {
@@ -264,6 +297,11 @@ export function mountSettingsDialog(): void {
       <section class="settings-section" aria-labelledby="settings-schedule-heading">
         <h3 id="settings-schedule-heading">Background runs</h3>
         <p class="settings-lead">Automatic runs happen on an interval during the active window.</p>
+        <label class="settings-field">
+          <span>Lookback days</span>
+          <input id="schedule-lookback-days" name="lookback_days" type="number" min="1" max="3650" step="1" />
+        </label>
+        <p class="settings-hint">How far back email pull and thread processing search.</p>
         <label class="settings-field">
           <span>Run every</span>
           <select id="schedule-interval" name="interval_sec"></select>
@@ -383,7 +421,8 @@ export function bindSettingsPanel(): void {
           return;
         }
         if (submitBtn) submitBtn.disabled = true;
-        await saveSchedule(schedule);
+        const lookbackDays = readLookbackDaysField();
+        await Promise.all([saveSchedule(schedule), saveLookbackDays(lookbackDays)]);
         dialogEl?.close();
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

@@ -197,7 +197,7 @@ def purge_tracked_todo_only_threads(db_path: str) -> int:
     purged = 0
     for row in fetch_thread_tracking_rows(db_path):
         tid = str(row.get("inbox_thread_id") or "").strip()
-        if not tid or tid.startswith("text:") or tid.startswith("slack:"):
+        if not tid or tid.startswith("text:") or tid.startswith("slack:") or tid.startswith("linkedin:"):
             continue
         kind = str(row.get("inbox_delivery_kind") or "").strip()
         if kind == InboxRoute.TODO_PLAN.value:

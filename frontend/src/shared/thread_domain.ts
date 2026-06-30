@@ -108,7 +108,7 @@ export function threadMessagesForDisplay(
   sourceAccount?: string,
 ): ThreadView["messages"] {
   const inbox = (sourceAccount || "").trim().toLowerCase();
-  if (!inbox || thread.id.startsWith("text:") || thread.id.startsWith("slack:")) {
+  if (!inbox || thread.id.startsWith("text:") || thread.id.startsWith("slack:") || thread.id.startsWith("linkedin:")) {
     return [...thread.messages];
   }
   return thread.messages.filter((row) => !messageIsToSourceAccount(row, inbox));
@@ -158,7 +158,7 @@ function chatThreadSummaryScore(s: LooseObj): number {
 
 export function threadSummaryForDisplay(thread: ThreadView): LooseObj {
   const rows = threadMessagesForDisplay(thread, displaySourceAccount);
-  const isChat = thread.id.startsWith("text:") || thread.id.startsWith("slack:");
+  const isChat = thread.id.startsWith("text:") || thread.id.startsWith("slack:") || thread.id.startsWith("linkedin:");
   if (isChat) {
     let best: LooseObj | null = null;
     let bestScore = 0;
@@ -193,8 +193,15 @@ export function threadIsSlack(thread: ThreadView): boolean {
   return str(s.channel || c0.channel) === "slack" || thread.id.startsWith("slack:");
 }
 
+export function threadIsLinkedin(thread: ThreadView): boolean {
+  const primary = thread.messages[0] || { cleaned: null, summary: null };
+  const c0 = (primary.cleaned || {}) as LooseObj;
+  const s = threadSummaryForDisplay(thread);
+  return str(s.channel || c0.channel) === "linkedin" || thread.id.startsWith("linkedin:");
+}
+
 export function threadIsEmail(thread: ThreadView): boolean {
-  return !threadIsText(thread) && !threadIsSlack(thread);
+  return !threadIsText(thread) && !threadIsSlack(thread) && !threadIsLinkedin(thread);
 }
 
 export function threadLabel(thread: ThreadView): string {

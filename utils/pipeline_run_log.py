@@ -79,3 +79,24 @@ def load_last_pipeline_run() -> Optional[Dict[str, Any]]:
     except (OSError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def reconcile_stale_pipeline_run(*, in_progress: bool) -> bool:
+    """
+    Mark a prior ``running`` log entry finished when no cycle holds the run lock.
+
+    Returns True when a stale entry was reconciled.
+    """
+    if in_progress:
+        return False
+    last = load_last_pipeline_run()
+    if not last or str(last.get("status") or "") != "running":
+        return False
+    record_pipeline_run_finish(
+        started_at=str(last.get("started_at") or ""),
+        trigger=str(last.get("trigger") or "unknown"),
+        backend=str(last.get("backend") or ""),
+        ok=False,
+        error="interrupted (process restarted while run was in progress)",
+    )
+    return True

@@ -44,9 +44,7 @@ load_env()
 
 log = logging.getLogger(__name__)
 
-from services.email.config import inbox_lookback_days_from_env
-
-FIVELANES_LOOKBACK_DAYS = inbox_lookback_days_from_env()
+from utils.lookback_config import get_lookback_days
 
 CALENDAR_AVAILABILITY_DISABLE = (os.getenv("CALENDAR_AVAILABILITY_DISABLE") or "").strip().lower() in (
     "1",
@@ -156,8 +154,24 @@ def run_fivelanes_cycle(*, trigger: str = "scheduler", blocking: bool = True) ->
     backend = get_backend()
     started_at = record_pipeline_run_start(trigger=trigger, backend=backend)
     err: Optional[str] = None
+    # #region agent log
     try:
-        fl.main(lookback_days=FIVELANES_LOOKBACK_DAYS)
+        import json as _json, time as _time
+        with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
+            _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "E", "location": "run_fivelanes_scheduler.py:run_fivelanes_cycle", "message": "cycle_start", "data": {"trigger": trigger, "backend": backend, "lookback_days": get_lookback_days()}, "timestamp": int(_time.time() * 1000)}) + "\n")
+    except Exception:
+        pass
+    # #endregion
+    try:
+        fl.main(lookback_days=get_lookback_days())
+        # #region agent log
+        try:
+            import json as _json, time as _time
+            with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
+                _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "A", "location": "run_fivelanes_scheduler.py:run_fivelanes_cycle", "message": "fl_main_done", "data": {"trigger": trigger}, "timestamp": int(_time.time() * 1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         from utils.features import is_enabled
 
         if is_enabled("availability") and not CALENDAR_AVAILABILITY_DISABLE:
@@ -175,6 +189,14 @@ def run_fivelanes_cycle(*, trigger: str = "scheduler", blocking: bool = True) ->
         log.exception("Fivelanes cycle failed")
         raise
     finally:
+        # #region agent log
+        try:
+            import json as _json, time as _time
+            with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
+                _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "E", "location": "run_fivelanes_scheduler.py:run_fivelanes_cycle", "message": "cycle_finally", "data": {"trigger": trigger, "ok": err is None, "error": err}, "timestamp": int(_time.time() * 1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         record_pipeline_run_finish(
             started_at=started_at,
             trigger=trigger,
@@ -255,13 +277,17 @@ def scheduler_loop(*, run_immediately: bool = True) -> None:
         "quiet %02d:00–%02d:00 %s, weekdays=%s, weekends=%s)",
         os.getpid(),
         cfg.interval_sec,
-        FIVELANES_LOOKBACK_DAYS,
+        get_lookback_days(),
         cfg.quiet_start_hour,
         cfg.quiet_end_hour,
         tz,
         cfg.active_weekdays,
         cfg.active_weekends,
     )
+    from utils.pipeline_run_log import reconcile_stale_pipeline_run
+
+    if reconcile_stale_pipeline_run(in_progress=pipeline_run_in_progress()):
+        log.warning("Reconciled stale pipeline run log (prior run did not finish cleanly)")
     if CALENDAR_AVAILABILITY_DISABLE:
         log.info("Calendar availability export: disabled")
     else:

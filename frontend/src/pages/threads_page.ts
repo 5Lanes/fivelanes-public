@@ -22,6 +22,7 @@ import {
   pendingMessagePillHtml,
   shouldShowThreadMessageBlocks,
   threadIsEmail,
+  threadIsLinkedin,
   threadIsSlack,
   threadIsText,
   threadLabel,
@@ -56,7 +57,7 @@ const PAGE_HTML = `
 </div>`;
 
 let threadViewMode: "active" | "snoozed" | "removed" = "active";
-let threadChannelFilter: "all" | "text" | "slack" | "email" = "all";
+let threadChannelFilter: "all" | "text" | "slack" | "linkedin" | "email" = "all";
 let navObserver: IntersectionObserver | null = null;
 let interactionsBound = false;
 let cardsRenderToken = 0;
@@ -100,12 +101,14 @@ function filterThreadsByChannel(threads: ThreadView[]): ThreadView[] {
   if (threadChannelFilter === "all") return threads;
   if (threadChannelFilter === "text") return threads.filter(threadIsText);
   if (threadChannelFilter === "slack") return threads.filter(threadIsSlack);
+  if (threadChannelFilter === "linkedin") return threads.filter(threadIsLinkedin);
   return threads.filter(threadIsEmail);
 }
 
 function channelFilterEmptyMessage(): string {
   if (threadChannelFilter === "text") return "No text threads in this view.";
   if (threadChannelFilter === "slack") return "No Slack threads in this view.";
+  if (threadChannelFilter === "linkedin") return "No LinkedIn threads in this view.";
   return "No email threads in this view.";
 }
 
@@ -126,6 +129,7 @@ function buildThreadCard(thread: ThreadView): HTMLElement {
   const pendingCount = pendingMessageCountForThread(thread, data);
   const isText = threadIsText(thread);
   const isSlack = threadIsSlack(thread);
+  const isLinkedin = threadIsLinkedin(thread);
   const updates = latestUpdatesForThread(thread);
   const nextSteps = ownerNextStepsForThread(thread);
   const counterpartySlots = counterpartyAvailabilityForSummary(s);
@@ -161,7 +165,7 @@ function buildThreadCard(thread: ThreadView): HTMLElement {
     `<div class="card-top"><time datetime="${escapeHtml(dt)}">${formatDate(dt)}</time>${
       tone ? `<span class="tone ${toneClass(tone)}">${escapeHtml(tone)}</span>` : ""
     }<span class="count-pill">${nMsg} msg${nMsg > 1 ? " (thread)" : ""}</span>${pendingMessagePillHtml(pendingCount)}${
-      isText ? `<span class="count-pill channel-text">Text</span>` : isSlack ? `<span class="count-pill channel-slack">Slack</span>` : ""
+      isText ? `<span class="count-pill channel-text">Text</span>` : isSlack ? `<span class="count-pill channel-slack">Slack</span>` : isLinkedin ? `<span class="count-pill channel-linkedin">LinkedIn</span>` : ""
     }` +
     `<div class="card-actions">` +
     `<a href="/plans?thread=${encodeURIComponent(thread.id)}" class="create-plan-link">Create a plan</a>` +
@@ -187,7 +191,7 @@ function buildThreadCard(thread: ThreadView): HTMLElement {
     `</div>` +
     (str(cLatest.sender)
       ? `<div class="meta"><strong>${nMsg > 1 ? "Latest from" : "From"}</strong> ${escapeHtml(
-          isText || isSlack ? formatChatSenderLabel(str(cLatest.sender)) : str(cLatest.sender),
+          isText || isSlack || isLinkedin ? formatChatSenderLabel(str(cLatest.sender)) : str(cLatest.sender),
         )}</div>`
       : "") +
     threadSummaryErrorHtml(s) +
@@ -236,7 +240,7 @@ function renderNav(
   threads: ThreadView[],
   snoozedCount: number,
   removedCount: number,
-  channelCounts: { all: number; text: number; slack: number; email: number },
+  channelCounts: { all: number; text: number; slack: number; linkedin: number; email: number },
 ): void {
   const list = navListEl();
   list.innerHTML = "";
@@ -286,6 +290,7 @@ function renderNav(
     { id: "all" as const, label: "All", count: channelCounts.all },
     { id: "text" as const, label: "Texts", count: channelCounts.text },
     { id: "slack" as const, label: "Slack", count: channelCounts.slack },
+    { id: "linkedin" as const, label: "LinkedIn", count: channelCounts.linkedin },
     { id: "email" as const, label: "Emails", count: channelCounts.email },
   ]) {
     const btn = document.createElement("button");
@@ -434,10 +439,12 @@ export async function renderThreadsPage(): Promise<void> {
     all: bySnooze.length,
     text: bySnooze.filter(threadIsText).length,
     slack: bySnooze.filter(threadIsSlack).length,
+    linkedin: bySnooze.filter(threadIsLinkedin).length,
     email: bySnooze.filter(threadIsEmail).length,
   };
   if (threadChannelFilter === "text" && channelCounts.text === 0) threadChannelFilter = "all";
   else if (threadChannelFilter === "slack" && channelCounts.slack === 0) threadChannelFilter = "all";
+  else if (threadChannelFilter === "linkedin" && channelCounts.linkedin === 0) threadChannelFilter = "all";
   else if (threadChannelFilter === "email" && channelCounts.email === 0) threadChannelFilter = "all";
   const visible = filterThreadsByChannel(bySnooze);
 
