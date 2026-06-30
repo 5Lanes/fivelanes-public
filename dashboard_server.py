@@ -109,35 +109,6 @@ _lane_summary_jobs: Dict[int, Dict[str, Any]] = {}
 # Only one lane summary worker runs at a time (thread refresh + lane rollup).
 _lane_summary_worker_lock = threading.Lock()
 
-# #region agent log
-_DEBUG_LOG_PATH = PROJECT_ROOT / ".cursor" / "debug-3d391d.log"
-
-
-def _agent_debug_log(
-    *,
-    location: str,
-    message: str,
-    data: Dict[str, Any],
-    hypothesis_id: str,
-) -> None:
-    try:
-        payload = {
-            "sessionId": "3d391d",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
-            "runId": "serial-fix",
-        }
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, default=str) + "\n")
-    except Exception:
-        pass
-
-
-# #endregion
-
 
 def _lane_summary_has_content(payload: Dict[str, Any]) -> bool:
     if str(payload.get("summary") or "").strip():
@@ -191,7 +162,6 @@ def _refresh_lane_thread_summaries(
     db_path: str,
     thread_ids: List[str],
     llm: Any,
-    lane_id: int | None = None,
 ) -> None:
     """Refresh stale lane thread summaries one at a time (never in parallel)."""
     from services.pipeline.process import force_resummarize_thread
@@ -200,7 +170,6 @@ def _refresh_lane_thread_summaries(
 
     generated_at = _utc_now_iso()
     backend = llm.name
-    attempted = 0
     for tid in thread_ids:
         tid = tid.strip()
         if not tid:
@@ -210,30 +179,13 @@ def _refresh_lane_thread_summaries(
             continue
         if not thread_needs_summary(db_path, tid, cleaned, force=False, backend=backend):
             continue
-        attempted += 1
-        # #region agent log
-        _agent_debug_log(
-            location="dashboard_server.py:_refresh_lane_thread_summaries",
-            message="thread refresh start",
-            data={"lane_id": lane_id, "lane_thread_index": attempted, "thread_id_len": len(tid)},
-            hypothesis_id="G",
-        )
-        # #endregion
-        ok = force_resummarize_thread(
+        force_resummarize_thread(
             db_path,
             tid,
             llm=llm,
             generated_at=generated_at,
             apply_to_outputs=True,
         )
-        # #region agent log
-        _agent_debug_log(
-            location="dashboard_server.py:_refresh_lane_thread_summaries",
-            message="thread refresh done" if ok else "thread refresh failed",
-            data={"lane_id": lane_id, "lane_thread_index": attempted, "ok": ok},
-            hypothesis_id="H",
-        )
-        # #endregion
 
 
 def _lane_summary_http_payload(
@@ -271,30 +223,13 @@ def _run_lane_summary_worker(
         started_at=_utc_now_iso(),
         finished_at=None,
     )
-    # #region agent log
-    _agent_debug_log(
-        location="dashboard_server.py:_run_lane_summary_worker",
-        message="worker waiting for global slot",
-        data={"lane_id": lane_id},
-        hypothesis_id="G",
-    )
-    # #endregion
     with _lane_summary_worker_lock:
-        # #region agent log
-        _agent_debug_log(
-            location="dashboard_server.py:_run_lane_summary_worker",
-            message="worker acquired global slot",
-            data={"lane_id": lane_id, "thread_count": len(thread_ids)},
-            hypothesis_id="G",
-        )
-        # #endregion
         try:
             llm = get_llm_backend(env_path=str(env_file()))
             _refresh_lane_thread_summaries(
                 db_path=DB_PATH,
                 thread_ids=thread_ids,
                 llm=llm,
-                lane_id=lane_id,
             )
             _lane, summaries = load_lane_thread_summaries(DB_PATH, lane_id=lane_id)
             if not summaries:
@@ -316,25 +251,9 @@ def _run_lane_summary_worker(
                 finished_at=_utc_now_iso(),
                 summary_updated_at=updated_at,
             )
-            # #region agent log
-            _agent_debug_log(
-                location="dashboard_server.py:_run_lane_summary_worker",
-                message="worker finished",
-                data={"lane_id": lane_id},
-                hypothesis_id="G",
-            )
-            # #endregion
             log.info("Lane summary finished for lane_id=%s (%s)", lane_id, lane_name)
         except Exception as exc:
             log.exception("Lane summary failed for lane_id=%s", lane_id)
-            # #region agent log
-            _agent_debug_log(
-                location="dashboard_server.py:_run_lane_summary_worker",
-                message="worker failed",
-                data={"lane_id": lane_id, "error": str(exc) or "lane_summary_failed"},
-                hypothesis_id="H",
-            )
-            # #endregion
             _set_lane_summary_job(
                 lane_id,
                 status="error",

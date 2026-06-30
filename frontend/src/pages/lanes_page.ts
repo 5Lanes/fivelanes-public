@@ -395,21 +395,6 @@ async function waitForLaneSummary(laneId: number, maxWaitMs = 20 * 60 * 1000): P
     } catch (err) {
       if (isTransientFetchError(err) && Date.now() - start < maxWaitMs) {
         transientFailures += 1;
-        // #region agent log
-        fetch("http://localhost:7364/ingest/d851e417-32b1-446f-b903-fefbca196cd9", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "3d391d" },
-          body: JSON.stringify({
-            sessionId: "3d391d",
-            location: "lanes_page.ts:waitForLaneSummary",
-            message: "transient fetch error, retrying",
-            data: { laneId, attempt: transientFailures, error: err instanceof Error ? err.message : String(err) },
-            timestamp: Date.now(),
-            runId: "pending-sync",
-            hypothesisId: "NET",
-          }),
-        }).catch(() => {});
-        // #endregion
         await sleep(Math.min(3000 * transientFailures, 15000));
         continue;
       }
@@ -473,21 +458,6 @@ function handleLaneSummaryError(laneId: number, err: unknown): void {
   laneSummaryPending.delete(laneId);
   const msg = err instanceof Error ? err.message : String(err);
   laneSummaryErrors.set(laneId, msg);
-  // #region agent log
-  fetch("http://localhost:7364/ingest/d851e417-32b1-446f-b903-fefbca196cd9", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "3d391d" },
-    body: JSON.stringify({
-      sessionId: "3d391d",
-      location: "lanes_page.ts:handleLaneSummaryError",
-      message: "lane summary watch failed",
-      data: { laneId, error: msg },
-      timestamp: Date.now(),
-      runId: "pending-sync",
-      hypothesisId: "H",
-    }),
-  }).catch(() => {});
-  // #endregion
   console.error(err);
   reloadFromStore();
 }
@@ -499,21 +469,6 @@ function watchLaneSummaryCompletion(laneId: number): void {
   void (async () => {
     try {
       const body = await waitForLaneSummary(laneId);
-      // #region agent log
-      fetch("http://localhost:7364/ingest/d851e417-32b1-446f-b903-fefbca196cd9", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "3d391d" },
-        body: JSON.stringify({
-          sessionId: "3d391d",
-          location: "lanes_page.ts:watchLaneSummaryCompletion",
-          message: "lane summary watch completed",
-          data: { laneId, hasContent: laneSummaryHasContent(body) },
-          timestamp: Date.now(),
-          runId: "pending-sync",
-          hypothesisId: "D",
-        }),
-      }).catch(() => {});
-      // #endregion
       handleLaneSummaryComplete(laneId, body);
     } catch (err) {
       handleLaneSummaryError(laneId, err);
@@ -561,26 +516,6 @@ export async function syncLaneSummaryJobsFromServer(): Promise<void> {
       }
     }),
   );
-  // #region agent log
-  fetch("http://localhost:7364/ingest/d851e417-32b1-446f-b903-fefbca196cd9", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "3d391d" },
-    body: JSON.stringify({
-      sessionId: "3d391d",
-      location: "lanes_page.ts:syncLaneSummaryJobsFromServer",
-      message: "restored pending lane summaries",
-      data: {
-        restored,
-        reconciled,
-        watching: [...laneSummaryWatching],
-        pending: [...laneSummaryPending],
-      },
-      timestamp: Date.now(),
-      runId: "pending-sync",
-      hypothesisId: "UI",
-    }),
-  }).catch(() => {});
-  // #endregion
   if (restored.length || reconciled.length) {
     renderLanesList();
   }

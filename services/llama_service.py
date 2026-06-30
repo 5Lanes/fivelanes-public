@@ -265,7 +265,7 @@ def describe_image_with_llava(
         headers=headers,
         method="POST",
     )
-    with llm_inference_slot(backend="ollama", kind="vision", model=model_name):
+    with llm_inference_slot():
         try:
             with urllib.request.urlopen(request, timeout=300) as response:
                 raw = response.read().decode("utf-8", errors="replace")
@@ -395,7 +395,7 @@ def call_ollama_json(
 
     combined = ""
     last_http_error: Optional[RuntimeError] = None
-    with llm_inference_slot(backend="ollama", kind="generate", model=model_name):
+    with llm_inference_slot():
         for fmt in formats_to_try:
             try:
                 combined = _ollama_generate_text(

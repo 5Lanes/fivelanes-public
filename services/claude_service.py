@@ -138,7 +138,7 @@ def call_claude_json(
     attempted: List[str] = []
     raw = ""
     last_error = ""
-    with llm_inference_slot(backend="claude", kind="generate", model=model):
+    with llm_inference_slot():
         for model_name in models_to_try:
             if model_name in attempted:
                 continue
@@ -309,7 +309,7 @@ def describe_image_with_claude(
     attempted: List[str] = []
     raw = ""
     last_error = ""
-    with llm_inference_slot(backend="claude", kind="vision", model=model):
+    with llm_inference_slot():
         for model_name in models_to_try:
             if model_name in attempted:
                 continue
