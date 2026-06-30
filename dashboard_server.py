@@ -1445,12 +1445,16 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         )
 
     def _get_config(self) -> None:
+        from utils.email_capture_config import get_email_capture_mode
         from utils.features import features_config_payload
         from utils.owner_config import public_config_payload
+        from utils.scheduler_config import get_schedule_config
 
         payload = {"ok": True, "backend": get_backend()}
         payload.update(public_config_payload())
         payload.update(features_config_payload())
+        payload["schedule"] = get_schedule_config().to_dict()
+        payload["email_capture"] = get_email_capture_mode()
         self._json_response(HTTPStatus.OK, payload)
 
     def _feature_gate_response(self, method: str, path: str) -> bool:
@@ -1496,6 +1500,57 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             )
             return
         self._json_response(HTTPStatus.OK, {"ok": True, "backend": get_backend()})
+
+    def _post_config_schedule(self, body: Dict[str, Any]) -> None:
+        from utils.scheduler_config import set_schedule_config
+
+        try:
+            config = set_schedule_config(body)
+        except ValueError as exc:
+            self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"ok": False, "error": str(exc) or "invalid_schedule"},
+            )
+            return
+        except OSError as exc:
+            self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"ok": False, "error": str(exc)},
+            )
+            return
+        self._json_response(
+            HTTPStatus.OK,
+            {"ok": True, "schedule": config.to_dict()},
+        )
+
+    def _post_config_email_capture(self, body: Dict[str, Any]) -> None:
+        from utils.email_capture_config import set_email_capture_mode
+
+        mode = str(body.get("email_capture") or body.get("mode") or "").strip().lower()
+        if not mode:
+            self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"ok": False, "error": "missing_email_capture"},
+            )
+            return
+        try:
+            applied = set_email_capture_mode(mode)
+        except ValueError as exc:
+            self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"ok": False, "error": str(exc) or "invalid_email_capture"},
+            )
+            return
+        except OSError as exc:
+            self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"ok": False, "error": str(exc)},
+            )
+            return
+        self._json_response(
+            HTTPStatus.OK,
+            {"ok": True, "email_capture": applied},
+        )
 
     def _post_pipeline_run(self) -> None:
         started, err = _start_pipeline_run()
@@ -1635,6 +1690,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._post_plan_delete(body)
         elif path == "/api/config/backend":
             self._post_config_backend(body)
+        elif path == "/api/config/schedule":
+            self._post_config_schedule(body)
+        elif path == "/api/config/email-capture":
+            self._post_config_email_capture(body)
         elif path == "/api/pipeline/run":
             self._post_pipeline_run()
         elif path == "/api/texts/track":

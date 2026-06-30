@@ -1,5 +1,9 @@
 import { refreshPipelineRunMeta } from "./pipeline_run_meta.js";
 import {
+  setSettingsControlsLocked,
+  syncBackendFromStatus,
+} from "./settings_panel.js";
+import {
   clearSummariesBundleCache,
   loadLatestBundle,
   setBundle,
@@ -9,27 +13,11 @@ import { str } from "./shared/utils.js";
 
 const runMetaEl = document.getElementById("run-meta") as HTMLParagraphElement | null;
 
-export type BackendName = "claude" | "llama";
-
 const runBtn = document.getElementById("run-fivelanes-btn") as HTMLButtonElement | null;
 const statusEl = document.getElementById("pipeline-status") as HTMLParagraphElement | null;
-const backendSwitch = document.getElementById("backend-switch") as HTMLDivElement | null;
-const backendLabel = document.getElementById("backend-label") as HTMLSpanElement | null;
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let onRunComplete: (() => void) | null = null;
-
-function backendDisplayName(backend: BackendName): string {
-  return backend === "claude" ? "Claude" : "Llama";
-}
-
-function setBackendLabel(backend: BackendName): void {
-  const name = backendDisplayName(backend);
-  if (backendLabel) {
-    backendLabel.textContent = `Backend: ${name}`;
-  }
-  backendSwitch?.setAttribute("aria-label", `LLM backend, ${name} selected`);
-}
 
 function setStatus(message: string, kind: "info" | "error" = "info"): void {
   if (!statusEl) return;
@@ -43,54 +31,6 @@ function setRunButtonRunning(running: boolean): void {
   runBtn.disabled = running;
   runBtn.textContent = running ? "Running…" : "Run fivelanes";
   runBtn.setAttribute("aria-busy", running ? "true" : "false");
-}
-
-function setBackendSwitchDisabled(disabled: boolean): void {
-  backendSwitch?.querySelectorAll<HTMLButtonElement>("[data-backend]").forEach((btn) => {
-    btn.disabled = disabled;
-  });
-}
-
-function updateBackendSwitch(backend: BackendName): void {
-  setBackendLabel(backend);
-  backendSwitch?.querySelectorAll<HTMLButtonElement>("[data-backend]").forEach((btn) => {
-    const active = btn.dataset.backend === backend;
-    btn.classList.toggle("active", active);
-    btn.setAttribute("aria-pressed", active ? "true" : "false");
-    btn.setAttribute("aria-current", active ? "true" : "false");
-  });
-}
-
-function syncBackendFromStatus(status: LooseObj): void {
-  const raw = str(status.backend).toLowerCase();
-  if (raw === "claude" || raw === "llama") {
-    updateBackendSwitch(raw);
-  }
-}
-
-async function fetchConfig(): Promise<BackendName> {
-  const res = await fetch("/api/config", { credentials: "same-origin" });
-  if (!res.ok) throw new Error(`Config load failed (${res.status})`);
-  const data = (await res.json()) as LooseObj;
-  const backend = str(data.backend).toLowerCase();
-  if (backend !== "claude" && backend !== "llama") {
-    throw new Error(`Unexpected backend: ${backend || "(empty)"}`);
-  }
-  return backend;
-}
-
-async function setBackend(backend: BackendName): Promise<void> {
-  const res = await fetch("/api/config/backend", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "same-origin",
-    body: JSON.stringify({ backend }),
-  });
-  const data = (await res.json().catch(() => ({}))) as LooseObj;
-  if (!res.ok) {
-    throw new Error(str(data.error) || `Backend update failed (${res.status})`);
-  }
-  updateBackendSwitch(backend);
 }
 
 async function fetchPipelineStatus(): Promise<LooseObj> {
@@ -120,7 +60,7 @@ async function pollPipelineStatus(): Promise<void> {
     void refreshPipelineRunMeta(runMetaEl);
     const running = Boolean(status.running);
     setRunButtonRunning(running);
-    setBackendSwitchDisabled(running);
+    setSettingsControlsLocked(running);
 
     if (running) {
       setStatus("Fivelanes is running…");
@@ -145,7 +85,7 @@ async function pollPipelineStatus(): Promise<void> {
   } catch (err) {
     stopPolling();
     setRunButtonRunning(false);
-    setBackendSwitchDisabled(false);
+    setSettingsControlsLocked(false);
     const msg = err instanceof Error ? err.message : String(err);
     setStatus(msg, "error");
   }
@@ -161,7 +101,7 @@ function startPolling(): void {
 
 async function startPipelineRun(): Promise<void> {
   setRunButtonRunning(true);
-  setBackendSwitchDisabled(true);
+  setSettingsControlsLocked(true);
   setStatus("Starting fivelanes…");
 
   const res = await fetch("/api/pipeline/run", {
@@ -179,7 +119,7 @@ async function startPipelineRun(): Promise<void> {
   }
   if (!res.ok) {
     setRunButtonRunning(false);
-    setBackendSwitchDisabled(false);
+    setSettingsControlsLocked(false);
     setStatus(str(data.error) || `Run failed (${res.status})`, "error");
     return;
   }
@@ -194,33 +134,14 @@ export function bindPipelineControls(onComplete?: () => void): void {
     void startPipelineRun();
   });
 
-  backendSwitch?.querySelectorAll<HTMLButtonElement>("[data-backend]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const backend = btn.dataset.backend as BackendName | undefined;
-      if (!backend || btn.classList.contains("active") || btn.disabled) return;
-      void (async () => {
-        try {
-          setBackendSwitchDisabled(true);
-          await setBackend(backend);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          setStatus(msg, "error");
-        } finally {
-          if (!runBtn?.disabled) setBackendSwitchDisabled(false);
-        }
-      })();
-    });
-  });
-
   void (async () => {
     try {
-      const backend = await fetchConfig();
-      updateBackendSwitch(backend);
       const status = await fetchPipelineStatus();
+      syncBackendFromStatus(status);
       void refreshPipelineRunMeta(runMetaEl);
       if (status.running) {
         setRunButtonRunning(true);
-        setBackendSwitchDisabled(true);
+        setSettingsControlsLocked(true);
         startPolling();
       }
     } catch (err) {

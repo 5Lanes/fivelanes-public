@@ -1,4 +1,5 @@
 import { bindPipelineControls } from "./pipeline_controls.js";
+import { bindSettingsPanel, mountSettingsDialog } from "./settings_panel.js";
 import { MEETINGS_LOOKAHEAD_DAYS, prefetchMeetings } from "./meetings_panel.js";
 import {
   bindDashboardInteractions,
@@ -139,6 +140,8 @@ async function bootstrap(): Promise<void> {
 
   prefetchMeetings(MEETINGS_LOOKAHEAD_DAYS);
   void refreshPipelineRunMeta(runMetaEl);
+  mountSettingsDialog();
+  bindSettingsPanel();
   bindPipelineControls(() => {
     void refreshPipelineRunMeta(runMetaEl);
     void rerenderCurrentPage();

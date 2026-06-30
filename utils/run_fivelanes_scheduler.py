@@ -19,6 +19,8 @@ Environment (same names as dashboard_server where applicable):
   FIVELANES_QUIET_START_HOUR   inclusive start of quiet period, 0–23 (default 19)
   FIVELANES_QUIET_END_HOUR     exclusive end of quiet period, 0–24 (default 6)
   FIVELANES_SCHEDULER_TZ       IANA timezone for quiet hours (default: system local)
+  FIVELANES_SCHEDULER_WEEKDAYS run on Mon–Fri when 1/true (default: true)
+  FIVELANES_SCHEDULER_WEEKENDS run on Sat–Sun when 1/true (default: true)
   CALENDAR_AVAILABILITY_DISABLE, CALENDAR_AVAILABILITY_WEEKS — same as dashboard_server
 
 Also used by ``dashboard_server.py`` (background thread).
@@ -32,22 +34,19 @@ import os
 import threading
 import time
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from utils.runtime_paths import data_path, env_file, infra_root, load_env
+from utils.runtime_paths import data_path, infra_root, load_env
+from utils.scheduler_config import ScheduleConfig, get_schedule_config, scheduler_tz
 
 load_env()
 
 log = logging.getLogger(__name__)
 
-FIVELANES_INTERVAL_SEC = int(os.getenv("FIVELANES_INTERVAL_SEC", "900"))
 from services.email.config import inbox_lookback_days_from_env
 
 FIVELANES_LOOKBACK_DAYS = inbox_lookback_days_from_env()
-FIVELANES_QUIET_START_HOUR = int(os.getenv("FIVELANES_QUIET_START_HOUR", "19"))
-FIVELANES_QUIET_END_HOUR = int(os.getenv("FIVELANES_QUIET_END_HOUR", "6"))
 
 CALENDAR_AVAILABILITY_DISABLE = (os.getenv("CALENDAR_AVAILABILITY_DISABLE") or "").strip().lower() in (
     "1",
@@ -83,28 +82,20 @@ def _mark_run_finished() -> None:
 def _seconds_until_next_interval() -> float:
     if _last_run_finished_mono <= 0:
         return 0.0
-    return max(0.0, FIVELANES_INTERVAL_SEC - (time.monotonic() - _last_run_finished_mono))
-
-
-def _scheduler_tz() -> ZoneInfo:
-    name = (os.getenv("FIVELANES_SCHEDULER_TZ") or "").strip()
-    if name:
-        return ZoneInfo(name)
-    return datetime.now().astimezone().tzinfo or ZoneInfo("UTC")
+    interval = get_schedule_config().interval_sec
+    return max(0.0, interval - (time.monotonic() - _last_run_finished_mono))
 
 
 def _now_local(tz: ZoneInfo) -> datetime:
     return datetime.now(tz)
 
 
-def in_quiet_hours(
-    when: datetime,
-    *,
-    quiet_start: int = FIVELANES_QUIET_START_HOUR,
-    quiet_end: int = FIVELANES_QUIET_END_HOUR,
-) -> bool:
+def in_quiet_hours(when: datetime, config: ScheduleConfig | None = None) -> bool:
     """True when ``when`` falls in the quiet window (no pipeline runs)."""
+    cfg = config or get_schedule_config()
     hour = when.hour
+    quiet_start = cfg.quiet_start_hour
+    quiet_end = cfg.quiet_end_hour
     if quiet_start < quiet_end:
         return quiet_start <= hour < quiet_end
     if quiet_start > quiet_end:
@@ -112,16 +103,39 @@ def in_quiet_hours(
     return False
 
 
-def seconds_until_quiet_ends(
-    when: datetime,
-    *,
-    quiet_end: int = FIVELANES_QUIET_END_HOUR,
-) -> float:
+def is_active_day(when: datetime, config: ScheduleConfig | None = None) -> bool:
+    """True when ``when`` falls on an allowed weekday or weekend."""
+    cfg = config or get_schedule_config()
+    is_weekday = when.weekday() < 5
+    if is_weekday:
+        return cfg.active_weekdays
+    return cfg.active_weekends
+
+
+def seconds_until_quiet_ends(when: datetime, config: ScheduleConfig | None = None) -> float:
     """Seconds until ``quiet_end`` o'clock on the same local calendar day as ``when``."""
-    target = when.replace(hour=quiet_end, minute=0, second=0, microsecond=0)
+    cfg = config or get_schedule_config()
+    target = when.replace(hour=cfg.quiet_end_hour, minute=0, second=0, microsecond=0)
     if when >= target:
         target += timedelta(days=1)
     return max(0.0, (target - when).total_seconds())
+
+
+def seconds_until_active_day(when: datetime, config: ScheduleConfig | None = None) -> float:
+    """Seconds until the next allowed day at ``quiet_end_hour``."""
+    cfg = config or get_schedule_config()
+    if is_active_day(when, cfg):
+        return 0.0
+    for days_ahead in range(1, 8):
+        target = (when + timedelta(days=days_ahead)).replace(
+            hour=cfg.quiet_end_hour,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        if is_active_day(target, cfg):
+            return max(0.0, (target - when).total_seconds())
+    return 86400.0
 
 
 def run_fivelanes_cycle(*, trigger: str = "scheduler", blocking: bool = True) -> bool:
@@ -173,15 +187,35 @@ def run_fivelanes_cycle(*, trigger: str = "scheduler", blocking: bool = True) ->
     return True
 
 
+def sleep_until_active_day(tz: ZoneInfo) -> None:
+    now = _now_local(tz)
+    cfg = get_schedule_config()
+    wait_s = seconds_until_active_day(now, cfg)
+    if wait_s <= 0:
+        return
+    day_bits = []
+    if cfg.active_weekdays:
+        day_bits.append("weekdays")
+    if cfg.active_weekends:
+        day_bits.append("weekends")
+    log.info(
+        "Inactive day (%s only); sleeping %.0fs until next allowed day",
+        " + ".join(day_bits) or "none",
+        wait_s,
+    )
+    time.sleep(wait_s)
+
+
 def sleep_until_active(tz: ZoneInfo) -> None:
     now = _now_local(tz)
-    if not in_quiet_hours(now):
+    cfg = get_schedule_config()
+    if not in_quiet_hours(now, cfg):
         return
-    wait_s = seconds_until_quiet_ends(now)
+    wait_s = seconds_until_quiet_ends(now, cfg)
     log.info(
         "Quiet hours (%02d:00–%02d:00 %s); sleeping %.0fs until next run window",
-        FIVELANES_QUIET_START_HOUR,
-        FIVELANES_QUIET_END_HOUR,
+        cfg.quiet_start_hour,
+        cfg.quiet_end_hour,
         tz,
         wait_s,
     )
@@ -189,8 +223,9 @@ def sleep_until_active(tz: ZoneInfo) -> None:
 
 
 def _wait_until_ready_for_scheduled_run(tz: ZoneInfo) -> None:
-    """Sleep through quiet hours, post-run interval, and any in-flight manual run."""
+    """Sleep through inactive days, quiet hours, post-run interval, and any in-flight manual run."""
     while True:
+        sleep_until_active_day(tz)
         sleep_until_active(tz)
         wait_s = _seconds_until_next_interval()
         if wait_s > 0:
@@ -206,16 +241,26 @@ def _wait_until_ready_for_scheduled_run(tz: ZoneInfo) -> None:
             time.sleep(1)
 
 
+def _scheduler_is_idle(tz: ZoneInfo) -> bool:
+    now = _now_local(tz)
+    cfg = get_schedule_config()
+    return is_active_day(now, cfg) and not in_quiet_hours(now, cfg)
+
+
 def scheduler_loop(*, run_immediately: bool = True) -> None:
-    tz = _scheduler_tz()
+    tz = scheduler_tz()
+    cfg = get_schedule_config()
     log.info(
-        "Fivelanes scheduler loop started (pid=%d, %ds after each run ends, lookback_days=%d, quiet %02d:00–%02d:00 %s)",
+        "Fivelanes scheduler loop started (pid=%d, %ds after each run ends, lookback_days=%d, "
+        "quiet %02d:00–%02d:00 %s, weekdays=%s, weekends=%s)",
         os.getpid(),
-        FIVELANES_INTERVAL_SEC,
+        cfg.interval_sec,
         FIVELANES_LOOKBACK_DAYS,
-        FIVELANES_QUIET_START_HOUR,
-        FIVELANES_QUIET_END_HOUR,
+        cfg.quiet_start_hour,
+        cfg.quiet_end_hour,
         tz,
+        cfg.active_weekdays,
+        cfg.active_weekends,
     )
     if CALENDAR_AVAILABILITY_DISABLE:
         log.info("Calendar availability export: disabled")
@@ -263,10 +308,10 @@ def main() -> int:
 
     configure_logging()
 
-    tz = _scheduler_tz()
-    if in_quiet_hours(_now_local(tz)):
+    tz = scheduler_tz()
+    if not _scheduler_is_idle(tz):
         if args.once:
-            log.info("Quiet hours — skipping run")
+            log.info("Outside active schedule — skipping run")
             return 0
         scheduler_loop(run_immediately=not args.no_immediate)
         return 0

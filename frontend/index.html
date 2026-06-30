@@ -23,17 +23,6 @@
         <span></span><span></span><span></span><span></span><span></span><span></span>
       </div>
       <div class="header-controls">
-        <div class="backend-control">
-          <span class="backend-label" id="backend-label">Backend: …</span>
-          <div class="backend-switch" id="backend-switch" role="group" aria-labelledby="backend-label">
-            <button type="button" class="backend-switch-btn" data-backend="llama" aria-pressed="false">
-              Llama
-            </button>
-            <button type="button" class="backend-switch-btn" data-backend="claude" aria-pressed="false">
-              Claude
-            </button>
-          </div>
-        </div>
         <button type="button" id="run-fivelanes-btn" class="run-fivelanes-btn">
           Run fivelanes
         </button>
@@ -53,6 +42,31 @@
           <li><a href="/texts-setup" class="app-nav-link" data-route="texts-setup" data-feature="texts">Texts</a></li>
           <li><a href="/slack-setup" class="app-nav-link" data-route="slack-setup" data-feature="slack">Slack</a></li>
         </ul>
+        <div class="app-nav-footer">
+          <button
+            type="button"
+            id="settings-btn"
+            class="app-nav-settings-btn"
+            aria-haspopup="dialog"
+            aria-controls="settings-dialog"
+          >
+            <svg class="app-nav-settings-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
+                stroke="currentColor"
+                stroke-width="1.75"
+              />
+              <path
+                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
+                stroke="currentColor"
+                stroke-width="1.75"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <span class="app-nav-settings-label">Settings</span>
+          </button>
+        </div>
       </nav>
       <div class="app-body">
         <main id="page-root" tabindex="-1"></main>
