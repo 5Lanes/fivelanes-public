@@ -14,11 +14,8 @@ const PAGE_HTML = `
         <label class="lanes-sort-control">
           <span class="lanes-sort-label">Sort</span>
           <select id="lanes-sort" class="lanes-sort-select" aria-label="Sort lanes">
-            <option value="name-asc">Name (A–Z)</option>
-            <option value="name-desc">Name (Z–A)</option>
-            <option value="threads-desc">Most threads</option>
-            <option value="threads-asc">Fewest threads</option>
             <option value="updated-desc">Recently updated</option>
+            <option value="created-desc">Recently added</option>
           </select>
         </label>
         <button type="button" class="create-lane-btn" id="create-lane-btn">Create lane</button>

@@ -1,18 +1,15 @@
 import { listSection, partitionThreadsBySnooze, threadEmailSubject, } from "../shared/thread_domain.js";
 import { applyLaneCreated, applyLaneRemoved, applyLaneSummary, applyLaneThreadMembership, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getLaneSummary, getLaneThreadIds, getLanes, loadLatestBundle, normalizeBundle, setBundle, } from "../shared/summaries_store.js";
 import { escapeHtml, str } from "../shared/utils.js";
-const LANES_SORT_KEY = "fivelanes_lanes_sort_v1";
+const LANES_SORT_KEY = "fivelanes_lanes_sort_v2";
 const PAGE_HTML = `
 <div class="view-lanes">
   <div class="lanes-toolbar">
     <label class="lanes-sort-control">
       <span class="lanes-sort-label">Sort</span>
       <select id="lanes-sort" class="lanes-sort-select" aria-label="Sort lanes">
-        <option value="name-asc">Name (A–Z)</option>
-        <option value="name-desc">Name (Z–A)</option>
-        <option value="threads-desc">Most threads</option>
-        <option value="threads-asc">Fewest threads</option>
         <option value="updated-desc">Recently updated</option>
+        <option value="created-desc">Recently added</option>
       </select>
     </label>
     <button type="button" class="create-lane-btn" id="create-lane-btn">Create lane</button>
@@ -50,11 +47,7 @@ function isDashboardLanesList(listEl) {
     return !!listEl.closest(".view-dashboard");
 }
 function isLaneSortMode(value) {
-    return (value === "name-asc" ||
-        value === "name-desc" ||
-        value === "threads-desc" ||
-        value === "threads-asc" ||
-        value === "updated-desc");
+    return value === "updated-desc" || value === "created-desc";
 }
 export function getLaneSortMode() {
     try {
@@ -65,7 +58,7 @@ export function getLaneSortMode() {
     catch {
         /* ignore storage errors */
     }
-    return "name-asc";
+    return "updated-desc";
 }
 export function setLaneSortMode(mode) {
     try {
@@ -75,8 +68,21 @@ export function setLaneSortMode(mode) {
         /* ignore storage errors */
     }
 }
-function laneThreadCount(data, laneId) {
-    return getLaneThreadIds(data, laneId).length;
+function threadLatestMessageAt(threadId) {
+    const thread = getCurrentThreads().find((t) => t.id === threadId);
+    if (!thread || !thread.messages.length)
+        return "";
+    const row = thread.messages[0];
+    return str(row.cleaned?.datetime || row.summary?.datetime);
+}
+function laneLatestThreadMessageAt(data, laneId) {
+    let latest = "";
+    for (const threadId of getLaneThreadIds(data, laneId)) {
+        const at = threadLatestMessageAt(threadId);
+        if (at && (!latest || at.localeCompare(latest) > 0))
+            latest = at;
+    }
+    return latest;
 }
 function compareLaneNames(a, b) {
     return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
@@ -84,15 +90,11 @@ function compareLaneNames(a, b) {
 export function sortLanes(lanes, mode, data) {
     const copy = [...lanes];
     switch (mode) {
-        case "name-desc":
-            return copy.sort((a, b) => compareLaneNames(b, a));
-        case "threads-desc":
-            return copy.sort((a, b) => laneThreadCount(data, b.id) - laneThreadCount(data, a.id) || compareLaneNames(a, b));
-        case "threads-asc":
-            return copy.sort((a, b) => laneThreadCount(data, a.id) - laneThreadCount(data, b.id) || compareLaneNames(a, b));
+        case "created-desc":
+            return copy.sort((a, b) => str(b.created_at).localeCompare(str(a.created_at)) || compareLaneNames(a, b));
         case "updated-desc":
-            return copy.sort((a, b) => str(b.updated_at).localeCompare(str(a.updated_at)) || compareLaneNames(a, b));
-        case "name-asc":
+            return copy.sort((a, b) => laneLatestThreadMessageAt(data, b.id).localeCompare(laneLatestThreadMessageAt(data, a.id)) ||
+                compareLaneNames(a, b));
         default:
             return copy.sort(compareLaneNames);
     }
