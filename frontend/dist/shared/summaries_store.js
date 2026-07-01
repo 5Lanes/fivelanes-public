@@ -265,6 +265,7 @@ export function applyPlanCreated(plan) {
         currentData.thread_plans = plans;
     }
     setThreadHasPlanInBundle(plan.inbox_thread_id, true);
+    syncSummariesBundleCache();
 }
 export function applyPlanUpdated(plan) {
     if (!currentData)
@@ -285,6 +286,7 @@ export function applyPlanUpdated(plan) {
         const stillHas = getThreadPlans(currentData).some((p) => p.inbox_thread_id === oldThread);
         setThreadHasPlanInBundle(oldThread, stillHas);
     }
+    syncSummariesBundleCache();
 }
 export function applyPlanDeleted(planId) {
     if (!currentData || !Array.isArray(currentData.thread_plans))
@@ -297,6 +299,7 @@ export function applyPlanDeleted(planId) {
         const stillHas = getThreadPlans(currentData).some((p) => p.inbox_thread_id === threadId);
         setThreadHasPlanInBundle(threadId, stillHas);
     }
+    syncSummariesBundleCache();
 }
 export function setBundle(data, sourceLabel) {
     currentData = normalizeBundle(data);
@@ -342,6 +345,20 @@ export function applyThreadSummary(threadId, summary) {
         row.summary_api_error = str(summary.api_error);
     }
 }
+function planIdsFingerprint(data) {
+    if (!Array.isArray(data.thread_plans))
+        return "";
+    return data.thread_plans
+        .map((row) => Number(row.id) || 0)
+        .filter((id) => id > 0)
+        .sort((a, b) => a - b)
+        .join(",");
+}
+export function syncSummariesBundleCache() {
+    if (!currentData)
+        return;
+    writeCachedBundle(currentData, null);
+}
 export function clearSummariesBundleCache() {
     removeStorageItem(sessionStorage, SUMMARIES_CACHE_KEY);
     removeStorageItem(sessionStorage, SUMMARIES_ETAG_KEY);
@@ -364,7 +381,8 @@ export function readCachedBundle() {
 }
 export function bundleChanged(prev, next) {
     return (str(prev.run_stamp) !== str(next.data.run_stamp) ||
-        str(prev.generated_at) !== str(next.data.generated_at));
+        str(prev.generated_at) !== str(next.data.generated_at) ||
+        planIdsFingerprint(prev) !== planIdsFingerprint(next.data));
 }
 export async function loadLatestBundle() {
     if (location.protocol === "file:") {

@@ -379,26 +379,45 @@ def _pipeline_status_payload() -> Dict[str, Any]:
 
 def _db_cache_etag(db_path: str) -> Tuple[str, str]:
     st = Path(db_path).stat()
-    etag = f'"{int(st.st_mtime_ns)}-{st.st_size}"'
+    etag = f'"{int(st.st_mtime_ns)}-{st.st_size}-{_summaries_bundle_epoch}"'
     last_modified = email.utils.formatdate(st.st_mtime, usegmt=True)
     return etag, last_modified
 
 
 _summaries_bundle_cache: Optional[Dict[str, Any]] = None
+_summaries_bundle_epoch: int = 0
 
 
 def _get_cached_summaries_bundle(etag: str) -> Optional[Dict[str, Any]]:
     cached = _summaries_bundle_cache
-    if cached and cached.get("etag") == etag:
+    if (
+        cached
+        and cached.get("etag") == etag
+        and cached.get("epoch") == _summaries_bundle_epoch
+    ):
         bundle = cached.get("bundle")
         if isinstance(bundle, dict):
             return bundle
     return None
 
 
-def _store_summaries_bundle_cache(etag: str, bundle: Dict[str, Any]) -> None:
+def _store_summaries_bundle_cache(
+    etag: str, bundle: Dict[str, Any], *, build_epoch: int
+) -> None:
     global _summaries_bundle_cache
-    _summaries_bundle_cache = {"etag": etag, "bundle": bundle}
+    if build_epoch != _summaries_bundle_epoch:
+        return
+    _summaries_bundle_cache = {
+        "etag": etag,
+        "bundle": bundle,
+        "epoch": build_epoch,
+    }
+
+
+def _invalidate_summaries_bundle_cache() -> None:
+    global _summaries_bundle_cache, _summaries_bundle_epoch
+    _summaries_bundle_cache = None
+    _summaries_bundle_epoch += 1
 
 
 class DashboardHandler(SimpleHTTPRequestHandler):
@@ -443,6 +462,17 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.NOT_FOUND, {"ok": False, "error": "database_not_found"}
             )
             return
+        from services.thread_snooze import (
+            refresh_linkedin_threads_auto_unsnooze,
+            refresh_slack_threads_auto_unsnooze,
+            refresh_text_threads_auto_unsnooze,
+        )
+
+        cleared = (
+            refresh_text_threads_auto_unsnooze(DB_PATH)
+            + refresh_slack_threads_auto_unsnooze(DB_PATH)
+            + refresh_linkedin_threads_auto_unsnooze(DB_PATH)
+        )
         try:
             etag, last_modified = _db_cache_etag(DB_PATH)
         except OSError:
@@ -452,11 +482,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             )
             return
         inm = (self.headers.get("If-None-Match") or "").strip()
-        if inm == etag:
+        if inm == etag and cleared == 0:
             self._not_modified(etag, last_modified)
             return
         bundle = _get_cached_summaries_bundle(etag)
-        if bundle is None:
+        if bundle is None or cleared > 0:
+            build_epoch = _summaries_bundle_epoch
             try:
                 bundle = build_summaries_bundle(DB_PATH)
             except Exception as exc:
@@ -466,7 +497,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     {"ok": False, "error": str(exc)},
                 )
                 return
-            _store_summaries_bundle_cache(etag, bundle)
+            _store_summaries_bundle_cache(etag, bundle, build_epoch=build_epoch)
         if not bundle.get("cleaned") and not bundle.get("summary"):
             self._json_response(
                 HTTPStatus.NOT_FOUND,
@@ -1196,6 +1227,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": str(exc)}
             )
             return
+        _invalidate_summaries_bundle_cache()
         self._json_response(HTTPStatus.OK, {"ok": True, "plan": plan})
 
     def _post_plan_update(self, body: Dict[str, Any]) -> None:
@@ -1253,6 +1285,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.NOT_FOUND, {"ok": False, "error": "plan_not_found"}
             )
             return
+        _invalidate_summaries_bundle_cache()
         self._json_response(HTTPStatus.OK, {"ok": True, "plan": plan})
 
     def _post_plan_delete(self, body: Dict[str, Any]) -> None:
@@ -1271,6 +1304,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.NOT_FOUND, {"ok": False, "error": "plan_not_found"}
             )
             return
+        _invalidate_summaries_bundle_cache()
         self._json_response(HTTPStatus.OK, {"ok": True, "plan_id": plan_id})
 
     def _post_email_reply(self, body: Dict[str, Any]) -> None:

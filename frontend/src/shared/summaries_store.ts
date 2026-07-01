@@ -263,6 +263,7 @@ export function applyPlanCreated(plan: PlanView): void {
     currentData.thread_plans = plans;
   }
   setThreadHasPlanInBundle(plan.inbox_thread_id, true);
+  syncSummariesBundleCache();
 }
 
 export function applyPlanUpdated(plan: PlanView): void {
@@ -281,6 +282,7 @@ export function applyPlanUpdated(plan: PlanView): void {
     const stillHas = getThreadPlans(currentData).some((p) => p.inbox_thread_id === oldThread);
     setThreadHasPlanInBundle(oldThread, stillHas);
   }
+  syncSummariesBundleCache();
 }
 
 export function applyPlanDeleted(planId: number): void {
@@ -293,6 +295,7 @@ export function applyPlanDeleted(planId: number): void {
     const stillHas = getThreadPlans(currentData).some((p) => p.inbox_thread_id === threadId);
     setThreadHasPlanInBundle(threadId, stillHas);
   }
+  syncSummariesBundleCache();
 }
 
 export function setBundle(data: LooseObj, sourceLabel: string): void {
@@ -338,6 +341,20 @@ export function applyThreadSummary(threadId: string, summary: LooseObj): void {
   }
 }
 
+function planIdsFingerprint(data: LooseObj): string {
+  if (!Array.isArray(data.thread_plans)) return "";
+  return (data.thread_plans as LooseObj[])
+    .map((row) => Number(row.id) || 0)
+    .filter((id) => id > 0)
+    .sort((a, b) => a - b)
+    .join(",");
+}
+
+export function syncSummariesBundleCache(): void {
+  if (!currentData) return;
+  writeCachedBundle(currentData, null);
+}
+
 export function clearSummariesBundleCache(): void {
   removeStorageItem(sessionStorage, SUMMARIES_CACHE_KEY);
   removeStorageItem(sessionStorage, SUMMARIES_ETAG_KEY);
@@ -363,7 +380,8 @@ export function bundleChanged(
 ): boolean {
   return (
     str(prev.run_stamp) !== str(next.data.run_stamp) ||
-    str(prev.generated_at) !== str(next.data.generated_at)
+    str(prev.generated_at) !== str(next.data.generated_at) ||
+    planIdsFingerprint(prev) !== planIdsFingerprint(next.data)
   );
 }
 

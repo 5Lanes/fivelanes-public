@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -39,6 +40,94 @@ def is_tracked(value: Any) -> bool:
     return normalize_state(value) != REMOVED
 
 
+ON_DISK_THREAD_PREFIXES = ("text:", "slack:", "linkedin:")
+SNOOZE_BASELINE_PREFIX = "snooze_ts:"
+
+
+def _is_on_disk_thread(thread_id: str) -> bool:
+    tid = (thread_id or "").strip()
+    return any(tid.startswith(prefix) for prefix in ON_DISK_THREAD_PREFIXES)
+
+
+def _source_id_sort_key(source_id: str) -> float:
+    try:
+        return float(source_id)
+    except ValueError:
+        return 0.0
+
+
+def _latest_on_disk_source_id(thread_id: str) -> str:
+    tid = (thread_id or "").strip()
+    if tid.startswith("slack:"):
+        from services.slack.format import load_messages_for_key, message_source_id
+        from services.slack.tracking import parse_slack_inbox_thread_id
+
+        key = parse_slack_inbox_thread_id(tid)
+        if not key:
+            return ""
+        messages = load_messages_for_key(key)
+    elif tid.startswith("text:"):
+        from services.texts.format import load_messages_for_key, message_source_id
+        from services.texts.tracking import parse_text_inbox_thread_id
+
+        key = parse_text_inbox_thread_id(tid)
+        if not key:
+            return ""
+        messages = load_messages_for_key(key)
+    elif tid.startswith("linkedin:"):
+        from services.linkedin.format import load_messages_for_key, message_source_id
+        from services.linkedin.tracking import parse_linkedin_inbox_thread_id
+
+        key = parse_linkedin_inbox_thread_id(tid)
+        if not key:
+            return ""
+        messages = load_messages_for_key(key)
+    else:
+        return ""
+
+    source_ids = [
+        str(message_source_id(msg) or "").strip()
+        for msg in messages
+        if str(message_source_id(msg) or "").strip()
+    ]
+    if not source_ids:
+        return ""
+    return max(source_ids, key=_source_id_sort_key)
+
+
+def _persist_snooze_baseline(db_path: str, thread_id: str) -> None:
+    from utils.database import _ensure_thread_tracking_schema, connect_sqlite
+
+    baseline = _latest_on_disk_source_id(thread_id)
+    if not baseline:
+        return
+    tid = (thread_id or "").strip()
+    value = f"{SNOOZE_BASELINE_PREFIX}{baseline}"
+    with connect_sqlite(db_path) as conn:
+        _ensure_thread_tracking_schema(conn)
+        conn.execute(
+            "UPDATE thread_tracking SET inner_rfc_message_id = ? WHERE inbox_thread_id = ?",
+            (value, tid),
+        )
+        conn.commit()
+
+
+def _clear_snooze_baseline(db_path: str, thread_id: str) -> None:
+    from utils.database import _ensure_thread_tracking_schema, connect_sqlite
+
+    tid = (thread_id or "").strip()
+    if not tid:
+        return
+    with connect_sqlite(db_path) as conn:
+        _ensure_thread_tracking_schema(conn)
+        conn.execute(
+            "UPDATE thread_tracking SET inner_rfc_message_id = '' "
+            "WHERE inbox_thread_id = ? AND inner_rfc_message_id LIKE ?",
+            (tid, f"{SNOOZE_BASELINE_PREFIX}%"),
+        )
+        conn.commit()
+
+
 def set_thread_snooze(db_path: str, thread_id: str, state: int) -> bool:
     """Persist snooze state on ``thread_tracking`` and ``claude_message_outputs``."""
     from utils.database import (
@@ -56,6 +145,11 @@ def set_thread_snooze(db_path: str, thread_id: str, state: int) -> bool:
     ok_claude = set_claude_outputs_thread_snoozed(
         db_path, thread_id=tid, snoozed=state_norm
     )
+    if ok_tracking and _is_on_disk_thread(tid):
+        if state_norm == SNOOZED:
+            _persist_snooze_baseline(db_path, tid)
+        elif state_norm == ACTIVE:
+            _clear_snooze_baseline(db_path, tid)
     return ok_tracking or ok_claude
 
 
@@ -64,6 +158,9 @@ def unsnooze_threads(db_path: str, thread_ids: Sequence[str]) -> None:
     from utils.database import clear_snooze_only_for_threads
 
     clear_snooze_only_for_threads(db_path, thread_ids)
+    for thread_id in thread_ids:
+        if _is_on_disk_thread(str(thread_id or "")):
+            _clear_snooze_baseline(db_path, str(thread_id))
 
 
 def remove_thread_tracking(db_path: str, thread_id: str) -> bool:
@@ -157,6 +254,37 @@ def unseen_source_ids(
     return clean - known_source_ids_for_thread(db_path, thread_id, clean)
 
 
+def _on_disk_messages_since_snooze(
+    file_cleaned: List[Dict[str, Any]],
+    db_cleaned: List[Dict[str, Any]],
+    tracking_row: Dict[str, Any],
+) -> bool:
+    """True when on-disk messages arrived after the thread was snoozed."""
+    baseline_raw = str(tracking_row.get("inner_rfc_message_id") or "").strip()
+    if baseline_raw.startswith(SNOOZE_BASELINE_PREFIX):
+        baseline_val = _source_id_sort_key(baseline_raw[len(SNOOZE_BASELINE_PREFIX) :])
+        for row in file_cleaned:
+            sid = str(row.get("source_id") or "").strip()
+            if sid and _source_id_sort_key(sid) > baseline_val:
+                return True
+        return False
+
+    from utils.database import _parse_iso_datetime
+
+    cutoff = _parse_iso_datetime(str(tracking_row.get("updated_at") or ""))
+    if cutoff > datetime.min.replace(tzinfo=timezone.utc):
+        for row in file_cleaned:
+            msg_at = _parse_iso_datetime(str(row.get("datetime") or ""))
+            if msg_at > cutoff:
+                return True
+    seen = {str(r.get("source_id") or "").strip() for r in db_cleaned}
+    for row in file_cleaned:
+        sid = str(row.get("source_id") or "").strip()
+        if sid and sid not in seen:
+            return True
+    return False
+
+
 def maybe_unsnooze_email_thread(
     db_path: str,
     tracking_row: Dict[str, Any],
@@ -189,7 +317,6 @@ def maybe_unsnooze_text_thread(db_path: str, conversation_key: str) -> bool:
     from services.texts.format import (
         cleaned_rows_for_conversation,
         load_messages_for_key,
-        new_cleaned_vs_existing,
     )
     from services.texts.tracking import text_inbox_thread_id
     from utils.database import fetch_thread_tracking_rows, load_processed_cleaned_for_thread
@@ -216,7 +343,7 @@ def maybe_unsnooze_text_thread(db_path: str, conversation_key: str) -> bool:
 
     file_cleaned = cleaned_rows_for_conversation(key, thread_id, messages)
     db_cleaned = load_processed_cleaned_for_thread(db_path, thread_id)
-    if not new_cleaned_vs_existing(db_cleaned, file_cleaned):
+    if not _on_disk_messages_since_snooze(file_cleaned, db_cleaned, tracking):
         return False
 
     unsnooze_threads(db_path, [thread_id])
@@ -236,11 +363,10 @@ def refresh_text_threads_auto_unsnooze(db_path: str) -> int:
 
 
 def maybe_unsnooze_slack_thread(db_path: str, conversation_key: str) -> bool:
-    """Unsnooze a Slack thread when on-disk messages are not yet in SQLite."""
+    """Unsnooze a Slack thread when new on-disk messages arrive after snooze."""
     from services.slack.format import (
         cleaned_rows_for_conversation,
         load_messages_for_key,
-        new_cleaned_vs_existing,
     )
     from services.slack.tracking import slack_inbox_thread_id
     from utils.database import fetch_thread_tracking_rows, load_processed_cleaned_for_thread
@@ -267,7 +393,7 @@ def maybe_unsnooze_slack_thread(db_path: str, conversation_key: str) -> bool:
 
     file_cleaned = cleaned_rows_for_conversation(key, thread_id, messages)
     db_cleaned = load_processed_cleaned_for_thread(db_path, thread_id)
-    if not new_cleaned_vs_existing(db_cleaned, file_cleaned):
+    if not _on_disk_messages_since_snooze(file_cleaned, db_cleaned, tracking):
         return False
 
     unsnooze_threads(db_path, [thread_id])
@@ -291,7 +417,6 @@ def maybe_unsnooze_linkedin_thread(db_path: str, conversation_key: str) -> bool:
     from services.linkedin.format import (
         cleaned_rows_for_conversation,
         load_messages_for_key,
-        new_cleaned_vs_existing,
     )
     from services.linkedin.tracking import linkedin_inbox_thread_id
     from utils.database import fetch_thread_tracking_rows, load_processed_cleaned_for_thread
@@ -318,7 +443,7 @@ def maybe_unsnooze_linkedin_thread(db_path: str, conversation_key: str) -> bool:
 
     file_cleaned = cleaned_rows_for_conversation(key, thread_id, messages)
     db_cleaned = load_processed_cleaned_for_thread(db_path, thread_id)
-    if not new_cleaned_vs_existing(db_cleaned, file_cleaned):
+    if not _on_disk_messages_since_snooze(file_cleaned, db_cleaned, tracking):
         return False
 
     unsnooze_threads(db_path, [thread_id])
