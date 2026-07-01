@@ -20,6 +20,8 @@ Typical data-directory layout:
     tokens.json        # OAuth tokens (created by utils/add_account.py)
     calendar_scheduling_rules.json
   conversations/       # iMessage/SMS JSON exports
+  slack-dms/           # Slack DM JSON (premium)
+  linkedin-messages/   # LinkedIn data export CSV (premium)
   out/                 # calendar availability JSON
   logs/
 ```
@@ -33,18 +35,20 @@ The dashboard is split into a base open-source layer and optional premium capabi
 | Tier | Capabilities |
 |------|----------------|
 | **Base** | Threads, dashboard, meetings, plans, lanes, meeting prep, email-reply drafting, pipeline |
-| **Premium** | Text threads (iMessage/SMS exports), calendar availability export and open-slots UI, Slack (upcoming) |
+| **Premium** | Text threads (iMessage/SMS exports), Slack DMs, LinkedIn DMs, calendar availability export and open-slots UI |
 
 Premium features are disabled in the public repo unless unlocked (e.g. via a premium add-on or `FIVELANES_PREMIUM=1` for local development). The README documents the full product; runtime gating lives in code.
 
 ## Input sources
 
-Fivelanes accepts data through four channels. The scheduled pipeline (`fivelanes.main` / dashboard scheduler) pulls email and calendar automatically; text threads are file-based and must be selected in the dashboard before they appear on Threads.
+Fivelanes accepts data through six channels. The scheduled pipeline (`fivelanes.main` / dashboard scheduler) pulls email and calendar automatically; text, Slack, and LinkedIn threads are file-based (or API-pulled for Slack) and must be selected in the dashboard before they appear on Threads.
 
 | Channel | How data arrives | Where it lands | Processing |
 |---------|------------------|----------------|------------|
 | **Email** | Mail to `SOURCE_ACCOUNT` (forward, Cc/Bcc, or direct To) | Gmail API → `thread_tracking`, `timeline_entries` | Segmentation + LLM summary (same as inbox pipeline) |
 | **Text** | JSON files in your data directory's `conversations/` (iMessage export shape) | `thread_tracking` (`text:` prefix) when tracked | Summary only (no email-style segmentation); **premium** |
+| **Slack** | Pull DMs via `SLACK_USER_TOKEN`, stored as JSON under `slack-dms/` | `thread_tracking` (`slack:` prefix) when tracked | Summary only; **premium** |
+| **LinkedIn** | CSV from LinkedIn data export under `linkedin-messages/messages.csv` | `thread_tracking` (`linkedin:` prefix) when tracked | Summary only; **premium** |
 | **Calendar** | Google Calendar OAuth (connected accounts) | `$DATA_ROOT/out/availability_calendar_latest.json`, `meetings` table | Availability export, open-slots UI, scheduling context in summaries; **premium** |
 | **Dashboard** | HTTP POST to `/api/*` (tracking, plans, lanes, pipeline run, drafts, meeting prep, email reply) | `$DATA_ROOT/timeline.db` | User actions and on-demand LLM calls |
 
@@ -68,6 +72,14 @@ python -c "from services.email import populate_timeline; populate_timeline(lookb
 
 Fivelanes does not sync texts from a phone automatically. Export conversations externally, drop the JSON files into `$FIVELANES_DATA_ROOT/conversations/`, then open **Texts setup** (`/texts-setup`) to choose which threads to track. Tracked threads are registered in `thread_tracking` with `inbox_thread_id` `text:<key>` and merged into the Threads view. Summaries are generated via `/api/texts/summarize` or as part of `fivelanes.main`.
 
+### Slack DMs
+
+**Premium.** Set `SLACK_USER_TOKEN` in your data `.env`, then open **Slack setup** (`/slack-setup`) to pull DMs into `$FIVELANES_DATA_ROOT/slack-dms/` and choose which conversations to track. Tracked threads use `inbox_thread_id` `slack:<conversation_id>` and appear on Threads. Summaries run via `/api/slack/summarize` or `fivelanes.main`.
+
+### LinkedIn DMs
+
+**Premium.** Export your LinkedIn messages (data export format) and place `messages.csv` under `$FIVELANES_DATA_ROOT/linkedin-messages/` (override with `LINKEDIN_MESSAGES_DIR`). Open **LinkedIn setup** (`/linkedin-setup`) to choose which threads to track. Tracked threads use `inbox_thread_id` `linkedin:<conversation_key>` and appear on Threads. Summaries run via `/api/linkedin/summarize` or `fivelanes.main`.
+
 ### Calendar and availability
 
 **Premium.** Google Calendar is read through the same OAuth tokens. After each pipeline run (unless `CALENDAR_AVAILABILITY_DISABLE=1`), events are exported to `$FIVELANES_DATA_ROOT/out/availability_calendar_latest.json` and synced into the `meetings` table. The Threads page shows open slots from that export; thread summaries can use your calendar as scheduling context. Optional scheduling rules in `$FIVELANES_DATA_ROOT/credentials/calendar_scheduling_rules.json` filter which calendars count and set buffers/timezone.
@@ -80,7 +92,7 @@ python scripts/pull_calendar_availability.py
 
 ### Dashboard and scheduler
 
-`dashboard_server.py` serves the UI and JSON API. Besides text-thread selection (premium), the dashboard accepts snooze/remove on threads, lane and plan edits, meeting-prep and email-reply prompts (user intent → LLM), and manual pipeline runs (`POST /api/pipeline/run`).
+`dashboard_server.py` serves the UI and JSON API. Besides text/Slack/LinkedIn thread selection (premium), the dashboard accepts snooze/remove on threads, lane and plan edits, meeting-prep and email-reply prompts (user intent → LLM), and manual pipeline runs (`POST /api/pipeline/run`).
 
 The background scheduler (`utils/run_fivelanes_scheduler.py`, also started with the dashboard) runs the full cycle every `FIVELANES_INTERVAL_SEC` (default 15 minutes) during the active window (default 06:00–19:00 local; quiet hours 19:00–06:00 via `FIVELANES_QUIET_START_HOUR` / `FIVELANES_QUIET_END_HOUR` in `FIVELANES_SCHEDULER_TZ`).
 

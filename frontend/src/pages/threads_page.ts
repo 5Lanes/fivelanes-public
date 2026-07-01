@@ -286,13 +286,22 @@ function renderNav(
 
   const channelLi = document.createElement("li");
   channelLi.className = "thread-nav-channels";
-  for (const { id, label, count } of [
-    { id: "all" as const, label: "All", count: channelCounts.all },
-    { id: "text" as const, label: "Texts", count: channelCounts.text },
-    { id: "slack" as const, label: "Slack", count: channelCounts.slack },
-    { id: "linkedin" as const, label: "LinkedIn", count: channelCounts.linkedin },
-    { id: "email" as const, label: "Emails", count: channelCounts.email },
-  ]) {
+  const channelOptions: Array<{
+    id: typeof threadChannelFilter;
+    label: string;
+    count: number;
+  }> = [{ id: "all", label: "All", count: channelCounts.all }];
+  if (isFeatureEnabled("texts")) {
+    channelOptions.push({ id: "text", label: "Texts", count: channelCounts.text });
+  }
+  if (isFeatureEnabled("slack")) {
+    channelOptions.push({ id: "slack", label: "Slack", count: channelCounts.slack });
+  }
+  if (isFeatureEnabled("linkedin")) {
+    channelOptions.push({ id: "linkedin", label: "LinkedIn", count: channelCounts.linkedin });
+  }
+  channelOptions.push({ id: "email", label: "Emails", count: channelCounts.email });
+  for (const { id, label, count } of channelOptions) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "nav-mode-btn nav-channel-btn";
@@ -442,10 +451,16 @@ export async function renderThreadsPage(): Promise<void> {
     linkedin: bySnooze.filter(threadIsLinkedin).length,
     email: bySnooze.filter(threadIsEmail).length,
   };
-  if (threadChannelFilter === "text" && channelCounts.text === 0) threadChannelFilter = "all";
-  else if (threadChannelFilter === "slack" && channelCounts.slack === 0) threadChannelFilter = "all";
-  else if (threadChannelFilter === "linkedin" && channelCounts.linkedin === 0) threadChannelFilter = "all";
-  else if (threadChannelFilter === "email" && channelCounts.email === 0) threadChannelFilter = "all";
+  if (threadChannelFilter === "text" && (!isFeatureEnabled("texts") || channelCounts.text === 0)) {
+    threadChannelFilter = "all";
+  } else if (threadChannelFilter === "slack" && (!isFeatureEnabled("slack") || channelCounts.slack === 0)) {
+    threadChannelFilter = "all";
+  } else if (
+    threadChannelFilter === "linkedin" &&
+    (!isFeatureEnabled("linkedin") || channelCounts.linkedin === 0)
+  ) {
+    threadChannelFilter = "all";
+  } else if (threadChannelFilter === "email" && channelCounts.email === 0) threadChannelFilter = "all";
   const visible = filterThreadsByChannel(bySnooze);
 
   renderCards(visible);

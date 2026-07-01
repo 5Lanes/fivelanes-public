@@ -233,13 +233,18 @@ function renderNav(threads, snoozedCount, removedCount, channelCounts) {
     list.appendChild(modeLi);
     const channelLi = document.createElement("li");
     channelLi.className = "thread-nav-channels";
-    for (const { id, label, count } of [
-        { id: "all", label: "All", count: channelCounts.all },
-        { id: "text", label: "Texts", count: channelCounts.text },
-        { id: "slack", label: "Slack", count: channelCounts.slack },
-        { id: "linkedin", label: "LinkedIn", count: channelCounts.linkedin },
-        { id: "email", label: "Emails", count: channelCounts.email },
-    ]) {
+    const channelOptions = [{ id: "all", label: "All", count: channelCounts.all }];
+    if (isFeatureEnabled("texts")) {
+        channelOptions.push({ id: "text", label: "Texts", count: channelCounts.text });
+    }
+    if (isFeatureEnabled("slack")) {
+        channelOptions.push({ id: "slack", label: "Slack", count: channelCounts.slack });
+    }
+    if (isFeatureEnabled("linkedin")) {
+        channelOptions.push({ id: "linkedin", label: "LinkedIn", count: channelCounts.linkedin });
+    }
+    channelOptions.push({ id: "email", label: "Emails", count: channelCounts.email });
+    for (const { id, label, count } of channelOptions) {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "nav-mode-btn nav-channel-btn";
@@ -383,12 +388,16 @@ export async function renderThreadsPage() {
         linkedin: bySnooze.filter(threadIsLinkedin).length,
         email: bySnooze.filter(threadIsEmail).length,
     };
-    if (threadChannelFilter === "text" && channelCounts.text === 0)
+    if (threadChannelFilter === "text" && (!isFeatureEnabled("texts") || channelCounts.text === 0)) {
         threadChannelFilter = "all";
-    else if (threadChannelFilter === "slack" && channelCounts.slack === 0)
+    }
+    else if (threadChannelFilter === "slack" && (!isFeatureEnabled("slack") || channelCounts.slack === 0)) {
         threadChannelFilter = "all";
-    else if (threadChannelFilter === "linkedin" && channelCounts.linkedin === 0)
+    }
+    else if (threadChannelFilter === "linkedin" &&
+        (!isFeatureEnabled("linkedin") || channelCounts.linkedin === 0)) {
         threadChannelFilter = "all";
+    }
     else if (threadChannelFilter === "email" && channelCounts.email === 0)
         threadChannelFilter = "all";
     const visible = filterThreadsByChannel(bySnooze);

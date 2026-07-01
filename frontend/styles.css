@@ -1173,7 +1173,11 @@ header p.run-meta {
 }
 
 .app-nav a[data-route="slack-setup"] {
-  --nav-lane: var(--lane-coral);
+  --nav-lane: var(--lane-blue);
+}
+
+.app-nav a[data-route="linkedin-setup"] {
+  --nav-lane: var(--lane-teal);
 }
 
 .app-nav a:hover {
