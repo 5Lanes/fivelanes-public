@@ -27,7 +27,7 @@ import {
 } from "./pages/texts_setup_page.js";
 import { refreshPipelineRunMeta } from "./pipeline_run_meta.js";
 import { refreshPlanNotifications } from "./shared/plan_notifications.js";
-import { bundleChanged, loadLatestBundle, readCachedBundle, setBundle } from "./shared/summaries_store.js";
+import { bundleChanged, getBundleMutationGeneration, loadLatestBundle, readCachedBundle, setBundle, setBundleFromNetwork } from "./shared/summaries_store.js";
 import { applyNavFeatureVisibility, isFeatureEnabled, setFeaturesConfigForTests } from "./shared/features.js";
 import { setOwnerConfigForTests } from "./shared/owner_config.js";
 import { setDisplaySourceAccount } from "./shared/thread_domain.js";
@@ -169,6 +169,7 @@ async function bootstrap(): Promise<void> {
       await renderPage(route);
     }
 
+    const mutationGenAtFetch = getBundleMutationGeneration();
     const configPromise = fetch("/api/config", { credentials: "same-origin" }).then(async (res) => {
       if (!res.ok) throw new Error(`Config load failed (${res.status})`);
       return (await res.json()) as Record<string, unknown>;
@@ -179,8 +180,9 @@ async function bootstrap(): Promise<void> {
 
     if (needsBundle && fresh) {
       if (!cached || bundleChanged(cached.data, fresh)) {
-        setBundle(fresh.data, fresh.label);
-        await renderPage(route);
+        if (setBundleFromNetwork(fresh.data, fresh.label, mutationGenAtFetch)) {
+          await renderPage(route);
+        }
       }
     } else if (!cached) {
       await renderPage(route);

@@ -3,7 +3,7 @@ import { renderLanesList, syncLaneSummaryJobsFromServer } from "./lanes_page.js"
 import { partitionThreadsBySnooze, threadLabel } from "../shared/thread_domain.js";
 import { dashboardPlanEditFormHtml, persistPlanDelete, persistPlanUpdate, } from "../shared/plan_helpers.js";
 import { refreshPlanNotifications } from "../shared/plan_notifications.js";
-import { applyPlanDeleted, applyPlanUpdated, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getThreadPlans, setBundle, } from "../shared/summaries_store.js";
+import { applyPlanCreated, applyPlanDeleted, applyPlanUpdated, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getThreadPlans, setBundle, } from "../shared/summaries_store.js";
 import { str } from "../shared/utils.js";
 const PAGE_HTML = `
 <div class="view-dashboard">
@@ -138,9 +138,21 @@ export function bindDashboardInteractions() {
             const planId = Number(removeBtn.dataset.planId) || 0;
             if (!planId)
                 return;
+            const removed = getThreadPlans(getCurrentData()).find((p) => p.id === planId);
+            if (!removed)
+                return;
             applyPlanDeleted(planId);
             reloadDashboard();
-            void persistPlanDelete(planId).catch((err) => console.error(err));
+            void (async () => {
+                try {
+                    await persistPlanDelete(planId);
+                }
+                catch (err) {
+                    applyPlanCreated(removed);
+                    reloadDashboard();
+                    console.error(err);
+                }
+            })();
             return;
         }
     });

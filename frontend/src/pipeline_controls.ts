@@ -5,8 +5,9 @@ import {
 } from "./settings_panel.js";
 import {
   clearSummariesBundleCache,
+  getBundleMutationGeneration,
   loadLatestBundle,
-  setBundle,
+  setBundleFromNetwork,
 } from "./shared/summaries_store.js";
 import type { LooseObj } from "./shared/types.js";
 import { str } from "./shared/utils.js";
@@ -48,8 +49,9 @@ function stopPolling(): void {
 
 async function refreshAfterRun(): Promise<void> {
   clearSummariesBundleCache();
+  const mutationGenAtFetch = getBundleMutationGeneration();
   const { data, label } = await loadLatestBundle();
-  setBundle(data, label);
+  setBundleFromNetwork(data, label, mutationGenAtFetch);
   onRunComplete?.();
 }
 

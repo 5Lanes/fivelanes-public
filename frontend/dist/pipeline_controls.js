@@ -1,6 +1,6 @@
 import { refreshPipelineRunMeta } from "./pipeline_run_meta.js";
 import { setSettingsControlsLocked, syncBackendFromStatus, } from "./settings_panel.js";
-import { clearSummariesBundleCache, loadLatestBundle, setBundle, } from "./shared/summaries_store.js";
+import { clearSummariesBundleCache, getBundleMutationGeneration, loadLatestBundle, setBundleFromNetwork, } from "./shared/summaries_store.js";
 import { str } from "./shared/utils.js";
 const runMetaEl = document.getElementById("run-meta");
 const runBtn = document.getElementById("run-fivelanes-btn");
@@ -35,8 +35,9 @@ function stopPolling() {
 }
 async function refreshAfterRun() {
     clearSummariesBundleCache();
+    const mutationGenAtFetch = getBundleMutationGeneration();
     const { data, label } = await loadLatestBundle();
-    setBundle(data, label);
+    setBundleFromNetwork(data, label, mutationGenAtFetch);
     onRunComplete?.();
 }
 async function pollPipelineStatus() {

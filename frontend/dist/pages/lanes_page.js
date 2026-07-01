@@ -1,5 +1,5 @@
 import { listSection, partitionThreadsBySnooze, threadEmailSubject, } from "../shared/thread_domain.js";
-import { applyLaneArchived, applyLaneCreated, applyLaneRemoved, applyLaneSummary, applyLaneThreadMembership, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getLaneSummary, getLaneThreadIds, getLanes, loadLatestBundle, normalizeBundle, setBundle, } from "../shared/summaries_store.js";
+import { applyLaneArchived, applyLaneCreated, applyLaneRemoved, applyLaneSummary, applyLaneThreadMembership, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getLaneSummary, getLaneThreadIds, getLanes, getBundleMutationGeneration, loadLatestBundle, normalizeBundle, setBundle, setBundleFromNetwork, } from "../shared/summaries_store.js";
 import { escapeHtml, str } from "../shared/utils.js";
 const LANES_SORT_KEY = "fivelanes_lanes_sort_v2";
 const PAGE_HTML = `
@@ -526,9 +526,10 @@ function showLaneCreateError(message) {
 }
 async function reloadLanesFromServer() {
     clearSummariesBundleCache();
+    const mutationGenAtFetch = getBundleMutationGeneration();
     try {
         const { data, label } = await loadLatestBundle();
-        setBundle(normalizeBundle(data), label);
+        setBundleFromNetwork(normalizeBundle(data), label, mutationGenAtFetch);
     }
     catch {
         const data = getCurrentData();
@@ -659,9 +660,11 @@ export function bindLanesInteractions() {
                 catch (err) {
                     console.error(err);
                     try {
+                        const mutationGenAtFetch = getBundleMutationGeneration();
                         const { data, label } = await loadLatestBundle();
-                        setBundle(normalizeBundle(data), label);
-                        renderLanesList();
+                        if (setBundleFromNetwork(normalizeBundle(data), label, mutationGenAtFetch)) {
+                            renderLanesList();
+                        }
                     }
                     catch {
                         /* keep optimistic state; user can refresh */
@@ -693,9 +696,11 @@ export function bindLanesInteractions() {
                 catch (err) {
                     console.error(err);
                     try {
+                        const mutationGenAtFetch = getBundleMutationGeneration();
                         const { data, label } = await loadLatestBundle();
-                        setBundle(normalizeBundle(data), label);
-                        renderLanesList();
+                        if (setBundleFromNetwork(normalizeBundle(data), label, mutationGenAtFetch)) {
+                            renderLanesList();
+                        }
                     }
                     catch {
                         /* keep optimistic state cleared; user can refresh */

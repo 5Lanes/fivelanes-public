@@ -400,9 +400,19 @@ export function bindPlansInteractions(): void {
     if (deleteBtn) {
       const planId = Number(deleteBtn.dataset.planId) || 0;
       if (!planId) return;
+      const removed = getThreadPlans(getCurrentData()).find((p) => p.id === planId);
+      if (!removed) return;
       applyPlanDeleted(planId);
       reloadFromStore();
-      void persistPlanDelete(planId).catch((err) => console.error(err));
+      void (async () => {
+        try {
+          await persistPlanDelete(planId);
+        } catch (err) {
+          applyPlanCreated(removed);
+          reloadFromStore();
+          console.error(err);
+        }
+      })();
       return;
     }
   });

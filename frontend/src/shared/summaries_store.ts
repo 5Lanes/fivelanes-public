@@ -42,15 +42,15 @@ function readCachedBundleRaw(): string {
 }
 
 function readCachedBundleEtag(): string {
-  if (!readCachedBundleRaw()) {
-    removeStorageItem(sessionStorage, SUMMARIES_ETAG_KEY);
-    removeStorageItem(localStorage, SUMMARIES_LOCAL_ETAG_KEY);
-    return "";
+  const sessionRaw = readStorageItem(sessionStorage, SUMMARIES_CACHE_KEY);
+  if (sessionRaw) {
+    return readStorageItem(sessionStorage, SUMMARIES_ETAG_KEY);
   }
-  return (
-    readStorageItem(sessionStorage, SUMMARIES_ETAG_KEY) ||
-    readStorageItem(localStorage, SUMMARIES_LOCAL_ETAG_KEY)
-  );
+  const localRaw = readStorageItem(localStorage, SUMMARIES_LOCAL_CACHE_KEY);
+  if (localRaw) {
+    return readStorageItem(localStorage, SUMMARIES_LOCAL_ETAG_KEY);
+  }
+  return "";
 }
 
 function writeCachedBundle(data: LooseObj, etag: string | null): void {
@@ -74,6 +74,15 @@ function writeCachedBundle(data: LooseObj, etag: string | null): void {
 let currentData: LooseObj | null = null;
 let currentSourceLabel = "";
 let currentThreads: ThreadView[] = [];
+let bundleMutationGeneration = 0;
+
+export function getBundleMutationGeneration(): number {
+  return bundleMutationGeneration;
+}
+
+function bumpBundleMutation(): void {
+  bundleMutationGeneration++;
+}
 
 export function getCurrentData(): LooseObj | null {
   return currentData;
@@ -255,6 +264,7 @@ export function threadHasPlan(threadId: string): boolean {
 
 export function applyPlanCreated(plan: PlanView): void {
   if (!currentData) return;
+  bumpBundleMutation();
   const plans = Array.isArray(currentData.thread_plans)
     ? (currentData.thread_plans as LooseObj[])
     : [];
@@ -268,6 +278,7 @@ export function applyPlanCreated(plan: PlanView): void {
 
 export function applyPlanUpdated(plan: PlanView): void {
   if (!currentData) return;
+  bumpBundleMutation();
   const plans = Array.isArray(currentData.thread_plans)
     ? (currentData.thread_plans as LooseObj[])
     : [];
@@ -287,6 +298,7 @@ export function applyPlanUpdated(plan: PlanView): void {
 
 export function applyPlanDeleted(planId: number): void {
   if (!currentData || !Array.isArray(currentData.thread_plans)) return;
+  bumpBundleMutation();
   const plans = currentData.thread_plans as LooseObj[];
   const removed = plans.find((row) => Number(row.id) === planId);
   const threadId = removed ? str(removed.inbox_thread_id) : "";
@@ -303,6 +315,17 @@ export function setBundle(data: LooseObj, sourceLabel: string): void {
   currentSourceLabel = sourceLabel;
   setDisplaySourceAccount(str(currentData.source_account));
   currentThreads = mergeRows(currentData);
+}
+
+/** Apply a network-fetched bundle only if no local plan mutations happened during the fetch. */
+export function setBundleFromNetwork(
+  data: LooseObj,
+  sourceLabel: string,
+  mutationGenerationAtFetchStart: number,
+): boolean {
+  if (mutationGenerationAtFetchStart !== bundleMutationGeneration) return false;
+  setBundle(data, sourceLabel);
+  return true;
 }
 
 export function applySavedThreadDraft(threadId: string, data: LooseObj, responseIntent: string): void {

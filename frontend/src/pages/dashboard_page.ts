@@ -8,6 +8,7 @@ import {
 } from "../shared/plan_helpers.js";
 import { refreshPlanNotifications } from "../shared/plan_notifications.js";
 import {
+  applyPlanCreated,
   applyPlanDeleted,
   applyPlanUpdated,
   getCurrentData,
@@ -163,9 +164,19 @@ export function bindDashboardInteractions(): void {
     if (removeBtn) {
       const planId = Number(removeBtn.dataset.planId) || 0;
       if (!planId) return;
+      const removed = getThreadPlans(getCurrentData()).find((p) => p.id === planId);
+      if (!removed) return;
       applyPlanDeleted(planId);
       reloadDashboard();
-      void persistPlanDelete(planId).catch((err) => console.error(err));
+      void (async () => {
+        try {
+          await persistPlanDelete(planId);
+        } catch (err) {
+          applyPlanCreated(removed);
+          reloadDashboard();
+          console.error(err);
+        }
+      })();
       return;
     }
   });

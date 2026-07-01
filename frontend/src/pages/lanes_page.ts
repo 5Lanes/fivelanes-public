@@ -16,9 +16,11 @@ import {
   getLaneSummary,
   getLaneThreadIds,
   getLanes,
+  getBundleMutationGeneration,
   loadLatestBundle,
   normalizeBundle,
   setBundle,
+  setBundleFromNetwork,
 } from "../shared/summaries_store.js";
 import { escapeHtml, str } from "../shared/utils.js";
 import type { LaneSummaryView, LaneView, LooseObj } from "../shared/types.js";
@@ -586,9 +588,10 @@ function showLaneCreateError(message: string): void {
 
 async function reloadLanesFromServer(): Promise<void> {
   clearSummariesBundleCache();
+  const mutationGenAtFetch = getBundleMutationGeneration();
   try {
     const { data, label } = await loadLatestBundle();
-    setBundle(normalizeBundle(data), label);
+    setBundleFromNetwork(normalizeBundle(data), label, mutationGenAtFetch);
   } catch {
     const data = getCurrentData();
     if (data) setBundle(data, getCurrentSourceLabel());
@@ -719,9 +722,11 @@ export function bindLanesInteractions(): void {
         } catch (err) {
           console.error(err);
           try {
+            const mutationGenAtFetch = getBundleMutationGeneration();
             const { data, label } = await loadLatestBundle();
-            setBundle(normalizeBundle(data), label);
-            renderLanesList();
+            if (setBundleFromNetwork(normalizeBundle(data), label, mutationGenAtFetch)) {
+              renderLanesList();
+            }
           } catch {
             /* keep optimistic state; user can refresh */
           }
@@ -748,9 +753,11 @@ export function bindLanesInteractions(): void {
         } catch (err) {
           console.error(err);
           try {
+            const mutationGenAtFetch = getBundleMutationGeneration();
             const { data, label } = await loadLatestBundle();
-            setBundle(normalizeBundle(data), label);
-            renderLanesList();
+            if (setBundleFromNetwork(normalizeBundle(data), label, mutationGenAtFetch)) {
+              renderLanesList();
+            }
           } catch {
             /* keep optimistic state cleared; user can refresh */
           }
