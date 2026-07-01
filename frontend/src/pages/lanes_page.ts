@@ -4,6 +4,7 @@ import {
   threadEmailSubject,
 } from "../shared/thread_domain.js";
 import {
+  applyLaneArchived,
   applyLaneCreated,
   applyLaneRemoved,
   applyLaneSummary,
@@ -36,6 +37,7 @@ const PAGE_HTML = `
         <option value="created-desc">Recently added</option>
       </select>
     </label>
+    <button type="button" class="lanes-show-archived-btn" id="lanes-show-archived-btn" aria-pressed="false">Show archived</button>
     <button type="button" class="create-lane-btn" id="create-lane-btn">Create lane</button>
   </div>
   <form class="create-lane-form" id="create-lane-form" hidden>
@@ -50,6 +52,7 @@ const PAGE_HTML = `
 let interactionsBound = false;
 let assignLaneId: number | null = null;
 let activeLaneTabId: number | null = null;
+let showArchivedLanes = false;
 const laneSummaryErrors = new Map<number, string>();
 const laneSummaryPending = new Set<number>();
 const laneSummaryWatching = new Set<number>();
@@ -138,6 +141,29 @@ function syncLaneSortSelect(): void {
   select.value = getLaneSortMode();
 }
 
+function lanesForCurrentView(data: LooseObj): LaneView[] {
+  return getLanes(data).filter((lane) => Boolean(lane.archived) === showArchivedLanes);
+}
+
+function syncArchivedViewToolbar(): void {
+  const toggleBtn = document.getElementById("lanes-show-archived-btn") as HTMLButtonElement | null;
+  const createBtn = document.getElementById("create-lane-btn");
+  const createForm = document.getElementById("create-lane-form");
+  if (toggleBtn) {
+    toggleBtn.textContent = showArchivedLanes ? "Show active" : "Show archived";
+    toggleBtn.setAttribute("aria-pressed", showArchivedLanes ? "true" : "false");
+  }
+  if (showArchivedLanes) {
+    createBtn?.setAttribute("hidden", "");
+    createForm?.setAttribute("hidden", "");
+    showLaneCreateError("");
+  } else {
+    if (!createForm || createForm.hasAttribute("hidden")) {
+      createBtn?.removeAttribute("hidden");
+    }
+  }
+}
+
 function trackingThreads() {
   const { active, snoozed } = partitionThreadsBySnooze(getCurrentThreads());
   return [...active, ...snoozed];
@@ -200,7 +226,7 @@ function laneCardHtml(
   threadIds: string[],
   summary: LaneSummaryView | null,
   expanded: boolean,
-  opts: { tabbed?: boolean } = {},
+  opts: { tabbed?: boolean; archivedView?: boolean } = {},
 ): string {
   const selected = new Set(threadIds);
   const threadLabels = threadIds
@@ -223,6 +249,7 @@ function laneCardHtml(
     </header>`;
   const tag = opts.tabbed ? "div" : "article";
   const className = opts.tabbed ? "user-lane-panel" : "user-lane-card";
+  const archiveLabel = opts.archivedView ? "Unarchive" : "Archive";
   return `<${tag} class="${className}" data-lane-id="${lane.id}">
     ${header}
     ${laneSummaryHtml(summary, lane.id)}
@@ -234,6 +261,9 @@ function laneCardHtml(
       </button>
       <button type="button" class="lane-edit-threads-btn" data-lane-id="${lane.id}">
         ${expanded ? "Done" : threadIds.length ? "Edit threads" : "Add threads"}
+      </button>
+      <button type="button" class="lane-archive-btn" data-lane-id="${lane.id}" data-lane-name="${escapeHtml(lane.name)}" data-archived="${opts.archivedView ? "true" : "false"}">
+        ${archiveLabel}
       </button>
       <button type="button" class="lane-delete-btn" data-lane-id="${lane.id}" data-lane-name="${escapeHtml(lane.name)}">
         Delete lane
@@ -270,7 +300,7 @@ function renderDashboardLanesTabs(
       const expanded = assignLaneId === lane.id;
       const active = lane.id === activeLaneTabId;
       return `<div class="lanes-tab-panel${active ? " is-active" : ""}" role="tabpanel" id="lane-panel-${lane.id}" aria-labelledby="lane-tab-${lane.id}" data-lane-id="${lane.id}"${active ? "" : " hidden"}>
-        ${laneCardHtml(lane, threadIds, summary, expanded, { tabbed: true })}
+        ${laneCardHtml(lane, threadIds, summary, expanded, { tabbed: true, archivedView: showArchivedLanes })}
       </div>`;
     })
     .join("");
@@ -286,10 +316,13 @@ function renderLanesList(): void {
   const data = getCurrentData();
   if (!listEl || !data) return;
 
-  const lanes = sortLanes(getLanes(data), getLaneSortMode(), data);
+  const lanes = sortLanes(lanesForCurrentView(data), getLaneSortMode(), data);
   syncLaneSortSelect();
+  syncArchivedViewToolbar();
   if (!lanes.length) {
-    listEl.innerHTML = `<p class="lanes-empty">No lanes yet. Create one to group threads.</p>`;
+    listEl.innerHTML = showArchivedLanes
+      ? `<p class="lanes-empty">No archived lanes.</p>`
+      : `<p class="lanes-empty">No lanes yet. Create one to group threads.</p>`;
     activeLaneTabId = null;
     return;
   }
@@ -304,7 +337,7 @@ function renderLanesList(): void {
       const threadIds = getLaneThreadIds(data, lane.id);
       const summary = getLaneSummary(data, lane.id);
       const expanded = assignLaneId === lane.id;
-      return laneCardHtml(lane, threadIds, summary, expanded);
+      return laneCardHtml(lane, threadIds, summary, expanded, { archivedView: showArchivedLanes });
     })
     .join("");
 }
@@ -325,6 +358,7 @@ async function persistLaneCreate(name: string): Promise<LaneView> {
     name: str(laneRaw.name) || name,
     created_at: str(laneRaw.created_at),
     updated_at: str(laneRaw.updated_at),
+    archived: Boolean(laneRaw.archived),
   };
 }
 
@@ -473,7 +507,7 @@ function watchLaneSummaryCompletion(laneId: number): void {
 export async function syncLaneSummaryJobsFromServer(): Promise<void> {
   const data = getCurrentData();
   if (!data) return;
-  const lanes = getLanes(data);
+  const lanes = lanesForCurrentView(data);
   if (!lanes.length) return;
 
   const restored: number[] = [];
@@ -509,6 +543,16 @@ export async function syncLaneSummaryJobsFromServer(): Promise<void> {
   if (restored.length || reconciled.length) {
     renderLanesList();
   }
+}
+
+async function persistLaneArchive(laneId: number, archived: boolean): Promise<void> {
+  const res = await fetch("/api/lanes/archive", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lane_id: laneId, archived }),
+  });
+  const body = (await res.json().catch(() => ({}))) as LooseObj;
+  if (!res.ok) throw new Error(str(body.error) || `Archive lane failed (${res.status})`);
 }
 
 async function persistLaneDelete(laneId: number): Promise<void> {
@@ -580,6 +624,14 @@ export function bindLanesInteractions(): void {
     const target = ev.target as HTMLElement | null;
     if (!target || !isLaneUi(target)) return;
 
+    if (target.closest("#lanes-show-archived-btn")) {
+      showArchivedLanes = !showArchivedLanes;
+      assignLaneId = null;
+      activeLaneTabId = null;
+      renderLanesList();
+      return;
+    }
+
     if (target.closest("#create-lane-btn")) {
       const form = document.getElementById("create-lane-form");
       const btn = document.getElementById("create-lane-btn");
@@ -642,6 +694,37 @@ export function bindLanesInteractions(): void {
         } catch (err) {
           handleLaneSummaryError(laneId, err);
           resetLaneRefreshButton(laneId);
+        }
+      })();
+      return;
+    }
+
+    const archiveBtn = target.closest(".lane-archive-btn") as HTMLButtonElement | null;
+    if (archiveBtn) {
+      const laneId = Number(archiveBtn.dataset.laneId) || 0;
+      const laneName = str(archiveBtn.dataset.laneName) || "this lane";
+      const archived = archiveBtn.dataset.archived === "true";
+      if (!laneId) return;
+      const action = archived ? "Unarchive" : "Archive";
+      if (!window.confirm(`${action} lane "${laneName}"?`)) return;
+      archiveBtn.disabled = true;
+      void (async () => {
+        applyLaneArchived(laneId, !archived);
+        if (assignLaneId === laneId) assignLaneId = null;
+        if (activeLaneTabId === laneId) activeLaneTabId = null;
+        renderLanesList();
+        try {
+          await persistLaneArchive(laneId, !archived);
+          reloadFromStore();
+        } catch (err) {
+          console.error(err);
+          try {
+            const { data, label } = await loadLatestBundle();
+            setBundle(normalizeBundle(data), label);
+            renderLanesList();
+          } catch {
+            /* keep optimistic state; user can refresh */
+          }
         }
       })();
       return;

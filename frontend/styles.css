@@ -1441,9 +1441,11 @@ header p.run-meta {
 }
 
 .create-lane-btn,
+.lanes-show-archived-btn,
 .create-lane-form button,
 .lane-edit-threads-btn,
-.lane-refresh-summary-btn {
+.lane-refresh-summary-btn,
+.lane-archive-btn {
   font-size: 0.85rem;
   font-family: system-ui, sans-serif;
   padding: 0.45rem 0.75rem;
@@ -1455,10 +1457,17 @@ header p.run-meta {
 }
 
 .create-lane-btn:hover,
+.lanes-show-archived-btn:hover,
 .create-lane-form button:hover,
 .lane-edit-threads-btn:hover,
-.lane-refresh-summary-btn:hover:not(:disabled) {
+.lane-refresh-summary-btn:hover:not(:disabled),
+.lane-archive-btn:hover {
   background: var(--hover);
+}
+
+.lanes-show-archived-btn[aria-pressed="true"] {
+  background: var(--hover);
+  border-color: var(--accent);
 }
 
 .lane-refresh-summary-btn:disabled {

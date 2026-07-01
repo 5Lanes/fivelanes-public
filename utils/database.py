@@ -536,6 +536,11 @@ def _ensure_lanes_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_lane_threads_inbox_thread_id "
         "ON lane_threads(inbox_thread_id)"
     )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(lanes)").fetchall()}
+    if "archived" not in columns:
+        conn.execute(
+            "ALTER TABLE lanes ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def create_lane(db_path: str, *, name: str) -> Dict[str, Any]:
@@ -553,7 +558,13 @@ def create_lane(db_path: str, *, name: str) -> Dict[str, Any]:
         )
         lane_id = int(cur.lastrowid or 0)
         conn.commit()
-    return {"id": lane_id, "name": label, "created_at": now, "updated_at": now}
+    return {
+        "id": lane_id,
+        "name": label,
+        "created_at": now,
+        "updated_at": now,
+        "archived": False,
+    }
 
 
 def add_thread_to_lane(db_path: str, *, lane_id: int, inbox_thread_id: str) -> bool:
@@ -608,6 +619,25 @@ def remove_thread_from_lane(db_path: str, *, lane_id: int, inbox_thread_id: str)
     return True
 
 
+def archive_lane(db_path: str, *, lane_id: int, archived: bool = True) -> bool:
+    """Mark a lane archived or active. Returns False if lane missing."""
+    if lane_id <= 0:
+        return False
+    now = datetime.now(timezone.utc).isoformat()
+    db_file = Path(db_path)
+    with connect_sqlite(db_file) as conn:
+        _ensure_lanes_schema(conn)
+        row = conn.execute("SELECT id FROM lanes WHERE id = ?", (lane_id,)).fetchone()
+        if not row:
+            return False
+        conn.execute(
+            "UPDATE lanes SET archived = ?, updated_at = ? WHERE id = ?",
+            (1 if archived else 0, now, lane_id),
+        )
+        conn.commit()
+    return True
+
+
 def delete_lane(db_path: str, *, lane_id: int) -> bool:
     """Delete a lane and its thread memberships and summary. Returns False if lane missing."""
     if lane_id <= 0:
@@ -632,7 +662,8 @@ def load_all_lanes(db_path: str) -> List[Dict[str, Any]]:
     with connect_sqlite(db_file) as conn:
         _ensure_lanes_schema(conn)
         rows = conn.execute(
-            "SELECT id, name, created_at, updated_at FROM lanes ORDER BY name COLLATE NOCASE"
+            "SELECT id, name, created_at, updated_at, archived "
+            "FROM lanes ORDER BY name COLLATE NOCASE"
         ).fetchall()
     return [
         {
@@ -640,6 +671,7 @@ def load_all_lanes(db_path: str) -> List[Dict[str, Any]]:
             "name": _normalize_field(r[1]),
             "created_at": _normalize_field(r[2]),
             "updated_at": _normalize_field(r[3]),
+            "archived": bool(int(r[4] or 0)),
         }
         for r in rows
     ]
@@ -851,9 +883,8 @@ def load_all_lane_summaries(db_path: str) -> Dict[str, Dict[str, Any]]:
             payload["input_fingerprint"] = _normalize_field(loaded.get("input_fingerprint"))
         if loaded.get("summary_as_of_date"):
             payload["summary_as_of_date"] = _normalize_field(loaded.get("summary_as_of_date"))
-        stale = lane_summary_is_stale(payload)
-        if stale:
-            payload = {"updated_at": payload["updated_at"]}
+        if lane_summary_is_stale(payload):
+            payload["stale"] = True
         out[key] = payload
     return out
 

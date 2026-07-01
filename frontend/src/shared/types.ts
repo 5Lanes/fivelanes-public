@@ -20,6 +20,7 @@ export type LaneView = {
   name: string;
   created_at: string;
   updated_at: string;
+  archived?: boolean;
 };
 
 export type LaneSummaryView = {

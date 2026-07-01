@@ -18,6 +18,7 @@ const PAGE_HTML = `
             <option value="created-desc">Recently added</option>
           </select>
         </label>
+        <button type="button" class="lanes-show-archived-btn" id="lanes-show-archived-btn" aria-pressed="false">Show archived</button>
         <button type="button" class="create-lane-btn" id="create-lane-btn">Create lane</button>
       </div>
     </div>

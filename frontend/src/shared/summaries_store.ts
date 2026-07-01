@@ -4,10 +4,10 @@ import type { LaneSummaryView, LaneView, LooseObj, ThreadView, PlanView } from "
 import { str } from "./utils.js";
 
 export const SUMMARIES_BUNDLE_URL = "/api/summaries/bundle";
-const SUMMARIES_CACHE_KEY = "fivelanes_summaries_bundle_v4";
-const SUMMARIES_ETAG_KEY = "fivelanes_summaries_bundle_etag_v4";
-const SUMMARIES_LOCAL_CACHE_KEY = "fivelanes_summaries_bundle_ls_v1";
-const SUMMARIES_LOCAL_ETAG_KEY = "fivelanes_summaries_bundle_etag_ls_v1";
+const SUMMARIES_CACHE_KEY = "fivelanes_summaries_bundle_v5";
+const SUMMARIES_ETAG_KEY = "fivelanes_summaries_bundle_etag_v5";
+const SUMMARIES_LOCAL_CACHE_KEY = "fivelanes_summaries_bundle_ls_v2";
+const SUMMARIES_LOCAL_ETAG_KEY = "fivelanes_summaries_bundle_etag_ls_v2";
 
 function readStorageItem(storage: Storage, key: string): string {
   try {
@@ -114,6 +114,7 @@ export function getLanes(data: LooseObj | null): LaneView[] {
       name: str(row.name),
       created_at: str(row.created_at),
       updated_at: str(row.updated_at),
+      archived: Boolean(row.archived),
     }))
     .filter((lane) => lane.id > 0 && lane.name);
 }
@@ -195,6 +196,16 @@ export function applyLaneSummary(laneId: number, payload: LooseObj): void {
     tone_overview: str(payload.tone_overview),
     updated_at: str(payload.summary_updated_at) || str(payload.updated_at),
   };
+}
+
+export function applyLaneArchived(laneId: number, archived: boolean): void {
+  if (!currentData || !Array.isArray(currentData.lanes)) return;
+  for (const row of currentData.lanes as LooseObj[]) {
+    if (Number(row.id) === laneId) {
+      row.archived = archived;
+      return;
+    }
+  }
 }
 
 export function applyLaneRemoved(laneId: number): void {

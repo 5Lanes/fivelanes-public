@@ -51,6 +51,7 @@ from utils.database import (
     _meeting_dedupe_key,
     add_thread_to_lane,
     aggregate_thread_chronological_anchor,
+    archive_lane,
     build_summaries_bundle,
     build_thread_draft_payload,
     create_lane,
@@ -1002,6 +1003,31 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
         self._json_response(HTTPStatus.OK, {"ok": True, "lane_id": lane_id})
 
+    def _post_lane_archive(self, body: Dict[str, Any]) -> None:
+        try:
+            lane_id = int(body.get("lane_id") or 0)
+        except (TypeError, ValueError):
+            lane_id = 0
+        archived = body.get("archived", True)
+        if isinstance(archived, str):
+            archived = archived.strip().lower() not in ("0", "false", "no")
+        else:
+            archived = bool(archived)
+        if lane_id <= 0:
+            self._json_response(
+                HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_lane_id"}
+            )
+            return
+        ok = archive_lane(DB_PATH, lane_id=lane_id, archived=archived)
+        if not ok:
+            self._json_response(
+                HTTPStatus.NOT_FOUND, {"ok": False, "error": "lane_not_found"}
+            )
+            return
+        self._json_response(
+            HTTPStatus.OK, {"ok": True, "lane_id": lane_id, "archived": archived}
+        )
+
     def _get_lane_summary(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
@@ -1058,7 +1084,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 return
 
         cached = load_lane_summary(DB_PATH, lane_id=lid)
-        if cached and _lane_summary_is_fresh(cached):
+        if cached and _lane_summary_has_content(cached):
             self._json_response(
                 HTTPStatus.OK,
                 _lane_summary_http_payload(
@@ -1801,6 +1827,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._post_lane_remove_thread(body)
         elif path == "/api/lanes/delete":
             self._post_lane_delete(body)
+        elif path == "/api/lanes/archive":
+            self._post_lane_archive(body)
         elif path == "/api/lanes/summary":
             self._post_lane_summary(body)
         elif path == "/api/plans/create":
