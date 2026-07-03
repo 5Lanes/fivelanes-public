@@ -15,7 +15,12 @@ from services.email.inbox_delivery import (
     timeline_row_needs_image_description,
     timeline_row_process_body,
 )
-from services.email.segmentation import segmentation_content_from_quoted_tail_only
+from services.email.segmentation import (
+    guard_segmentation_content,
+    segmentation_content_from_quoted_tail_only,
+    segmentation_content_not_from_reply_head,
+    strip_quoted_thread_tail,
+)
 from services.image_description import (
     process_timeline_message_segmentation,
     should_reprocess_image_only_row,
@@ -63,6 +68,7 @@ def segment_body_deduped(
     cache: SegmentationCache,
     *,
     llm: LlmBackend | None = None,
+    full_body: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], str]:
     """Segment email body, deduplicating identical bodies within one run."""
     backend = llm or get_llm_backend()
@@ -86,6 +92,14 @@ def segment_body_deduped(
                 f"raw_preview={raw_preview}"
             )
             seg = {}
+        else:
+            seg = guard_segmentation_content(
+                full_body or process_body,
+                seg,
+                resubmit_segmentation=lambda head: backend.submit_segmentation(
+                    parse_emails([head])[0]
+                ),
+            )
     stored = copy.deepcopy(seg) if isinstance(seg, dict) else {}
     cache[digest] = (stored, err)
     return stored, err
@@ -170,6 +184,8 @@ def row_needs_segmentation(
             row=row,
         ) and not segmentation_content_from_quoted_tail_only(
             process_body, prior_cleaned
+        ) and not segmentation_content_not_from_reply_head(
+            process_body, prior_cleaned
         ):
             return False
     if not process_body and not timeline_row_needs_image_description(row, process_body):
@@ -210,11 +226,14 @@ def segment_timeline_row(
     segment_fn: SegmentFn,
 ) -> Dict[str, Any]:
     process_body = timeline_row_process_body(row)
+    seg_body = strip_quoted_thread_tail(process_body) or process_body
     seg, err = process_timeline_message_segmentation(
         row,
-        process_body,
+        seg_body,
         seg_cache,
-        segment_fn,
+        lambda body, cache: segment_body_deduped(
+            body, cache, full_body=process_body
+        ),
     )
     return cleaned_entry_from_timeline_row(
         thread_id=thread_id,

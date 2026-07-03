@@ -1,6 +1,6 @@
 """segmentation module."""
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 _OUTLOOK_QUOTE_BLOCK = re.compile(
@@ -8,10 +8,17 @@ _OUTLOOK_QUOTE_BLOCK = re.compile(
     re.IGNORECASE,
 )
 _GMAIL_ON_WROTE = re.compile(r"(?m)^On .+wrote:\s*$", re.IGNORECASE)
+# Gmail often splits the attribution across two lines: "On …" then "wrote:".
+_GMAIL_ON_WROTE_SPLIT = re.compile(
+    r"(?m)^On .+\n\s*wrote:\s*$",
+    re.IGNORECASE,
+)
 _ORIGINAL_MESSAGE = re.compile(
     r"(?m)^-{3,}\s*Original Message\s*-{3,}\s*$",
     re.IGNORECASE,
 )
+
+
 def quoted_thread_start_index(body: str) -> Optional[int]:
     """
     Character index where a quoted prior-thread block likely begins, or ``None``.
@@ -23,7 +30,7 @@ def quoted_thread_start_index(body: str) -> Optional[int]:
     if not text.strip():
         return None
     candidates: List[int] = []
-    for pat in (_OUTLOOK_QUOTE_BLOCK, _GMAIL_ON_WROTE, _ORIGINAL_MESSAGE):
+    for pat in (_OUTLOOK_QUOTE_BLOCK, _GMAIL_ON_WROTE, _GMAIL_ON_WROTE_SPLIT, _ORIGINAL_MESSAGE):
         m = pat.search(text)
         if m:
             candidates.append(m.start())
@@ -66,6 +73,26 @@ def segmentation_content_from_quoted_tail_only(
     nh = _normalize_for_content_compare(head)
     nt = _normalize_for_content_compare(tail)
     return nc in nt and nc not in nh
+
+
+def segmentation_content_not_from_reply_head(
+    full_body: str, cleaned_content: str
+) -> bool:
+    """True when stored segmentation clearly did not come from the reply head."""
+    content = str(cleaned_content or "").strip()
+    if not content or not (full_body or "").strip():
+        return False
+    idx = quoted_thread_start_index(full_body)
+    if idx is None or idx <= 0:
+        return False
+    head = full_body[:idx].strip()
+    nc = _normalize_for_content_compare(content)
+    nh = _normalize_for_content_compare(head)
+    if len(nc) < 24:
+        return False
+    return nc not in nh
+
+
 def guard_segmentation_content(
     full_body: str,
     seg: Dict[str, Any],

@@ -2,10 +2,10 @@ import { mergeRows, setDisplaySourceAccount } from "./thread_domain.js";
 import { isTodoPlanThreadId } from "./plan_helpers.js";
 import { str } from "./utils.js";
 export const SUMMARIES_BUNDLE_URL = "/api/summaries/bundle";
-const SUMMARIES_CACHE_KEY = "fivelanes_summaries_bundle_v5";
-const SUMMARIES_ETAG_KEY = "fivelanes_summaries_bundle_etag_v5";
-const SUMMARIES_LOCAL_CACHE_KEY = "fivelanes_summaries_bundle_ls_v2";
-const SUMMARIES_LOCAL_ETAG_KEY = "fivelanes_summaries_bundle_etag_ls_v2";
+const SUMMARIES_CACHE_KEY = "fivelanes_summaries_bundle_v6";
+const SUMMARIES_ETAG_KEY = "fivelanes_summaries_bundle_etag_v6";
+const SUMMARIES_LOCAL_CACHE_KEY = "fivelanes_summaries_bundle_ls_v3";
+const SUMMARIES_LOCAL_ETAG_KEY = "fivelanes_summaries_bundle_etag_ls_v3";
 function readStorageItem(storage, key) {
     try {
         return storage.getItem(key) || "";
@@ -401,6 +401,7 @@ export function readCachedBundle() {
 export function bundleChanged(prev, next) {
     return (str(prev.run_stamp) !== str(next.data.run_stamp) ||
         str(prev.generated_at) !== str(next.data.generated_at) ||
+        str(prev.content_fingerprint) !== str(next.data.content_fingerprint) ||
         planIdsFingerprint(prev) !== planIdsFingerprint(next.data));
 }
 export async function loadLatestBundle() {

@@ -39,6 +39,7 @@ Text threads use on-disk ``conversations/*.json`` plus ``thread_tracking`` rows 
 ``inbox_thread_id`` ``text:<key>`` (no separate text tables).
 """
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -2161,9 +2162,14 @@ def _prior_success_row_is_replaceable(
     if _cleaned_content_is_known_placeholder(prior):
         return True
     if raw_text:
-        from services.email.segmentation import segmentation_content_from_quoted_tail_only
+        from services.email.segmentation import (
+            segmentation_content_from_quoted_tail_only,
+            segmentation_content_not_from_reply_head,
+        )
 
         if segmentation_content_from_quoted_tail_only(raw_text, prior):
+            return True
+        if segmentation_content_not_from_reply_head(raw_text, prior):
             return True
     # Short filename-like tokens from image-only segmentation, not real body text.
     return len(prior) < 120 and "\n" not in prior and prior.count(" ") < 4
@@ -2844,6 +2850,7 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
         db_path,
         lookback_days=lookback_days,
     )
+    bundle["content_fingerprint"] = summaries_content_fingerprint(bundle.get("cleaned") or [])
     try:
         from services.email.config import SOURCE_ACCOUNT
 
@@ -2866,6 +2873,56 @@ def load_processed_thread_source_pairs(db_path: str) -> Set[Tuple[str, str]]:
             return _claude_outputs_successful_thread_source_pairs(conn)
     except sqlite3.Error:
         return set()
+
+
+def summaries_content_fingerprint(cleaned: List[Dict[str, Any]]) -> str:
+    """Stable hash of segmented message bodies for dashboard cache busting."""
+    parts: List[str] = []
+    for row in sorted(
+        cleaned,
+        key=lambda r: (
+            _normalize_field(r.get("thread_id")),
+            _normalize_field(r.get("source_id")),
+        ),
+    ):
+        sid = _normalize_field(row.get("source_id"))
+        if not sid:
+            continue
+        parts.append(
+            "|".join(
+                [
+                    _normalize_field(row.get("thread_id")),
+                    sid,
+                    _normalize_field(row.get("cleaned_content")),
+                ]
+            )
+        )
+    if not parts:
+        return ""
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def claude_outputs_revision(db_path: str) -> str:
+    """Latest ``generated_at`` among segmented rows (ETag/content-revision helper)."""
+    try:
+        with connect_sqlite(db_path) as conn:
+            _ensure_claude_outputs_schema(conn)
+            row = conn.execute(
+                "SELECT MAX(generated_at) FROM claude_message_outputs"
+            ).fetchone()
+    except sqlite3.Error:
+        return ""
+    return _normalize_field(row[0] if row else "")
+
+
+def notify_summaries_bundle_dirty() -> None:
+    """Bust dashboard in-memory summaries cache after segmented rows change."""
+    try:
+        from dashboard_server import _invalidate_summaries_bundle_cache
+
+        _invalidate_summaries_bundle_cache()
+    except Exception:
+        pass
 
 
 def load_prior_cleaned_content_by_pair(db_path: str) -> Dict[Tuple[str, str], str]:
@@ -3011,6 +3068,8 @@ def save_claude_run_outputs(
                 ],
             )
         conn.commit()
+
+    notify_summaries_bundle_dirty()
 
 
 def delete_claude_outputs_for_thread(db_path: str, thread_id: str) -> int:

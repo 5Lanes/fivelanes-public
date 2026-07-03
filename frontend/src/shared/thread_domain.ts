@@ -1,5 +1,5 @@
 import type { LooseObj, ThreadView, CounterpartySlot } from "./types.js";
-import { arr, escapeHtml, recipientsContainAddress, str } from "./utils.js";
+import { arr, escapeHtml, str, toFieldContainsAddress } from "./utils.js";
 import { otherPartyOwesRe } from "./owner_config.js";
 import {
   counterpartySlotHighlightHtml,
@@ -87,7 +87,7 @@ export function threadMessagesForReply(
   });
 }
 
-/** True when the message is a Fivelanes inbox delivery (forward/Cc shell). */
+/** True when the message is a forward-to Fivelanes inbox shell (To: source account). */
 export function messageIsToSourceAccount(
   row: ThreadView["messages"][number],
   sourceAccount: string,
@@ -96,10 +96,8 @@ export function messageIsToSourceAccount(
   if (!inbox) return false;
   const c = (row.cleaned || {}) as LooseObj;
   const s = (row.summary || {}) as LooseObj;
-  return (
-    recipientsContainAddress(c.recipients, inbox) ||
-    recipientsContainAddress(s.recipients, inbox)
-  );
+  // Show messages that Bcc the inbox for tracking; hide only forward shells (To: inbox).
+  return toFieldContainsAddress(c.recipients, inbox) || toFieldContainsAddress(s.recipients, inbox);
 }
 
 /** Newest-first thread messages for the UI, excluding inbox delivery shells. */
@@ -111,7 +109,8 @@ export function threadMessagesForDisplay(
   if (!inbox || thread.id.startsWith("text:") || thread.id.startsWith("slack:") || thread.id.startsWith("linkedin:")) {
     return [...thread.messages];
   }
-  return thread.messages.filter((row) => !messageIsToSourceAccount(row, inbox));
+  const visible = thread.messages.filter((row) => !messageIsToSourceAccount(row, inbox));
+  return visible;
 }
 
 export function formatDraftReplyMarkdown(payload: LooseObj): string {

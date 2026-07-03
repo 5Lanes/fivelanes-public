@@ -59,6 +59,30 @@ export function recipientsContainAddress(
   return false;
 }
 
+function sourceAccountUsesPlusTag(sourceLower: string): boolean {
+  const local = sourceLower.split("@", 1)[0] ?? "";
+  return local.includes("+");
+}
+
+function headerFieldContainsAddress(headerValue: string, addressLower: string): boolean {
+  const want = addressLower.trim().toLowerCase();
+  if (!want.includes("@")) return false;
+  const addrs = extractEmailsLower(headerValue);
+  if (addrs.has(want)) return true;
+  if (sourceAccountUsesPlusTag(want)) return false;
+  const normalizedWant = normalizeGmailAddress(want);
+  for (const addr of addrs) {
+    if (normalizeGmailAddress(addr) === normalizedWant) return true;
+  }
+  return false;
+}
+
+/** True when the Fivelanes inbox is in the To header (forward delivery shell). */
+export function toFieldContainsAddress(raw: unknown, addressLower: string): boolean {
+  const fields = parseRecipientFields(raw);
+  return headerFieldContainsAddress(fields.to, addressLower);
+}
+
 function parseRecipientFields(raw: unknown): { to: string; cc: string; bcc: string } {
   if (!raw) return { to: "", cc: "", bcc: "" };
   if (typeof raw === "object" && raw !== null) {

@@ -4,10 +4,10 @@ import type { LaneSummaryView, LaneView, LooseObj, ThreadView, PlanView } from "
 import { str } from "./utils.js";
 
 export const SUMMARIES_BUNDLE_URL = "/api/summaries/bundle";
-const SUMMARIES_CACHE_KEY = "fivelanes_summaries_bundle_v5";
-const SUMMARIES_ETAG_KEY = "fivelanes_summaries_bundle_etag_v5";
-const SUMMARIES_LOCAL_CACHE_KEY = "fivelanes_summaries_bundle_ls_v2";
-const SUMMARIES_LOCAL_ETAG_KEY = "fivelanes_summaries_bundle_etag_ls_v2";
+const SUMMARIES_CACHE_KEY = "fivelanes_summaries_bundle_v6";
+const SUMMARIES_ETAG_KEY = "fivelanes_summaries_bundle_etag_v6";
+const SUMMARIES_LOCAL_CACHE_KEY = "fivelanes_summaries_bundle_ls_v3";
+const SUMMARIES_LOCAL_ETAG_KEY = "fivelanes_summaries_bundle_etag_ls_v3";
 
 function readStorageItem(storage: Storage, key: string): string {
   try {
@@ -404,6 +404,7 @@ export function bundleChanged(
   return (
     str(prev.run_stamp) !== str(next.data.run_stamp) ||
     str(prev.generated_at) !== str(next.data.generated_at) ||
+    str(prev.content_fingerprint) !== str(next.data.content_fingerprint) ||
     planIdsFingerprint(prev) !== planIdsFingerprint(next.data)
   );
 }

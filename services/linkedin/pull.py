@@ -5,9 +5,11 @@ from __future__ import annotations
 import csv
 import logging
 import os
+import re
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Set
+from typing import Any, Dict, Iterable, List, Set, Tuple
 
 from services.linkedin.config import (
     LINKEDIN_SCRAPER_DATA_DIR,
@@ -38,6 +40,114 @@ _EXPORT_HEADERS = [
     "IS MESSAGE DRAFT",
     "IS CONVERSATION DRAFT",
 ]
+
+
+_WEEKDAY_INDEX = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
+
+_MONTH_INDEX = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+
+
+def _parse_scraped_at(value: str) -> datetime:
+    text = (value or "").strip()
+    if not text:
+        return datetime.now(timezone.utc)
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return datetime.now(timezone.utc)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _format_utc(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _combine_date_and_clock(date: datetime, clock: str) -> datetime:
+    match = re.match(r"^(\d{1,2}):(\d{2})\s*(AM|PM)$", clock.strip(), re.IGNORECASE)
+    if not match:
+        return date
+    hour = int(match.group(1)) % 12
+    if match.group(3).upper() == "PM":
+        hour += 12
+    minute = int(match.group(2))
+    return date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+
+def _normalize_scraper_timestamp(timestamp: str, *, scraped_at: str) -> str:
+    raw = (timestamp or "").strip()
+    if not raw:
+        return raw
+    if re.match(r"^\d{4}-\d{2}-\d{2}", raw):
+        return raw
+
+    anchor = _parse_scraped_at(scraped_at)
+    lower = raw.lower()
+    if lower == "today":
+        return _format_utc(anchor)
+    if lower == "yesterday":
+        return _format_utc(anchor - timedelta(days=1))
+
+    weekday = _WEEKDAY_INDEX.get(lower)
+    if weekday is not None:
+        days_back = (anchor.weekday() - weekday) % 7
+        return _format_utc(anchor - timedelta(days=days_back))
+
+    month_day = re.match(r"^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+(\d{1,2})$", lower)
+    if month_day:
+        month = _MONTH_INDEX[month_day.group(1)]
+        day = int(month_day.group(2))
+        year = anchor.year
+        try:
+            return _format_utc(datetime(year, month, day, tzinfo=timezone.utc))
+        except ValueError:
+            return raw
+
+    clock_only = re.match(r"^(\d{1,2}:\d{2}\s*(?:AM|PM))$", raw, re.IGNORECASE)
+    if clock_only:
+        return _format_utc(_combine_date_and_clock(anchor, clock_only.group(1)))
+
+    return raw
+
+
+def _dedupe_export_rows(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    seen: Set[Tuple[str, str, str]] = set()
+    deduped: List[Dict[str, str]] = []
+    for row in rows:
+        key = (
+            str(row.get("CONVERSATION ID") or "").strip(),
+            str(row.get("FROM") or "").strip(),
+            str(row.get("CONTENT") or "").strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped
 
 
 def _owner_profile_url() -> str:
@@ -129,7 +239,10 @@ def _scraper_row_to_export(row: Dict[str, str], *, owner_display: str) -> Dict[s
     owner_url = _owner_profile_url()
     conversation_id = str(row.get("conversation_id") or "").strip()
     content = str(row.get("message") or "")
-    timestamp = str(row.get("timestamp") or "").strip()
+    timestamp = _normalize_scraper_timestamp(
+        str(row.get("timestamp") or ""),
+        scraped_at=str(row.get("scraped_at") or ""),
+    )
 
     if is_from_me:
         from_name = sender or owner_display
@@ -186,11 +299,13 @@ def _merge_scraped_into_export(
         ]
 
     owner_display = _owner_display_name(scraped)
-    converted = [
-        _scraper_row_to_export(row, owner_display=owner_display)
-        for row in scraped
-        if row.get("conversation_id")
-    ]
+    converted = _dedupe_export_rows(
+        [
+            _scraper_row_to_export(row, owner_display=owner_display)
+            for row in scraped
+            if row.get("conversation_id")
+        ]
+    )
 
     pulled_conversation_ids = {
         str(row.get("CONVERSATION ID") or "").strip() for row in converted if row.get("CONVERSATION ID")
@@ -207,7 +322,8 @@ def _merge_scraped_into_export(
         for row in existing
         if str(row.get("CONVERSATION ID") or "").strip() not in pulled_conversation_ids
     ]
-    merged = kept + converted
+    pulled_rows = _dedupe_export_rows(converted)
+    merged = kept + pulled_rows
     with export_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=_EXPORT_HEADERS, extrasaction="ignore")
         writer.writeheader()
@@ -216,7 +332,7 @@ def _merge_scraped_into_export(
     clear_csv_cache()
     return {
         "conversation_count": len(pulled_conversation_ids),
-        "message_count": len(converted),
+        "message_count": len(pulled_rows),
         "total_rows": len(merged),
     }
 
@@ -268,6 +384,7 @@ def pull_linkedin_messages(
         )
 
     merge_stats = _merge_scraped_into_export(scraped_path, conversation_keys=set(keys))
+    repair_stats = repair_linkedin_export_timestamps()
     repaired_db = _repair_db_owner_senders(db_path) if db_path else 0
 
     return {
@@ -282,4 +399,36 @@ def pull_linkedin_messages(
         "repaired_db_senders": repaired_db,
         "scraped": run_scraper,
         **merge_stats,
+        "repaired_timestamps": repair_stats.get("changed", 0),
+        "deduped_rows": repair_stats.get("deduped", 0),
     }
+
+
+def repair_linkedin_export_timestamps() -> Dict[str, int]:
+    """Normalize relative DATE values and drop duplicate rows in the export CSV."""
+    export_path = messages_csv_path()
+    rows = _read_export_rows(export_path)
+    if not rows:
+        return {"changed": 0, "deduped": 0, "total_rows": 0}
+
+    anchor = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    changed = 0
+    for row in rows:
+        old = str(row.get("DATE") or "").strip()
+        if not old or re.match(r"^\d{4}-\d{2}-\d{2}", old):
+            continue
+        new = _normalize_scraper_timestamp(old, scraped_at=anchor)
+        if new != old:
+            row["DATE"] = new
+            changed += 1
+
+    deduped = _dedupe_export_rows(rows)
+    removed = len(rows) - len(deduped)
+    if changed or removed:
+        with export_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=_EXPORT_HEADERS, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(deduped)
+        clear_csv_cache()
+
+    return {"changed": changed, "deduped": removed, "total_rows": len(deduped)}
