@@ -58,4 +58,12 @@ export function applyNavFeatureVisibility(): void {
     const anyVisible = Array.from(children).some((el) => !el.hidden);
     group.hidden = !anyVisible;
   });
+
+  const moreNav = document.getElementById("app-nav-more");
+  if (moreNav) {
+    const moreLinks = moreNav.querySelectorAll<HTMLElement>("[data-feature]");
+    if (moreLinks.length === 0) return;
+    const anyVisible = Array.from(moreLinks).some((el) => !el.hidden);
+    moreNav.hidden = !anyVisible;
+  }
 }

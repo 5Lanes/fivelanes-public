@@ -18,7 +18,13 @@ function setRunButtonRunning(running) {
     if (!runBtn)
         return;
     runBtn.disabled = running;
-    runBtn.textContent = running ? "Running…" : "Run fivelanes";
+    const label = runBtn.querySelector(".run-fivelanes-btn-label");
+    if (label) {
+        label.textContent = running ? "Running…" : "Run fivelanes";
+    }
+    else {
+        runBtn.textContent = running ? "Running…" : "Run fivelanes";
+    }
     runBtn.setAttribute("aria-busy", running ? "true" : "false");
 }
 async function fetchPipelineStatus() {

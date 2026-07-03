@@ -2,57 +2,32 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#101216" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="description" content="Fivelanes inbox dashboard — threads, meetings, lanes, and plans" />
   <title>Fivelanes</title>
   <link rel="icon" href="/square5.jpg" type="image/jpeg" />
+  <link rel="apple-touch-icon" href="/square5.jpg" />
   <link rel="stylesheet" href="/frontend/styles.css" />
 </head>
 <body>
   <a class="skip-link" href="#page-root">Skip to main content</a>
   <div class="wrap">
-    <header>
-      <div class="brand">
-        <img src="/square5.jpg" alt="" class="brand-logo" width="52" height="52" decoding="async" />
-        <div class="brand-text">
-          <h1>Fivelanes</h1>
+    <header class="app-header">
+      <div class="app-header-row">
+        <div class="brand">
+          <img src="/square5.jpg" alt="" class="brand-logo" width="52" height="52" decoding="async" />
+          <div class="brand-text">
+            <h1>Fivelanes</h1>
+          </div>
         </div>
-      </div>
-      <div class="brand-lanes" aria-hidden="true">
-        <span></span><span></span><span></span><span></span><span></span><span></span>
-      </div>
-      <div class="header-controls">
-        <button type="button" id="run-fivelanes-btn" class="run-fivelanes-btn">
-          Run fivelanes
-        </button>
-      </div>
-      <p class="pipeline-status" id="pipeline-status" hidden></p>
-      <p class="run-meta" id="run-meta" hidden></p>
-    </header>
-
-    <div class="app-shell">
-      <nav class="app-nav" id="app-nav" aria-label="Main">
-        <ul id="app-nav-list">
-          <li><a href="/dashboard" class="app-nav-link" data-route="dashboard">Dashboard</a></li>
-          <li><a href="/threads" class="app-nav-link" data-route="threads">Threads</a></li>
-          <li><a href="/meetings" class="app-nav-link" data-route="meetings">Meetings</a></li>
-          <li><a href="/lanes" class="app-nav-link" data-route="lanes">Lanes</a></li>
-          <li><a href="/plans" class="app-nav-link" data-route="plans">Plans</a></li>
-          <li class="app-nav-group" id="app-nav-sources" data-nav-group="sources">
-            <span class="app-nav-group-label">Sources</span>
-            <ul class="app-nav-sublist" aria-label="Sources">
-              <li><a href="/texts-setup" class="app-nav-link" data-route="texts-setup" data-feature="texts">Texts</a></li>
-              <li><a href="/slack-setup" class="app-nav-link" data-route="slack-setup" data-feature="slack">Slack</a></li>
-              <li><a href="/linkedin-setup" class="app-nav-link" data-route="linkedin-setup" data-feature="linkedin">LinkedIn</a></li>
-            </ul>
-          </li>
-        </ul>
-        <div class="app-nav-footer">
+        <div class="header-controls">
           <button
             type="button"
             id="settings-btn"
-            class="app-nav-settings-btn"
+            class="app-nav-settings-btn header-settings-btn"
             aria-haspopup="dialog"
             aria-controls="settings-dialog"
           >
@@ -72,7 +47,47 @@
             </svg>
             <span class="app-nav-settings-label">Settings</span>
           </button>
+          <button type="button" id="run-fivelanes-btn" class="run-fivelanes-btn" aria-label="Run fivelanes">
+            <span class="run-fivelanes-btn-label">Run fivelanes</span>
+          </button>
         </div>
+      </div>
+      <div class="brand-lanes" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <p class="pipeline-status" id="pipeline-status" hidden></p>
+      <p class="run-meta" id="run-meta" hidden></p>
+    </header>
+
+    <div class="app-shell">
+      <nav class="app-nav" id="app-nav" aria-label="Main">
+        <ul id="app-nav-list" class="app-nav-tabs">
+          <li><a href="/dashboard" class="app-nav-link" data-route="dashboard" data-short="Home"><span class="app-nav-link-text">Dashboard</span></a></li>
+          <li><a href="/threads" class="app-nav-link" data-route="threads" data-short="Threads"><span class="app-nav-link-text">Threads</span></a></li>
+          <li><a href="/meetings" class="app-nav-link" data-route="meetings" data-short="Meet"><span class="app-nav-link-text">Meetings</span></a></li>
+          <li><a href="/lanes" class="app-nav-link" data-route="lanes" data-short="Lanes"><span class="app-nav-link-text">Lanes</span></a></li>
+          <li><a href="/plans" class="app-nav-link" data-route="plans" data-short="Plans"><span class="app-nav-link-text">Plans</span></a></li>
+        </ul>
+        <div class="app-nav-group app-nav-sources-desktop" id="app-nav-sources" data-nav-group="sources">
+          <span class="app-nav-group-label">Sources</span>
+          <ul class="app-nav-sublist" aria-label="Sources">
+            <li><a href="/texts-setup" class="app-nav-link" data-route="texts-setup" data-feature="texts"><span class="app-nav-link-text">Texts</span></a></li>
+            <li><a href="/slack-setup" class="app-nav-link" data-route="slack-setup" data-feature="slack"><span class="app-nav-link-text">Slack</span></a></li>
+            <li><a href="/linkedin-setup" class="app-nav-link" data-route="linkedin-setup" data-feature="linkedin"><span class="app-nav-link-text">LinkedIn</span></a></li>
+          </ul>
+        </div>
+        <details class="app-nav-more" id="app-nav-more">
+          <summary class="app-nav-more-trigger" aria-label="More pages">
+            <span class="app-nav-more-icon" aria-hidden="true">⋯</span>
+            <span class="app-nav-more-label">More</span>
+          </summary>
+          <div class="app-nav-more-panel" role="menu">
+            <p class="app-nav-more-heading">Sources</p>
+            <a href="/texts-setup" class="app-nav-link app-nav-more-link" data-route="texts-setup" data-feature="texts" role="menuitem">Texts</a>
+            <a href="/slack-setup" class="app-nav-link app-nav-more-link" data-route="slack-setup" data-feature="slack" role="menuitem">Slack</a>
+            <a href="/linkedin-setup" class="app-nav-link app-nav-more-link" data-route="linkedin-setup" data-feature="linkedin" role="menuitem">LinkedIn</a>
+          </div>
+        </details>
       </nav>
       <div class="app-body">
         <main id="page-root" tabindex="-1"></main>

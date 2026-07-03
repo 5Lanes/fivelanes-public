@@ -11,6 +11,7 @@ const PAGE_HTML = `
     <ul id="thread-nav-list"></ul>
   </aside>
   <div class="main-panel">
+    <button type="button" class="thread-mobile-back" id="thread-mobile-back" aria-label="Back to thread list">← Threads</button>
     <div id="lanes" class="lanes-grid" hidden></div>
     <div id="cards" class="cards"></div>
   </div>
@@ -22,6 +23,31 @@ const PAGE_HTML = `
     </section>
   </aside>
 </div>`;
+function isMobileThreadsLayout() {
+    return window.matchMedia("(max-width: 640px)").matches;
+}
+function threadsLayoutEl() {
+    return document.querySelector(".dashboard-layout--threads");
+}
+function closeMobileThreadDetail() {
+    threadsLayoutEl()?.classList.remove("thread-detail-open");
+    document.querySelectorAll("article.card.thread-card-active").forEach((card) => {
+        card.classList.remove("thread-card-active");
+    });
+}
+function openMobileThreadDetail(threadId) {
+    if (!isMobileThreadsLayout()) {
+        document.getElementById(`thread-${threadId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+    }
+    const layout = threadsLayoutEl();
+    if (!layout)
+        return;
+    document.querySelectorAll("article.card").forEach((card) => {
+        card.classList.toggle("thread-card-active", card.id === `thread-${threadId}`);
+    });
+    layout.classList.add("thread-detail-open");
+}
 let threadViewMode = "active";
 let threadChannelFilter = "all";
 let navObserver = null;
@@ -278,7 +304,7 @@ function renderNav(threads, snoozedCount, removedCount, channelCounts) {
         btn.addEventListener("click", () => {
             document.querySelectorAll("#thread-nav button[data-thread-id]").forEach((el) => el.classList.remove("active"));
             btn.classList.add("active");
-            document.getElementById(`thread-${thread.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+            openMobileThreadDetail(thread.id);
         });
         li.appendChild(btn);
         list.appendChild(li);
@@ -401,6 +427,7 @@ export async function renderThreadsPage() {
     else if (threadChannelFilter === "email" && channelCounts.email === 0)
         threadChannelFilter = "all";
     const visible = filterThreadsByChannel(bySnooze);
+    closeMobileThreadDetail();
     renderCards(visible);
     renderNav(visible, snoozedCount, removedCount, channelCounts);
     bindScrollNavHighlight();
@@ -412,6 +439,9 @@ export function bindThreadsInteractions() {
     if (interactionsBound)
         return;
     interactionsBound = true;
+    document.getElementById("thread-mobile-back")?.addEventListener("click", () => {
+        closeMobileThreadDetail();
+    });
     document.addEventListener("click", (ev) => {
         const target = ev.target;
         if (!target)
