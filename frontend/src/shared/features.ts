@@ -45,6 +45,17 @@ export function applyNavFeatureVisibility(): void {
   document.querySelectorAll<HTMLElement>("[data-feature]").forEach((el) => {
     const featureId = (el.dataset.feature || "").trim();
     if (!featureId) return;
-    el.hidden = !isFeatureEnabled(featureId);
+    const visible = isFeatureEnabled(featureId);
+    el.hidden = !visible;
+    if (el.parentElement?.matches("li")) {
+      el.parentElement.hidden = !visible;
+    }
+  });
+
+  document.querySelectorAll<HTMLElement>("[data-nav-group]").forEach((group) => {
+    const children = group.querySelectorAll<HTMLElement>("[data-feature]");
+    if (children.length === 0) return;
+    const anyVisible = Array.from(children).some((el) => !el.hidden);
+    group.hidden = !anyVisible;
   });
 }

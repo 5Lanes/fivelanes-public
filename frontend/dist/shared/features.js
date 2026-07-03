@@ -38,6 +38,17 @@ export function applyNavFeatureVisibility() {
         const featureId = (el.dataset.feature || "").trim();
         if (!featureId)
             return;
-        el.hidden = !isFeatureEnabled(featureId);
+        const visible = isFeatureEnabled(featureId);
+        el.hidden = !visible;
+        if (el.parentElement?.matches("li")) {
+            el.parentElement.hidden = !visible;
+        }
+    });
+    document.querySelectorAll("[data-nav-group]").forEach((group) => {
+        const children = group.querySelectorAll("[data-feature]");
+        if (children.length === 0)
+            return;
+        const anyVisible = Array.from(children).some((el) => !el.hidden);
+        group.hidden = !anyVisible;
     });
 }

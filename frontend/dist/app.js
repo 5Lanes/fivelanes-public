@@ -46,6 +46,9 @@ function setActiveNav(route) {
     document.querySelectorAll(".app-nav-link[data-route]").forEach((link) => {
         link.classList.toggle("active", link.dataset.route === route);
     });
+    document.querySelectorAll(".app-nav-group").forEach((group) => {
+        group.classList.toggle("has-active-child", group.querySelector(".app-nav-link.active") !== null);
+    });
 }
 function showBootstrapError(message) {
     pageRoot.innerHTML = `<div class="view-empty"><p class="empty-state">${escapeHtml(message)}</p></div>`;

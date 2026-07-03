@@ -39,9 +39,14 @@
           <li><a href="/meetings" class="app-nav-link" data-route="meetings">Meetings</a></li>
           <li><a href="/lanes" class="app-nav-link" data-route="lanes">Lanes</a></li>
           <li><a href="/plans" class="app-nav-link" data-route="plans">Plans</a></li>
-          <li><a href="/texts-setup" class="app-nav-link" data-route="texts-setup" data-feature="texts">Texts</a></li>
-          <li><a href="/slack-setup" class="app-nav-link" data-route="slack-setup" data-feature="slack">Slack</a></li>
-          <li><a href="/linkedin-setup" class="app-nav-link" data-route="linkedin-setup" data-feature="linkedin">LinkedIn</a></li>
+          <li class="app-nav-group" id="app-nav-sources" data-nav-group="sources">
+            <span class="app-nav-group-label">Sources</span>
+            <ul class="app-nav-sublist" aria-label="Sources">
+              <li><a href="/texts-setup" class="app-nav-link" data-route="texts-setup" data-feature="texts">Texts</a></li>
+              <li><a href="/slack-setup" class="app-nav-link" data-route="slack-setup" data-feature="slack">Slack</a></li>
+              <li><a href="/linkedin-setup" class="app-nav-link" data-route="linkedin-setup" data-feature="linkedin">LinkedIn</a></li>
+            </ul>
+          </li>
         </ul>
         <div class="app-nav-footer">
           <button
