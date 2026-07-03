@@ -92,7 +92,9 @@ from services.linkedin import (
     LINKEDIN_MESSAGES_DIR,
     fetch_tracked_conversation_keys as fetch_tracked_linkedin_keys,
     list_conversation_catalog as list_linkedin_catalog,
+    pull_linkedin_messages,
     set_tracked_conversation_keys as set_tracked_linkedin_keys,
+    write_selections_for_conversation_keys,
 )
 from services.linkedin.summarize import summarize_tracked_linkedin_threads
 from utils.run_fivelanes_scheduler import (
@@ -680,6 +682,46 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         result["summarize"] = "started"
         self._json_response(HTTPStatus.OK, result)
 
+    def _post_linkedin_pull(self, body: Dict[str, Any]) -> None:
+        raw = body.get("conversation_keys")
+        if raw is None:
+            raw = body.get("tracked")
+        keys = raw if isinstance(raw, list) else None
+        if isinstance(keys, list) and not keys:
+            keys = None
+        try:
+            result = pull_linkedin_messages(DB_PATH, conversation_keys=keys)
+        except Exception as exc:
+            log.exception("linkedin pull failed")
+            self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"ok": False, "error": str(exc)},
+            )
+            return
+
+        if result.get("skipped"):
+            self._json_response(HTTPStatus.OK, result)
+            return
+
+        keys = result.get("selections") or keys
+        pulled_keys = fetch_tracked_linkedin_keys(DB_PATH) if Path(DB_PATH).is_file() else []
+
+        def _summarize_worker() -> None:
+            try:
+                summarize_tracked_linkedin_threads(
+                    DB_PATH, conversation_keys=pulled_keys or None
+                )
+            except Exception:
+                log.exception("Background LinkedIn summarization after pull failed")
+
+        threading.Thread(
+            target=_summarize_worker,
+            name="linkedin-summarize-after-pull",
+            daemon=True,
+        ).start()
+        result["summarize"] = "started"
+        self._json_response(HTTPStatus.OK, result)
+
     def _post_linkedin_summarize(self, body: Dict[str, Any]) -> None:
         if not Path(DB_PATH).is_file():
             self._json_response(
@@ -742,6 +784,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
 
         keys = result.get("tracked") if isinstance(result.get("tracked"), list) else raw
+        try:
+            write_selections_for_conversation_keys(keys)
+        except Exception:
+            log.exception("Failed to persist LinkedIn pull selections")
 
         def _summarize_worker() -> None:
             try:
@@ -1893,6 +1939,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._post_slack_summarize(body)
         elif path == "/api/linkedin/track":
             self._post_linkedin_track(body)
+        elif path == "/api/linkedin/pull":
+            self._post_linkedin_pull(body)
         elif path == "/api/linkedin/summarize":
             self._post_linkedin_summarize(body)
         else:

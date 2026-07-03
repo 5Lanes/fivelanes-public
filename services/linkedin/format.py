@@ -52,6 +52,8 @@ def _message_is_from_me(from_name: str, sender_profile_url: str) -> bool:
         return True
     sender = (from_name or "").strip().lower()
     owner = owner_name().strip().lower()
+    if sender == "owner" and owner and owner != "owner":
+        return True
     if not owner or not sender:
         return False
     if sender == owner:
@@ -70,6 +72,16 @@ def _message_is_from_me(from_name: str, sender_profile_url: str) -> bool:
 def _message_source_id(conversation_id: str, date: str, from_name: str, content: str) -> str:
     payload = f"{conversation_id}|{date}|{from_name}|{content[:500]}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+
+
+def source_id_for_export_row(row: Dict[str, Any]) -> str:
+    """Stable id for a LinkedIn export-format CSV row (used when merging scraper imports)."""
+    return _message_source_id(
+        str(row.get(_CSV_FIELDS["conversation_id"]) or row.get("CONVERSATION ID") or ""),
+        str(row.get(_CSV_FIELDS["date"]) or row.get("DATE") or ""),
+        str(row.get(_CSV_FIELDS["from_name"]) or row.get("FROM") or ""),
+        str(row.get(_CSV_FIELDS["content"]) or row.get("CONTENT") or ""),
+    )
 
 
 def _normalize_csv_row(raw: Dict[str, str]) -> Optional[Dict[str, Any]]:
@@ -117,6 +129,12 @@ def _csv_cache_key(path: Path) -> Tuple[str, float]:
         return (str(path), 0.0)
     stat = path.stat()
     return (str(path.resolve()), stat.st_mtime)
+
+
+def clear_csv_cache() -> None:
+    """Drop cached CSV rows after an on-disk import or pull."""
+    _csv_cache["key"] = None
+    _csv_cache["rows_by_conversation"] = {}
 
 
 def _load_rows_by_conversation() -> Dict[str, List[Dict[str, Any]]]:

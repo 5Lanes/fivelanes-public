@@ -5,10 +5,23 @@ const PAGE_HTML = `
   <header class="texts-setup-header">
     <h2>LinkedIn threads</h2>
     <p class="texts-setup-lead">
-      Conversations are loaded from your data directory's <code>linkedin-messages/messages.csv</code> file (LinkedIn data export format).
-      Select which threads to track; tracked threads appear on <a href="/threads">Threads</a>.
+      Pull fresh messages for selected conversations, then choose which threads to track on
+      <a href="/threads">Threads</a>.
     </p>
   </header>
+
+  <section class="texts-setup-card" aria-labelledby="linkedin-pull-heading">
+    <h3 id="linkedin-pull-heading">Pull from LinkedIn</h3>
+    <p class="texts-setup-hint">
+      Runs the Playwright scraper for your <strong>tracked</strong> conversations only
+      (saved below), then merges new messages into <code>linkedin-messages/messages.csv</code>.
+      Pull is manual — the scheduled pipeline only summarizes existing messages.
+    </p>
+    <div class="texts-setup-actions">
+      <button type="button" class="texts-save-tracked-btn" id="linkedin-pull-btn">Pull tracked conversations</button>
+    </div>
+    <p id="linkedin-pull-status" class="texts-status" hidden></p>
+  </section>
 
   <section class="texts-setup-card" aria-labelledby="linkedin-select-heading">
     <h3 id="linkedin-select-heading">Choose threads to track</h3>
@@ -123,11 +136,54 @@ export function bindLinkedinSetupInteractions() {
     if (interactionsBound)
         return;
     interactionsBound = true;
+    const pullBtn = document.getElementById("linkedin-pull-btn");
+    const pullStatus = document.getElementById("linkedin-pull-status");
     const saveBtn = document.getElementById("linkedin-save-tracked-btn");
     const summarizeBtn = document.getElementById("linkedin-summarize-btn");
     const saveStatus = document.getElementById("linkedin-save-status");
     const selectAllBtn = document.getElementById("linkedin-select-all-btn");
     const selectNoneBtn = document.getElementById("linkedin-select-none-btn");
+    pullBtn?.addEventListener("click", async () => {
+        const keys = selectedKeys();
+        const useTrackedOnly = keys.length === 0;
+        if (useTrackedOnly && trackedKeys.size === 0) {
+            setStatus(pullStatus, "Save tracking for at least one conversation first.", "error");
+            return;
+        }
+        setStatus(pullStatus, useTrackedOnly
+            ? `Pulling ${trackedKeys.size} tracked conversation(s) from LinkedIn… this may take a few minutes.`
+            : `Pulling ${keys.length} selected conversation(s) from LinkedIn… this may take a few minutes.`, "info");
+        if (pullBtn)
+            pullBtn.disabled = true;
+        try {
+            const res = await fetch("/api/linkedin/pull", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(useTrackedOnly ? {} : { conversation_keys: keys }),
+            });
+            const data = (await res.json());
+            if (!res.ok) {
+                setStatus(pullStatus, data.error || `HTTP ${res.status}`, "error");
+                return;
+            }
+            if (data.skipped) {
+                setStatus(pullStatus, "No tracked conversations to pull.", "error");
+                return;
+            }
+            clearSummariesBundleCache();
+            await fetchCatalog();
+            renderConversationList();
+            setStatus(pullStatus, `Pulled ${data.message_count ?? 0} new message(s) from ${data.conversation_count ?? 0} conversation(s). Summaries are updating — refresh Threads shortly.`, "ok");
+        }
+        catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            setStatus(pullStatus, msg, "error");
+        }
+        finally {
+            if (pullBtn)
+                pullBtn.disabled = false;
+        }
+    });
     selectAllBtn?.addEventListener("click", () => {
         document.querySelectorAll(".linkedin-conversation-checkbox").forEach((box) => {
             box.checked = true;

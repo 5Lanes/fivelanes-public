@@ -105,7 +105,7 @@ function buildThreadCard(thread) {
             const msgDt = str(c.datetime || row.summary?.datetime);
             const subj = str(c.subject) || "(No subject)";
             const fromLine = str(c.sender)
-                ? `<div class="meta"><strong>From</strong> ${escapeHtml(str(c.sender))}</div>`
+                ? `<div class="meta"><strong>From</strong> ${escapeHtml(isText || isSlack || isLinkedin ? formatChatSenderLabel(str(c.sender)) : str(c.sender))}</div>`
                 : "";
             const rec = formatRecipients(c.recipients);
             const recLine = rec

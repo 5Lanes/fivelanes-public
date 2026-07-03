@@ -64,6 +64,7 @@ _ROUTE_FEATURES: dict[tuple[str, str], str] = {
     ("POST", "/api/slack/track"): "slack",
     ("POST", "/api/slack/summarize"): "slack",
     ("GET", "/api/linkedin/catalog"): "linkedin",
+    ("POST", "/api/linkedin/pull"): "linkedin",
     ("POST", "/api/linkedin/track"): "linkedin",
     ("POST", "/api/linkedin/summarize"): "linkedin",
 }
