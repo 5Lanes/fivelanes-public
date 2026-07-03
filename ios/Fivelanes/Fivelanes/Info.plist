@@ -21,20 +21,22 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>FIVELANES_DASHBOARD_URL</key>
-	<string>http://100.107.24.80:8000/dashboard</string>
+	<string>http://homeserver.tailba5702.ts.net:8000/dashboard</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 		<key>NSExceptionDomains</key>
 		<dict>
 			<key>ts.net</key>
 			<dict>
-				<key>NSIncludesSubdomains</key>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
 				<true/>
-				<key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
+				<key>NSIncludesSubdomains</key>
 				<true/>
 			</dict>
 		</dict>
