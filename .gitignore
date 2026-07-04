@@ -19,3 +19,7 @@ node_modules/
 /out/
 timeline.db
 PRD.md
+
+# iOS local config (example stays tracked)
+ios/Config.plist
+**/xcuserdata/

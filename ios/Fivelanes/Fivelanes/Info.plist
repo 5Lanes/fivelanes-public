@@ -21,7 +21,7 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>FIVELANES_DASHBOARD_URL</key>
-	<string>http://homeserver.tailba5702.ts.net:8000/dashboard</string>
+	<string>http://YOUR-MACHINE.YOUR-TAILNET.ts.net:8000/dashboard</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>
