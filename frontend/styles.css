@@ -1226,6 +1226,10 @@ header p.run-meta {
   --nav-lane: var(--lane-teal);
 }
 
+.app-nav a[data-route="meet-recordings-setup"] {
+  --nav-lane: var(--lane-orange);
+}
+
 .app-nav a:hover {
   background: var(--hover);
 }

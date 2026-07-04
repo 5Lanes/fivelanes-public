@@ -13,7 +13,8 @@ export type AppRoute =
   | "plans"
   | "texts-setup"
   | "slack-setup"
-  | "linkedin-setup";
+  | "linkedin-setup"
+  | "meet-recordings-setup";
 
 export type LaneView = {
   id: number;

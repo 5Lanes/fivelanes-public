@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Add a Google account for Gmail + Calendar API access (OAuth).
+Add a Google account for Gmail, Calendar, and Meet recording Docs API access (OAuth).
 
 Requires ``$FIVELANES_DATA_ROOT/credentials/credentials.json`` (Desktop app OAuth client) and that the
 redirect URI you use is listed in Google Cloud Console for that client.

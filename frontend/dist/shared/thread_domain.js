@@ -81,7 +81,11 @@ export function messageIsToSourceAccount(row, sourceAccount) {
 /** Newest-first thread messages for the UI, excluding inbox delivery shells. */
 export function threadMessagesForDisplay(thread, sourceAccount) {
     const inbox = (sourceAccount || "").trim().toLowerCase();
-    if (!inbox || thread.id.startsWith("text:") || thread.id.startsWith("slack:") || thread.id.startsWith("linkedin:")) {
+    if (!inbox ||
+        thread.id.startsWith("text:") ||
+        thread.id.startsWith("slack:") ||
+        thread.id.startsWith("linkedin:") ||
+        thread.id.startsWith("meet:")) {
         return [...thread.messages];
     }
     const visible = thread.messages.filter((row) => !messageIsToSourceAccount(row, inbox));
@@ -140,7 +144,10 @@ function chatThreadSummaryScore(s) {
 }
 export function threadSummaryForDisplay(thread) {
     const rows = threadMessagesForDisplay(thread, displaySourceAccount);
-    const isChat = thread.id.startsWith("text:") || thread.id.startsWith("slack:") || thread.id.startsWith("linkedin:");
+    const isChat = thread.id.startsWith("text:") ||
+        thread.id.startsWith("slack:") ||
+        thread.id.startsWith("linkedin:") ||
+        thread.id.startsWith("meet:");
     if (isChat) {
         let best = null;
         let bestScore = 0;
@@ -180,8 +187,17 @@ export function threadIsLinkedin(thread) {
     const s = threadSummaryForDisplay(thread);
     return str(s.channel || c0.channel) === "linkedin" || thread.id.startsWith("linkedin:");
 }
+export function threadIsMeetRecording(thread) {
+    const primary = thread.messages[0] || { cleaned: null, summary: null };
+    const c0 = (primary.cleaned || {});
+    const s = threadSummaryForDisplay(thread);
+    return (str(s.channel || c0.channel) === "meet_recording" || thread.id.startsWith("meet:"));
+}
 export function threadIsEmail(thread) {
-    return !threadIsText(thread) && !threadIsSlack(thread) && !threadIsLinkedin(thread);
+    return (!threadIsText(thread) &&
+        !threadIsSlack(thread) &&
+        !threadIsLinkedin(thread) &&
+        !threadIsMeetRecording(thread));
 }
 export function threadLabel(thread) {
     const p = thread.messages[0] || { cleaned: null, summary: null };

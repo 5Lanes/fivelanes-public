@@ -40,6 +40,7 @@ FEATURE_REGISTRY: dict[str, FeatureTier] = {
     "pipeline": FeatureTier.OS,
     "meeting_prep": FeatureTier.OS,
     "email_reply": FeatureTier.OS,
+    "meet_recordings": FeatureTier.OS,
     # Premium — enabled when premium is unlocked
     "texts": FeatureTier.PREMIUM,
     "slack": FeatureTier.PREMIUM,
@@ -67,6 +68,10 @@ _ROUTE_FEATURES: dict[tuple[str, str], str] = {
     ("POST", "/api/linkedin/pull"): "linkedin",
     ("POST", "/api/linkedin/track"): "linkedin",
     ("POST", "/api/linkedin/summarize"): "linkedin",
+    ("GET", "/api/meet-recordings/catalog"): "meet_recordings",
+    ("POST", "/api/meet-recordings/pull"): "meet_recordings",
+    ("POST", "/api/meet-recordings/track"): "meet_recordings",
+    ("POST", "/api/meet-recordings/summarize"): "meet_recordings",
 }
 
 _premium_unlocked = False

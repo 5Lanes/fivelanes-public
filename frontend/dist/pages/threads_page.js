@@ -1,5 +1,5 @@
 import { applySavedThreadDraft, applyThreadSummary, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, setBundle, } from "../shared/summaries_store.js";
-import { counterpartyAvailabilityForSummary, counterpartyAvailabilitySectionHtml, formatDraftReplyMarkdown, formatChatSenderLabel, latestUpdatesForThread, listSection, ownerNextStepsForThread, messageSourceDetailsHtml, nextStepsSectionHtml, partitionThreadsBySnooze, pendingMessageCountForThread, pendingMessagePillHtml, shouldShowThreadMessageBlocks, threadIsEmail, threadIsLinkedin, threadIsSlack, threadIsText, threadLabel, threadMessagesForDisplay, threadMessagesForReply, threadSummaryErrorHtml, threadSummaryForDisplay, } from "../shared/thread_domain.js";
+import { counterpartyAvailabilityForSummary, counterpartyAvailabilitySectionHtml, formatDraftReplyMarkdown, formatChatSenderLabel, latestUpdatesForThread, listSection, ownerNextStepsForThread, messageSourceDetailsHtml, nextStepsSectionHtml, partitionThreadsBySnooze, pendingMessageCountForThread, pendingMessagePillHtml, shouldShowThreadMessageBlocks, threadIsEmail, threadIsLinkedin, threadIsMeetRecording, threadIsSlack, threadIsText, threadLabel, threadMessagesForDisplay, threadMessagesForReply, threadSummaryErrorHtml, threadSummaryForDisplay, } from "../shared/thread_domain.js";
 import { escapeHtml, formatDate, formatRecipients, str, toneClass } from "../shared/utils.js";
 import { ensureAvailabilityDocLoaded } from "../shared/availability_windows.js";
 import { applyNavFeatureVisibility, isFeatureEnabled } from "../shared/features.js";
@@ -91,6 +91,8 @@ function filterThreadsByChannel(threads) {
         return threads.filter(threadIsSlack);
     if (threadChannelFilter === "linkedin")
         return threads.filter(threadIsLinkedin);
+    if (threadChannelFilter === "meet")
+        return threads.filter(threadIsMeetRecording);
     return threads.filter(threadIsEmail);
 }
 function channelFilterEmptyMessage() {
@@ -100,6 +102,8 @@ function channelFilterEmptyMessage() {
         return "No Slack threads in this view.";
     if (threadChannelFilter === "linkedin")
         return "No LinkedIn threads in this view.";
+    if (threadChannelFilter === "meet")
+        return "No Meet recording threads in this view.";
     return "No email threads in this view.";
 }
 function buildThreadCard(thread) {
@@ -269,6 +273,9 @@ function renderNav(threads, snoozedCount, removedCount, channelCounts) {
     if (isFeatureEnabled("linkedin")) {
         channelOptions.push({ id: "linkedin", label: "LinkedIn", count: channelCounts.linkedin });
     }
+    if (isFeatureEnabled("meet_recordings")) {
+        channelOptions.push({ id: "meet", label: "Meet notes", count: channelCounts.meet });
+    }
     channelOptions.push({ id: "email", label: "Emails", count: channelCounts.email });
     for (const { id, label, count } of channelOptions) {
         const btn = document.createElement("button");
@@ -412,6 +419,7 @@ export async function renderThreadsPage() {
         text: bySnooze.filter(threadIsText).length,
         slack: bySnooze.filter(threadIsSlack).length,
         linkedin: bySnooze.filter(threadIsLinkedin).length,
+        meet: bySnooze.filter(threadIsMeetRecording).length,
         email: bySnooze.filter(threadIsEmail).length,
     };
     if (threadChannelFilter === "text" && (!isFeatureEnabled("texts") || channelCounts.text === 0)) {
@@ -422,6 +430,10 @@ export async function renderThreadsPage() {
     }
     else if (threadChannelFilter === "linkedin" &&
         (!isFeatureEnabled("linkedin") || channelCounts.linkedin === 0)) {
+        threadChannelFilter = "all";
+    }
+    else if (threadChannelFilter === "meet" &&
+        (!isFeatureEnabled("meet_recordings") || channelCounts.meet === 0)) {
         threadChannelFilter = "all";
     }
     else if (threadChannelFilter === "email" && channelCounts.email === 0)

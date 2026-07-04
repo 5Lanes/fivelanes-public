@@ -1229,7 +1229,13 @@ def untrack_todo_plan_inbox_thread(db_path: str, *, inbox_thread_id: str) -> boo
     ``thread_plans`` rows are kept — Todo emails should exist only as plans.
     """
     tid = _normalize_field(inbox_thread_id)
-    if not tid or tid.startswith("text:") or tid.startswith("slack:") or tid.startswith("linkedin:"):
+    if (
+        not tid
+        or tid.startswith("text:")
+        or tid.startswith("slack:")
+        or tid.startswith("linkedin:")
+        or tid.startswith("meet:")
+    ):
         return False
     now = datetime.now(timezone.utc).isoformat()
     db_file = Path(db_path)
@@ -2663,7 +2669,10 @@ def pending_message_counts_by_thread(
                 """
                 SELECT COALESCE(thread_id, ''), source_id
                 FROM timeline_entries
-                WHERE type IN ('email', 'meeting_invite')
+                WHERE (
+                    type IN ('email', 'meeting_invite')
+                    OR (type = 'meeting' AND COALESCE(TRIM(body), '') != '')
+                )
                   AND datetime >= ?
                   AND COALESCE(TRIM(source_id), '') != ''
                 """,

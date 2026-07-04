@@ -40,7 +40,7 @@ def is_tracked(value: Any) -> bool:
     return normalize_state(value) != REMOVED
 
 
-ON_DISK_THREAD_PREFIXES = ("text:", "slack:", "linkedin:")
+ON_DISK_THREAD_PREFIXES = ("text:", "slack:", "linkedin:", "meet:")
 SNOOZE_BASELINE_PREFIX = "snooze_ts:"
 
 
@@ -82,6 +82,19 @@ def _latest_on_disk_source_id(thread_id: str) -> str:
         if not key:
             return ""
         messages = load_messages_for_key(key)
+    elif tid.startswith("meet:"):
+        from services.meet_recordings.tracking import (
+            load_imported_note,
+            parse_meet_inbox_thread_id,
+        )
+
+        key = parse_meet_inbox_thread_id(tid)
+        if not key:
+            return ""
+        note = load_imported_note(key)
+        if not note:
+            return ""
+        return f"docs:{key}"
     else:
         return ""
 

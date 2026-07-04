@@ -31,13 +31,15 @@ from utils.runtime_paths import credentials_dir, infra_root, load_env
 
 load_env()
 
-# Scopes for Gmail read and Calendar read (same token for both; re-run add_gmail_account to add Calendar).
+# Scopes for Gmail, Calendar, and Meet recording Docs (same token; re-run add_account.py after scope changes).
 # Optional: ``gmail.settings.basic.readonly`` lists send-as aliases (e.g. ``@gmail.com`` vs Workspace).
 # It must be added under Google Cloud → OAuth consent screen → Scopes, or OAuth returns ``invalid_scope``.
 # Enable with env ``FIVELANES_GMAIL_SETTINGS_SCOPE=1`` after configuring the consent screen.
 _SCOPES_BASE = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/documents.readonly",
 ]
 _SETTINGS_SCOPE = "https://www.googleapis.com/auth/gmail.settings.basic.readonly"
 if (os.getenv("FIVELANES_GMAIL_SETTINGS_SCOPE") or "").strip().lower() in (

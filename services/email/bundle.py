@@ -113,6 +113,7 @@ def append_unsynced_email_threads_to_bundle(
         and not str(row.get("inbox_thread_id") or "").startswith("text:")
         and not str(row.get("inbox_thread_id") or "").startswith("slack:")
         and not str(row.get("inbox_thread_id") or "").startswith("linkedin:")
+        and not str(row.get("inbox_thread_id") or "").startswith("meet:")
     }
     if not tracked_ids:
         return

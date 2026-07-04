@@ -106,7 +106,13 @@ export function threadMessagesForDisplay(
   sourceAccount?: string,
 ): ThreadView["messages"] {
   const inbox = (sourceAccount || "").trim().toLowerCase();
-  if (!inbox || thread.id.startsWith("text:") || thread.id.startsWith("slack:") || thread.id.startsWith("linkedin:")) {
+  if (
+    !inbox ||
+    thread.id.startsWith("text:") ||
+    thread.id.startsWith("slack:") ||
+    thread.id.startsWith("linkedin:") ||
+    thread.id.startsWith("meet:")
+  ) {
     return [...thread.messages];
   }
   const visible = thread.messages.filter((row) => !messageIsToSourceAccount(row, inbox));
@@ -157,7 +163,11 @@ function chatThreadSummaryScore(s: LooseObj): number {
 
 export function threadSummaryForDisplay(thread: ThreadView): LooseObj {
   const rows = threadMessagesForDisplay(thread, displaySourceAccount);
-  const isChat = thread.id.startsWith("text:") || thread.id.startsWith("slack:") || thread.id.startsWith("linkedin:");
+  const isChat =
+    thread.id.startsWith("text:") ||
+    thread.id.startsWith("slack:") ||
+    thread.id.startsWith("linkedin:") ||
+    thread.id.startsWith("meet:");
   if (isChat) {
     let best: LooseObj | null = null;
     let bestScore = 0;
@@ -199,8 +209,22 @@ export function threadIsLinkedin(thread: ThreadView): boolean {
   return str(s.channel || c0.channel) === "linkedin" || thread.id.startsWith("linkedin:");
 }
 
+export function threadIsMeetRecording(thread: ThreadView): boolean {
+  const primary = thread.messages[0] || { cleaned: null, summary: null };
+  const c0 = (primary.cleaned || {}) as LooseObj;
+  const s = threadSummaryForDisplay(thread);
+  return (
+    str(s.channel || c0.channel) === "meet_recording" || thread.id.startsWith("meet:")
+  );
+}
+
 export function threadIsEmail(thread: ThreadView): boolean {
-  return !threadIsText(thread) && !threadIsSlack(thread) && !threadIsLinkedin(thread);
+  return (
+    !threadIsText(thread) &&
+    !threadIsSlack(thread) &&
+    !threadIsLinkedin(thread) &&
+    !threadIsMeetRecording(thread)
+  );
 }
 
 export function threadLabel(thread: ThreadView): string {

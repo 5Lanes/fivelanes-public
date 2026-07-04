@@ -97,6 +97,14 @@ from services.linkedin import (
     write_selections_for_conversation_keys,
 )
 from services.linkedin.summarize import summarize_tracked_linkedin_threads
+from services.meet_recordings import (
+    MEET_RECORDINGS_DIR,
+    fetch_tracked_document_keys as fetch_tracked_meet_keys,
+    list_document_catalog as list_meet_catalog,
+    pull_meet_recording_catalog,
+    set_tracked_document_keys as set_tracked_meet_keys,
+    summarize_tracked_meet_recordings,
+)
 from utils.run_fivelanes_scheduler import (
     pipeline_run_in_progress,
     run_fivelanes_cycle,
@@ -599,6 +607,96 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             result = pull_slack_dms()
         except Exception as exc:
             log.exception("slack pull failed")
+            self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"ok": False, "error": str(exc)},
+            )
+            return
+        self._json_response(HTTPStatus.OK, result)
+
+    def _post_meet_recordings_pull(self) -> None:
+        try:
+            result = pull_meet_recording_catalog()
+        except Exception as exc:
+            log.exception("meet recordings pull failed")
+            self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"ok": False, "error": str(exc)},
+            )
+            return
+        self._json_response(HTTPStatus.OK, result)
+
+    def _get_meet_recordings_catalog(self) -> None:
+        catalog = list_meet_catalog()
+        tracked = fetch_tracked_meet_keys(DB_PATH) if Path(DB_PATH).is_file() else []
+        self._json_response(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "meet_recordings_dir": str(MEET_RECORDINGS_DIR),
+                "catalog": catalog,
+                "tracked": tracked,
+            },
+        )
+
+    def _post_meet_recordings_track(self, body: Dict[str, Any]) -> None:
+        if not Path(DB_PATH).is_file():
+            self._json_response(
+                HTTPStatus.NOT_FOUND, {"ok": False, "error": "database_not_found"}
+            )
+            return
+        raw = body.get("document_keys")
+        if raw is None:
+            raw = body.get("tracked")
+        if not isinstance(raw, list):
+            self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"ok": False, "error": "missing_document_keys"},
+            )
+            return
+        try:
+            result = set_tracked_meet_keys(DB_PATH, raw)
+        except Exception as exc:
+            log.exception("meet recordings track failed")
+            self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"ok": False, "error": str(exc)},
+            )
+            return
+
+        keys = result.get("tracked") if isinstance(result.get("tracked"), list) else raw
+
+        def _summarize_worker() -> None:
+            try:
+                summarize_tracked_meet_recordings(
+                    DB_PATH, document_keys=keys, force=True
+                )
+            except Exception:
+                log.exception("Background meet recording summarization failed")
+
+        threading.Thread(
+            target=_summarize_worker,
+            name="meet-recordings-summarize",
+            daemon=True,
+        ).start()
+        self._json_response(HTTPStatus.OK, result)
+
+    def _post_meet_recordings_summarize(self, body: Dict[str, Any]) -> None:
+        if not Path(DB_PATH).is_file():
+            self._json_response(
+                HTTPStatus.NOT_FOUND, {"ok": False, "error": "database_not_found"}
+            )
+            return
+        raw = body.get("document_keys")
+        force = bool(body.get("force"))
+        try:
+            result = summarize_tracked_meet_recordings(
+                DB_PATH,
+                document_keys=raw if isinstance(raw, list) else None,
+                force=force,
+            )
+        except Exception as exc:
+            log.exception("meet recordings summarize failed")
             self._json_response(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
                 {"ok": False, "error": str(exc)},
@@ -1850,6 +1948,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if path == "/api/linkedin/catalog":
             self._get_linkedin_catalog()
             return
+        if path == "/api/meet-recordings/catalog":
+            self._get_meet_recordings_catalog()
+            return
         if path == "/timeline.db":
             self._get_timeline_db()
             return
@@ -1866,6 +1967,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "/texts-setup",
             "/slack-setup",
             "/linkedin-setup",
+            "/meet-recordings-setup",
         ):
             self._serve_app_shell()
             return
@@ -1946,6 +2048,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._post_linkedin_pull(body)
         elif path == "/api/linkedin/summarize":
             self._post_linkedin_summarize(body)
+        elif path == "/api/meet-recordings/pull":
+            self._post_meet_recordings_pull()
+        elif path == "/api/meet-recordings/track":
+            self._post_meet_recordings_track(body)
+        elif path == "/api/meet-recordings/summarize":
+            self._post_meet_recordings_summarize(body)
         else:
             log.warning("POST %s not handled (raw path=%r)", path, self.path)
             self._json_response(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not_found"})

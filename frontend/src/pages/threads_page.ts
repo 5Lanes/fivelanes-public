@@ -23,6 +23,7 @@ import {
   shouldShowThreadMessageBlocks,
   threadIsEmail,
   threadIsLinkedin,
+  threadIsMeetRecording,
   threadIsSlack,
   threadIsText,
   threadLabel,
@@ -86,7 +87,7 @@ function openMobileThreadDetail(threadId: string): void {
 }
 
 let threadViewMode: "active" | "snoozed" | "removed" = "active";
-let threadChannelFilter: "all" | "text" | "slack" | "linkedin" | "email" = "all";
+let threadChannelFilter: "all" | "text" | "slack" | "linkedin" | "meet" | "email" = "all";
 let navObserver: IntersectionObserver | null = null;
 let interactionsBound = false;
 let cardsRenderToken = 0;
@@ -131,6 +132,7 @@ function filterThreadsByChannel(threads: ThreadView[]): ThreadView[] {
   if (threadChannelFilter === "text") return threads.filter(threadIsText);
   if (threadChannelFilter === "slack") return threads.filter(threadIsSlack);
   if (threadChannelFilter === "linkedin") return threads.filter(threadIsLinkedin);
+  if (threadChannelFilter === "meet") return threads.filter(threadIsMeetRecording);
   return threads.filter(threadIsEmail);
 }
 
@@ -138,6 +140,7 @@ function channelFilterEmptyMessage(): string {
   if (threadChannelFilter === "text") return "No text threads in this view.";
   if (threadChannelFilter === "slack") return "No Slack threads in this view.";
   if (threadChannelFilter === "linkedin") return "No LinkedIn threads in this view.";
+  if (threadChannelFilter === "meet") return "No Meet recording threads in this view.";
   return "No email threads in this view.";
 }
 
@@ -271,7 +274,14 @@ function renderNav(
   threads: ThreadView[],
   snoozedCount: number,
   removedCount: number,
-  channelCounts: { all: number; text: number; slack: number; linkedin: number; email: number },
+  channelCounts: {
+    all: number;
+    text: number;
+    slack: number;
+    linkedin: number;
+    meet: number;
+    email: number;
+  },
 ): void {
   const list = navListEl();
   list.innerHTML = "";
@@ -330,6 +340,9 @@ function renderNav(
   }
   if (isFeatureEnabled("linkedin")) {
     channelOptions.push({ id: "linkedin", label: "LinkedIn", count: channelCounts.linkedin });
+  }
+  if (isFeatureEnabled("meet_recordings")) {
+    channelOptions.push({ id: "meet", label: "Meet notes", count: channelCounts.meet });
   }
   channelOptions.push({ id: "email", label: "Emails", count: channelCounts.email });
   for (const { id, label, count } of channelOptions) {
@@ -480,6 +493,7 @@ export async function renderThreadsPage(): Promise<void> {
     text: bySnooze.filter(threadIsText).length,
     slack: bySnooze.filter(threadIsSlack).length,
     linkedin: bySnooze.filter(threadIsLinkedin).length,
+    meet: bySnooze.filter(threadIsMeetRecording).length,
     email: bySnooze.filter(threadIsEmail).length,
   };
   if (threadChannelFilter === "text" && (!isFeatureEnabled("texts") || channelCounts.text === 0)) {
@@ -489,6 +503,11 @@ export async function renderThreadsPage(): Promise<void> {
   } else if (
     threadChannelFilter === "linkedin" &&
     (!isFeatureEnabled("linkedin") || channelCounts.linkedin === 0)
+  ) {
+    threadChannelFilter = "all";
+  } else if (
+    threadChannelFilter === "meet" &&
+    (!isFeatureEnabled("meet_recordings") || channelCounts.meet === 0)
   ) {
     threadChannelFilter = "all";
   } else if (threadChannelFilter === "email" && channelCounts.email === 0) threadChannelFilter = "all";

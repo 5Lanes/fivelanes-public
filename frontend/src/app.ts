@@ -25,6 +25,11 @@ import {
   mountTextsSetupPage,
   renderTextsSetupPage,
 } from "./pages/texts_setup_page.js";
+import {
+  bindMeetRecordingsSetupInteractions,
+  mountMeetRecordingsSetupPage,
+  renderMeetRecordingsSetupPage,
+} from "./pages/meet_recordings_setup_page.js";
 import { refreshPipelineRunMeta } from "./pipeline_run_meta.js";
 import { refreshPlanNotifications } from "./shared/plan_notifications.js";
 import { bundleChanged, getBundleMutationGeneration, loadLatestBundle, readCachedBundle, setBundle, setBundleFromNetwork } from "./shared/summaries_store.js";
@@ -51,6 +56,7 @@ export function routeFromPathname(pathname: string): AppRoute {
   if (path === "/texts-setup") return "texts-setup";
   if (path === "/slack-setup") return "slack-setup";
   if (path === "/linkedin-setup") return "linkedin-setup";
+  if (path === "/meet-recordings-setup") return "meet-recordings-setup";
   if (path === "/threads" || path === "/" || path === "/summaries.html") return "threads";
   return "threads";
 }
@@ -72,6 +78,7 @@ const ROUTE_FEATURES: Partial<Record<AppRoute, string>> = {
   "texts-setup": "texts",
   "slack-setup": "slack",
   "linkedin-setup": "linkedin",
+  "meet-recordings-setup": "meet_recordings",
 };
 
 async function renderPage(route: AppRoute): Promise<void> {
@@ -134,6 +141,13 @@ async function renderPage(route: AppRoute): Promise<void> {
     return;
   }
 
+  if (route === "meet-recordings-setup") {
+    mountMeetRecordingsSetupPage(pageRoot);
+    bindMeetRecordingsSetupInteractions();
+    await renderMeetRecordingsSetupPage();
+    return;
+  }
+
   mountThreadsPage(pageRoot);
   bindThreadsInteractions();
   await renderThreadsPage();
@@ -164,7 +178,11 @@ async function bootstrap(): Promise<void> {
     void rerenderCurrentPage();
   });
   const route = routeFromPathname(location.pathname);
-  const needsBundle = route !== "texts-setup" && route !== "slack-setup" && route !== "linkedin-setup";
+  const needsBundle =
+    route !== "texts-setup" &&
+    route !== "slack-setup" &&
+    route !== "linkedin-setup" &&
+    route !== "meet-recordings-setup";
   const cached = needsBundle ? readCachedBundle() : null;
   try {
     if (cached) {

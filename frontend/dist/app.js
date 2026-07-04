@@ -9,6 +9,7 @@ import { bindThreadsInteractions, mountThreadsPage, renderThreadsPage } from "./
 import { bindLinkedinSetupInteractions, mountLinkedinSetupPage, renderLinkedinSetupPage, } from "./pages/linkedin_setup_page.js";
 import { bindSlackSetupInteractions, mountSlackSetupPage, renderSlackSetupPage, } from "./pages/slack_setup_page.js";
 import { bindTextsSetupInteractions, mountTextsSetupPage, renderTextsSetupPage, } from "./pages/texts_setup_page.js";
+import { bindMeetRecordingsSetupInteractions, mountMeetRecordingsSetupPage, renderMeetRecordingsSetupPage, } from "./pages/meet_recordings_setup_page.js";
 import { refreshPipelineRunMeta } from "./pipeline_run_meta.js";
 import { refreshPlanNotifications } from "./shared/plan_notifications.js";
 import { bundleChanged, getBundleMutationGeneration, loadLatestBundle, readCachedBundle, setBundle, setBundleFromNetwork } from "./shared/summaries_store.js";
@@ -38,6 +39,8 @@ export function routeFromPathname(pathname) {
         return "slack-setup";
     if (path === "/linkedin-setup")
         return "linkedin-setup";
+    if (path === "/meet-recordings-setup")
+        return "meet-recordings-setup";
     if (path === "/threads" || path === "/" || path === "/summaries.html")
         return "threads";
     return "threads";
@@ -57,6 +60,7 @@ const ROUTE_FEATURES = {
     "texts-setup": "texts",
     "slack-setup": "slack",
     "linkedin-setup": "linkedin",
+    "meet-recordings-setup": "meet_recordings",
 };
 async function renderPage(route) {
     setActiveNav(route);
@@ -109,6 +113,12 @@ async function renderPage(route) {
         await renderLinkedinSetupPage();
         return;
     }
+    if (route === "meet-recordings-setup") {
+        mountMeetRecordingsSetupPage(pageRoot);
+        bindMeetRecordingsSetupInteractions();
+        await renderMeetRecordingsSetupPage();
+        return;
+    }
     mountThreadsPage(pageRoot);
     bindThreadsInteractions();
     await renderThreadsPage();
@@ -135,7 +145,10 @@ async function bootstrap() {
         void rerenderCurrentPage();
     });
     const route = routeFromPathname(location.pathname);
-    const needsBundle = route !== "texts-setup" && route !== "slack-setup" && route !== "linkedin-setup";
+    const needsBundle = route !== "texts-setup" &&
+        route !== "slack-setup" &&
+        route !== "linkedin-setup" &&
+        route !== "meet-recordings-setup";
     const cached = needsBundle ? readCachedBundle() : null;
     try {
         if (cached) {

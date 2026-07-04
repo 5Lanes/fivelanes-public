@@ -117,12 +117,15 @@ def load_timeline_entries_by_thread(
     with connect_sqlite(db_path, row_factory=sqlite3.Row) as conn:
         rows = conn.execute(
             """
-            SELECT source_id, datetime, sender, recipients, summary, body,
+            SELECT source_id, type, datetime, sender, recipients, summary, body,
                    COALESCE(thread_id, '') AS thread_id,
                    COALESCE(body_has_image, 0) AS body_has_image,
                    COALESCE(fetch_oauth_account_id, '') AS fetch_oauth_account_id
             FROM timeline_entries
-            WHERE type IN ('email', 'meeting_invite')
+            WHERE (
+                type IN ('email', 'meeting_invite')
+                OR (type = 'meeting' AND COALESCE(TRIM(body), '') != '')
+            )
               AND datetime >= ?
             ORDER BY datetime ASC
             """,
@@ -150,7 +153,7 @@ def load_timeline_entry_by_source_id(
         with connect_sqlite(db_path, row_factory=sqlite3.Row) as conn:
             row = conn.execute(
                 """
-                SELECT source_id, datetime, sender, recipients, summary, body,
+                SELECT source_id, type, datetime, sender, recipients, summary, body,
                        COALESCE(thread_id, '') AS thread_id,
                        COALESCE(body_has_image, 0) AS body_has_image,
                        COALESCE(fetch_oauth_account_id, '') AS fetch_oauth_account_id
@@ -226,6 +229,20 @@ def segment_timeline_row(
     segment_fn: SegmentFn,
 ) -> Dict[str, Any]:
     process_body = timeline_row_process_body(row)
+    # Meet recording notes already store the conversation-summary tab text.
+    if str(row.get("type") or "").strip() == "meeting":
+        seg = {
+            "content": process_body,
+            "quoted_reply": "",
+            "signature": "",
+        }
+        return cleaned_entry_from_timeline_row(
+            thread_id=thread_id,
+            row=row,
+            process_body=process_body,
+            seg=seg,
+            err="",
+        )
     seg_body = strip_quoted_thread_tail(process_body) or process_body
     seg, err = process_timeline_message_segmentation(
         row,
