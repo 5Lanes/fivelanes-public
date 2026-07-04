@@ -119,11 +119,13 @@ def create_summary():
     pass
 
 
-def main(lookback_days: int = 14, lookforward_days: int = 14):
+def main(lookback_days: int | None = None, lookforward_days: int = 14):
+    from utils.lookback_config import get_lookback_days
+
     logging.basicConfig(level=logging.INFO)
 
     populate_timeline(
-        lookback_days=lookback_days,
+        lookback_days=get_lookback_days() if lookback_days is None else lookback_days,
         lookforward_days=lookforward_days,
     )
 

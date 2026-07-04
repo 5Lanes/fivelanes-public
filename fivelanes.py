@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 
 from routes.email_routes import pull_source_emails
 from routes.llm_routes import run_fivelanes_llm_pipeline
+from utils.database import ensure_database_schema
+from utils.lookback_config import get_lookback_days
 from utils.runtime_paths import database_path, load_env
 
 log = logging.getLogger(__name__)
@@ -18,7 +20,7 @@ FIVELANES_BACKEND = os.getenv("FIVELANES_BACKEND") or "llama"
 
 
 def run_email_pipeline(
-    lookback_days: int = 180,
+    lookback_days: Optional[int] = None,
     *,
     db_path: Optional[str] = None,
     max_results: int = 500,
@@ -29,23 +31,24 @@ def run_email_pipeline(
 
     Inbox address defaults to ``SOURCE_ACCOUNT`` from ``.env`` (loaded in
     ``services.email``). Pass ``source_account`` only to override for this run.
+    Lookback defaults to ``FIVELANES_LOOKBACK_DAYS`` from ``.env``.
     """
     pull_source_emails(
-        lookback_days=lookback_days,
+        lookback_days=get_lookback_days() if lookback_days is None else lookback_days,
         source_account=source_account,
         max_results=max_results,
         db_path=db_path or DATABASE_NAME,
     )
 
 def run_llm_pipeline(
-    lookback_days: int = 180,
+    lookback_days: Optional[int] = None,
     *,
     db_path: Optional[str] = None,
     backend: Optional[str] = None,
 ) -> None:
     """Segment messages in ``timeline_entries`` (grouped by thread) and summarize threads."""
     run_fivelanes_llm_pipeline(
-        lookback_days=lookback_days,
+        lookback_days=get_lookback_days() if lookback_days is None else lookback_days,
         db_path=db_path or DATABASE_NAME,
         backend=backend or FIVELANES_BACKEND,
     )
@@ -67,7 +70,7 @@ def run_force_resummary_active_threads(
 
 
 def main(
-    lookback_days: int = 180,
+    lookback_days: Optional[int] = None,
     *,
     force_resummary: bool = False,
     dry_run: bool = False,
@@ -75,6 +78,8 @@ def main(
     from utils.logging import configure_logging
 
     configure_logging()
+    ensure_database_schema(DATABASE_NAME)
+    days = get_lookback_days() if lookback_days is None else lookback_days
     if force_resummary:
         run_force_resummary_active_threads(
             dry_run=dry_run,
@@ -84,20 +89,20 @@ def main(
     try:
         import json as _json, time as _time
         with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
-            _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "A", "location": "fivelanes.py:main", "message": "email_phase_start", "data": {"lookback_days": lookback_days}, "timestamp": int(_time.time() * 1000)}) + "\n")
+            _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "A", "location": "fivelanes.py:main", "message": "email_phase_start", "data": {"lookback_days": days}, "timestamp": int(_time.time() * 1000)}) + "\n")
     except Exception:
         pass
     # #endregion
-    run_email_pipeline(lookback_days=lookback_days, max_results=500)
+    run_email_pipeline(lookback_days=days, max_results=500)
     # #region agent log
     try:
         import json as _json, time as _time
         with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
-            _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "A", "location": "fivelanes.py:main", "message": "llm_phase_start", "data": {"lookback_days": lookback_days}, "timestamp": int(_time.time() * 1000)}) + "\n")
+            _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "A", "location": "fivelanes.py:main", "message": "llm_phase_start", "data": {"lookback_days": days}, "timestamp": int(_time.time() * 1000)}) + "\n")
     except Exception:
         pass
     # #endregion
-    run_llm_pipeline(lookback_days=lookback_days)
+    run_llm_pipeline(lookback_days=days)
     # #region agent log
     try:
         import json as _json, time as _time
@@ -191,8 +196,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--lookback-days",
         type=int,
-        default=180,
-        help="Email pull / full pipeline lookback (default: 180)",
+        default=None,
+        help="Email pull / full pipeline lookback (default: FIVELANES_LOOKBACK_DAYS from .env)",
     )
     args = parser.parse_args()
     main(

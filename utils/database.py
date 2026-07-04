@@ -2634,7 +2634,7 @@ def load_all_thread_draft_replies(db_path: str) -> Dict[str, Dict[str, Any]]:
 def pending_message_counts_by_thread(
     db_path: str,
     *,
-    lookback_days: int = 14,
+    lookback_days: int | None = None,
 ) -> Dict[str, int]:
     """
     Per ``thread_id``, count messages not yet in successful ``claude_message_outputs``.
@@ -2642,7 +2642,10 @@ def pending_message_counts_by_thread(
     Email: ``timeline_entries`` rows within lookback missing a successful output row.
     Text: on-disk conversation messages missing a successful output row.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, lookback_days))
+    from utils.lookback_config import get_lookback_days
+
+    days = get_lookback_days() if lookback_days is None else lookback_days
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, days))
     cutoff_iso = cutoff.isoformat()
     successful: set[tuple[str, str]] = set()
     try:

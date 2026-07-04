@@ -49,6 +49,7 @@ from services.prompts import (
 )
 from utils.database import (
     _meeting_dedupe_key,
+    ensure_database_schema,
     add_thread_to_lane,
     aggregate_thread_chronological_anchor,
     archive_lane,
@@ -2108,6 +2109,7 @@ def main() -> None:
     os.chdir(infra_root())
     log_path = configure_logging()
     log.info("Dashboard starting (pid=%d, log=%s)", os.getpid(), log_path)
+    ensure_database_schema(DB_PATH)
     server = ThreadingHTTPServer((DASHBOARD_HOST, DASHBOARD_PORT), DashboardHandler)
     _print_dashboard_urls(DASHBOARD_HOST, DASHBOARD_PORT)
     scheduler = threading.Thread(

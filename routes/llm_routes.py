@@ -19,14 +19,16 @@ _segment_body_deduped = segment_body_deduped
 
 
 def run_fivelanes_llm_pipeline(
-    lookback_days: int = 14,
+    lookback_days: Optional[int] = None,
     db_path: Optional[str] = None,
     *,
     backend: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Segment new messages and summarize affected threads."""
+    from utils.lookback_config import get_lookback_days
+
     cleaned, per_message = run_threads_llm_pipeline(
-        lookback_days=lookback_days,
+        lookback_days=get_lookback_days() if lookback_days is None else lookback_days,
         db_path=db_path,
         backend=backend,
     )

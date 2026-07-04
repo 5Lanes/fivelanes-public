@@ -34,6 +34,7 @@ from services.pipeline.summary import (
 from services.prompts import parse_emails
 from utils.api_error_detection import thread_summary_is_valid
 from utils.database import (
+    _ensure_timeline_schema,
     apply_thread_resummary_to_db,
     connect_sqlite,
     load_prior_cleaned_content_by_pair,
@@ -108,13 +109,18 @@ def segment_body_deduped(
 def load_timeline_entries_by_thread(
     db_path: str,
     *,
-    lookback_days: int = 14,
+    lookback_days: int | None = None,
 ) -> Dict[str, List[Dict[str, Any]]]:
+    from utils.lookback_config import get_lookback_days
+
+    days = get_lookback_days() if lookback_days is None else lookback_days
     lookback_bound = (
-        datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        datetime.now(timezone.utc) - timedelta(days=days)
     ).isoformat()
 
     with connect_sqlite(db_path, row_factory=sqlite3.Row) as conn:
+        _ensure_timeline_schema(conn)
+        conn.commit()
         rows = conn.execute(
             """
             SELECT source_id, type, datetime, sender, recipients, summary, body,
@@ -459,18 +465,21 @@ def process_thread_llm(
 
 
 def run_threads_llm_pipeline(
-    lookback_days: int = 14,
+    lookback_days: int | None = None,
     db_path: str | None = None,
     *,
     backend: str | None = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Segment new timeline messages and summarize affected threads."""
+    from utils.lookback_config import get_lookback_days
+
+    days = get_lookback_days() if lookback_days is None else lookback_days
     db = db_path or database_path()
     llm = get_llm_backend(backend=backend)
     run_stamp = run_stamp_utc()
     log.info("Thread LLM pipeline run_stamp=%s backend=%s", run_stamp, llm.name)
 
-    grouped = load_timeline_entries_by_thread(db, lookback_days=lookback_days)
+    grouped = load_timeline_entries_by_thread(db, lookback_days=days)
     if not grouped:
         return [], []
 
@@ -493,7 +502,7 @@ def run_threads_llm_pipeline(
     try:
         import json as _json, time as _time
         with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
-            _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "B", "location": "process.py:run_threads_llm_pipeline", "message": "thread_loop_start", "data": {"thread_count": len(thread_keys), "lookback_days": lookback_days, "run_stamp": run_stamp}, "timestamp": int(_time.time() * 1000)}) + "\n")
+            _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "B", "location": "process.py:run_threads_llm_pipeline", "message": "thread_loop_start", "data": {"thread_count": len(thread_keys), "lookback_days": days, "run_stamp": run_stamp}, "timestamp": int(_time.time() * 1000)}) + "\n")
     except Exception:
         pass
     # #endregion
