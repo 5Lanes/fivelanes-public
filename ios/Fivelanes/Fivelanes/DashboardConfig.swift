@@ -1,27 +1,45 @@
 import Foundation
 
 enum DashboardConfig {
-  /// Set `FIVELANES_DASHBOARD_URL` in Info.plist to your Tailscale dashboard URL, e.g.
-  /// `http://your-machine.your-tailnet.ts.net:8000/dashboard`
+  /// Set `FIVELANES_DASHBOARD_URL` in `ios/Config.plist` (copy from `Config.example.plist`).
   static var dashboardURL: URL {
-    let raw = Bundle.main.object(forInfoDictionaryKey: "FIVELANES_DASHBOARD_URL") as? String
-    let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    guard !trimmed.isEmpty, let url = URL(string: trimmed), let host = url.host, !host.isEmpty else {
+    guard let raw = configuredURLString,
+          let url = URL(string: raw),
+          let host = url.host,
+          !host.isEmpty
+    else {
       return URL(string: "http://localhost:8000/dashboard")!
     }
     return url
   }
 
   static var isConfigured: Bool {
-    let raw = Bundle.main.object(forInfoDictionaryKey: "FIVELANES_DASHBOARD_URL") as? String
-    let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    guard !trimmed.isEmpty, let url = URL(string: trimmed), let host = url.host else {
+    guard let raw = configuredURLString,
+          let url = URL(string: raw),
+          let host = url.host,
+          !host.isEmpty
+    else {
       return false
     }
-    return host != "localhost"
+    let upper = host.uppercased()
+    if host == "localhost" || upper.contains("YOUR-MACHINE") || upper.contains("YOUR-TAILNET") {
+      return false
+    }
+    return true
   }
 
   static var dashboardHost: String? {
     dashboardURL.host
+  }
+
+  private static var configuredURLString: String? {
+    guard let url = Bundle.main.url(forResource: "Config", withExtension: "plist"),
+          let dict = NSDictionary(contentsOf: url) as? [String: Any],
+          let raw = dict["FIVELANES_DASHBOARD_URL"] as? String
+    else {
+      return nil
+    }
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 }

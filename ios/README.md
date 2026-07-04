@@ -11,7 +11,13 @@ Private iPhone wrapper around the self-hosted Fivelanes dashboard. It loads your
 
 ## 1. Configure the dashboard URL
 
-Edit [`Fivelanes/Info.plist`](Fivelanes/Fivelanes/Info.plist) and set:
+Copy the example config and set your Tailscale dashboard URL:
+
+```bash
+cp ios/Config.example.plist ios/Config.plist
+```
+
+Edit `ios/Config.plist`:
 
 ```xml
 <key>FIVELANES_DASHBOARD_URL</key>
@@ -20,7 +26,7 @@ Edit [`Fivelanes/Info.plist`](Fivelanes/Fivelanes/Info.plist) and set:
 
 Use your Tailscale **MagicDNS** hostname (recommended) or `http://100.x.x.x:8000/dashboard`.
 
-`Config.example.plist` is a copy-paste reference for the same value.
+`Config.plist` is gitignored (real URL). `Config.example.plist` stays tracked as the template. If `Config.plist` is missing, the Xcode build copies the example automatically.
 
 ### HTTP / App Transport Security
 
@@ -82,7 +88,7 @@ This repo does not automate signing; use Xcode’s **Archive** flow when you are
 
 | Symptom | Check |
 |--------|--------|
-| Blank “configure URL” screen | `FIVELANES_DASHBOARD_URL` still has the placeholder or `localhost` |
+| Blank “configure URL” screen | `ios/Config.plist` missing, or `FIVELANES_DASHBOARD_URL` still has the placeholder / `localhost` |
 | Can’t connect | Tailscale running on iPhone; same URL works in Safari |
 | ATS / insecure connection | Use `*.ts.net` hostname or Tailscale Serve HTTPS |
 | WebView reloads often | Normal after long background; in-app state is still better than Safari tabs |

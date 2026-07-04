@@ -40,7 +40,7 @@ struct ContentView: View {
             Text("Fivelanes")
                 .font(.largeTitle.bold())
 
-            Text("Set your Tailscale dashboard URL in Info.plist:")
+            Text("Copy ios/Config.example.plist to ios/Config.plist and set:")
                 .foregroundStyle(.secondary)
 
             Text("FIVELANES_DASHBOARD_URL")
