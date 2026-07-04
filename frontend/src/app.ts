@@ -11,6 +11,11 @@ import { mountMeetingsPage, renderMeetingsPage } from "./pages/meetings_page.js"
 import { bindPlansInteractions, mountPlansPage, renderPlansPage } from "./pages/plans_page.js";
 import { bindThreadsInteractions, mountThreadsPage, renderThreadsPage } from "./pages/threads_page.js";
 import {
+  bindSourcesInteractions,
+  mountSourcesPage,
+  renderSourcesPage,
+} from "./pages/sources_page.js";
+import {
   bindLinkedinSetupInteractions,
   mountLinkedinSetupPage,
   renderLinkedinSetupPage,
@@ -42,6 +47,50 @@ import { escapeHtml } from "./shared/utils.js";
 const runMetaEl = document.getElementById("run-meta") as HTMLParagraphElement;
 const pageRoot = document.getElementById("page-root") as HTMLDivElement;
 
+const LEGACY_SETUP_REDIRECTS: Record<string, string> = {
+  "/texts-setup": "/sources#texts",
+  "/slack-setup": "/sources#slack",
+  "/linkedin-setup": "/sources#linkedin",
+  "/meet-recordings-setup": "/sources#meet",
+};
+
+/** Returns true if the browser is navigating away (legacy redirect). */
+export function applyLegacyRouteRedirect(pathname: string, search = location.search): boolean {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  const params = new URLSearchParams(search);
+
+  if (path === "/" || path === "/summaries.html") {
+    location.replace("/dashboard");
+    return true;
+  }
+  if (path === "/threads") {
+    const thread = params.get("thread")?.trim();
+    location.replace(thread ? `/dashboard?thread=${encodeURIComponent(thread)}` : "/dashboard");
+    return true;
+  }
+  if (path === "/meetings") {
+    location.replace("/dashboard#schedule");
+    return true;
+  }
+  if (path === "/lanes") {
+    location.replace("/dashboard#lanes");
+    return true;
+  }
+  if (path === "/plans") {
+    const thread = params.get("thread")?.trim();
+    location.replace(
+      thread ? `/dashboard?thread=${encodeURIComponent(thread)}#schedule-plans` : "/dashboard#schedule-plans",
+    );
+    return true;
+  }
+  const setupTarget = LEGACY_SETUP_REDIRECTS[path];
+  if (setupTarget) {
+    location.replace(setupTarget);
+    return true;
+  }
+  return false;
+}
+
 async function rerenderCurrentPage(): Promise<void> {
   await renderPage(routeFromPathname(location.pathname));
   refreshPlanNotifications();
@@ -50,6 +99,7 @@ async function rerenderCurrentPage(): Promise<void> {
 export function routeFromPathname(pathname: string): AppRoute {
   const path = pathname.replace(/\/+$/, "") || "/";
   if (path === "/dashboard") return "dashboard";
+  if (path === "/sources") return "sources";
   if (path === "/meetings") return "meetings";
   if (path === "/lanes") return "lanes";
   if (path === "/plans") return "plans";
@@ -58,15 +108,12 @@ export function routeFromPathname(pathname: string): AppRoute {
   if (path === "/linkedin-setup") return "linkedin-setup";
   if (path === "/meet-recordings-setup") return "meet-recordings-setup";
   if (path === "/threads" || path === "/" || path === "/summaries.html") return "threads";
-  return "threads";
+  return "dashboard";
 }
 
 function setActiveNav(route: AppRoute): void {
-  document.querySelectorAll<HTMLAnchorElement>(".app-nav-link[data-route]").forEach((link) => {
+  document.querySelectorAll<HTMLElement>(".app-nav-link[data-route]").forEach((link) => {
     link.classList.toggle("active", link.dataset.route === route);
-  });
-  document.querySelectorAll<HTMLElement>(".app-nav-group").forEach((group) => {
-    group.classList.toggle("has-active-child", group.querySelector(".app-nav-link.active") !== null);
   });
 }
 
@@ -96,7 +143,15 @@ async function renderPage(route: AppRoute): Promise<void> {
     mountDashboardPage(pageRoot);
     bindDashboardInteractions();
     bindLanesInteractions();
+    bindThreadsInteractions();
     await renderDashboardPage();
+    return;
+  }
+
+  if (route === "sources") {
+    mountSourcesPage(pageRoot);
+    bindSourcesInteractions();
+    await renderSourcesPage();
     return;
   }
 
@@ -169,6 +224,8 @@ async function bootstrap(): Promise<void> {
     return;
   }
 
+  if (applyLegacyRouteRedirect(location.pathname, location.search)) return;
+
   prefetchMeetings(MEETINGS_LOOKAHEAD_DAYS);
   void refreshPipelineRunMeta(runMetaEl);
   mountSettingsDialog();
@@ -182,7 +239,8 @@ async function bootstrap(): Promise<void> {
     route !== "texts-setup" &&
     route !== "slack-setup" &&
     route !== "linkedin-setup" &&
-    route !== "meet-recordings-setup";
+    route !== "meet-recordings-setup" &&
+    route !== "sources";
   const cached = needsBundle ? readCachedBundle() : null;
   try {
     if (cached) {

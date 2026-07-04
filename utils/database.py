@@ -28,6 +28,8 @@ See README § "Thread identity: inbox tracking vs timeline messages".
 
 **``lanes``** / **``lane_threads``** — user-defined lanes and inbox thread membership.
 
+**``lane_areas``** — top-level lane tabs (Personal, Work); each **lane** row is a track under an area.
+
 **``lane_summaries``** — LLM roll-up briefs for all threads assigned to a lane.
 
 **``thread_plans``** — user-defined next steps tied to an inbox thread (action, type, optional deadline).
@@ -542,10 +544,29 @@ def _ensure_lanes_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE lanes ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"
         )
+    _ensure_lane_areas_schema(conn)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(lanes)").fetchall()}
+    if "area_id" not in columns:
+        conn.execute("ALTER TABLE lanes ADD COLUMN area_id INTEGER REFERENCES lane_areas(id)")
 
 
-def create_lane(db_path: str, *, name: str) -> Dict[str, Any]:
-    """Insert a lane and return its row."""
+def _ensure_lane_areas_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS lane_areas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            color_index INTEGER NOT NULL DEFAULT 0,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+
+def create_lane(db_path: str, *, name: str, area_id: Optional[int] = None) -> Dict[str, Any]:
+    """Insert a lane (track) and return its row."""
     label = _normalize_field(name)
     if not label:
         raise ValueError("missing_lane_name")
@@ -553,9 +574,14 @@ def create_lane(db_path: str, *, name: str) -> Dict[str, Any]:
     db_file = Path(db_path)
     with connect_sqlite(db_file) as conn:
         _ensure_lanes_schema(conn)
+        aid = int(area_id) if area_id is not None and int(area_id) > 0 else None
+        if aid is not None:
+            row = conn.execute("SELECT id FROM lane_areas WHERE id = ?", (aid,)).fetchone()
+            if not row:
+                raise ValueError("lane_area_not_found")
         cur = conn.execute(
-            "INSERT INTO lanes (name, created_at, updated_at) VALUES (?, ?, ?)",
-            (label, now, now),
+            "INSERT INTO lanes (name, created_at, updated_at, area_id) VALUES (?, ?, ?, ?)",
+            (label, now, now, aid),
         )
         lane_id = int(cur.lastrowid or 0)
         conn.commit()
@@ -565,6 +591,7 @@ def create_lane(db_path: str, *, name: str) -> Dict[str, Any]:
         "created_at": now,
         "updated_at": now,
         "archived": False,
+        "area_id": aid,
     }
 
 
@@ -658,12 +685,12 @@ def delete_lane(db_path: str, *, lane_id: int) -> bool:
 
 
 def load_all_lanes(db_path: str) -> List[Dict[str, Any]]:
-    """Return all lanes ordered by name."""
+    """Return all lanes (tracks) ordered by name."""
     db_file = Path(db_path)
     with connect_sqlite(db_file) as conn:
         _ensure_lanes_schema(conn)
         rows = conn.execute(
-            "SELECT id, name, created_at, updated_at, archived "
+            "SELECT id, name, created_at, updated_at, archived, area_id "
             "FROM lanes ORDER BY name COLLATE NOCASE"
         ).fetchall()
     return [
@@ -673,9 +700,124 @@ def load_all_lanes(db_path: str) -> List[Dict[str, Any]]:
             "created_at": _normalize_field(r[2]),
             "updated_at": _normalize_field(r[3]),
             "archived": bool(int(r[4] or 0)),
+            "area_id": int(r[5]) if r[5] is not None else None,
         }
         for r in rows
     ]
+
+
+def load_all_lane_areas(db_path: str) -> List[Dict[str, Any]]:
+    """Return all lane area tabs ordered by sort_order then name."""
+    db_file = Path(db_path)
+    with connect_sqlite(db_file) as conn:
+        _ensure_lane_areas_schema(conn)
+        rows = conn.execute(
+            "SELECT id, name, color_index, sort_order, created_at, updated_at "
+            "FROM lane_areas ORDER BY sort_order, name COLLATE NOCASE"
+        ).fetchall()
+    return [
+        {
+            "id": int(r[0]),
+            "name": _normalize_field(r[1]),
+            "color_index": int(r[2] or 0),
+            "sort_order": int(r[3] or 0),
+            "created_at": _normalize_field(r[4]),
+            "updated_at": _normalize_field(r[5]),
+        }
+        for r in rows
+    ]
+
+
+def create_lane_area(db_path: str, *, name: str, color_index: int = 0) -> Dict[str, Any]:
+    label = _normalize_field(name)
+    if not label:
+        raise ValueError("missing_lane_area_name")
+    now = datetime.now(timezone.utc).isoformat()
+    db_file = Path(db_path)
+    with connect_sqlite(db_file) as conn:
+        _ensure_lane_areas_schema(conn)
+        max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) FROM lane_areas").fetchone()
+        sort_order = int(max_order[0] or -1) + 1
+        cur = conn.execute(
+            """
+            INSERT INTO lane_areas (name, color_index, sort_order, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (label, int(color_index), sort_order, now, now),
+        )
+        area_id = int(cur.lastrowid or 0)
+        conn.commit()
+    return {
+        "id": area_id,
+        "name": label,
+        "color_index": int(color_index),
+        "sort_order": sort_order,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def update_lane_area(
+    db_path: str,
+    *,
+    area_id: int,
+    name: Optional[str] = None,
+    color_index: Optional[int] = None,
+    sort_order: Optional[int] = None,
+) -> bool:
+    if area_id <= 0:
+        return False
+    now = datetime.now(timezone.utc).isoformat()
+    db_file = Path(db_path)
+    with connect_sqlite(db_file) as conn:
+        _ensure_lane_areas_schema(conn)
+        row = conn.execute("SELECT id FROM lane_areas WHERE id = ?", (area_id,)).fetchone()
+        if not row:
+            return False
+        fields: List[str] = ["updated_at = ?"]
+        values: List[Any] = [now]
+        if name is not None:
+            label = _normalize_field(name)
+            if not label:
+                raise ValueError("missing_lane_area_name")
+            fields.append("name = ?")
+            values.append(label)
+        if color_index is not None:
+            fields.append("color_index = ?")
+            values.append(int(color_index))
+        if sort_order is not None:
+            fields.append("sort_order = ?")
+            values.append(int(sort_order))
+        values.append(area_id)
+        conn.execute(
+            f"UPDATE lane_areas SET {', '.join(fields)} WHERE id = ?",
+            tuple(values),
+        )
+        conn.commit()
+    return True
+
+
+def assign_lane_to_area(db_path: str, *, lane_id: int, area_id: Optional[int]) -> bool:
+    if lane_id <= 0:
+        return False
+    now = datetime.now(timezone.utc).isoformat()
+    db_file = Path(db_path)
+    with connect_sqlite(db_file) as conn:
+        _ensure_lanes_schema(conn)
+        row = conn.execute("SELECT id FROM lanes WHERE id = ?", (lane_id,)).fetchone()
+        if not row:
+            return False
+        aid = int(area_id) if area_id is not None and int(area_id) > 0 else None
+        if aid is not None:
+            area_row = conn.execute("SELECT id FROM lane_areas WHERE id = ?", (aid,)).fetchone()
+            if not area_row:
+                return False
+        conn.execute(
+            "UPDATE lanes SET area_id = ?, updated_at = ? WHERE id = ?",
+            (aid, now, lane_id),
+        )
+        conn.commit()
+    return True
 
 
 def load_lane_thread_memberships(db_path: str) -> Dict[str, List[str]]:
@@ -2842,6 +2984,7 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
         "thread_drafts": load_all_thread_draft_replies(db_path),
         "meeting_preps": load_all_meeting_preps(db_path),
         "lanes": load_all_lanes(db_path),
+        "lane_areas": load_all_lane_areas(db_path),
         "lane_threads": load_lane_thread_memberships(db_path),
         "lane_summaries": load_all_lane_summaries(db_path),
         "thread_plans": load_all_thread_plans(db_path),

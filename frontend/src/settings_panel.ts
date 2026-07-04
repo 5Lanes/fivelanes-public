@@ -2,7 +2,6 @@ import type { LooseObj } from "./shared/types.js";
 import { str } from "./shared/utils.js";
 
 export type BackendName = "claude" | "llama";
-export type EmailCaptureMode = "forwards" | "labels";
 
 export type ScheduleConfig = {
   interval_sec: number;
@@ -79,12 +78,6 @@ function parseBackend(data: LooseObj): BackendName {
   return backend;
 }
 
-function parseEmailCapture(data: LooseObj): EmailCaptureMode {
-  const mode = str(data.email_capture).toLowerCase();
-  if (mode !== "forwards" && mode !== "labels") return "forwards";
-  return mode;
-}
-
 function backendSwitchEl(): HTMLDivElement | null {
   return dialogEl?.querySelector("#backend-switch") ?? null;
 }
@@ -128,22 +121,6 @@ export function syncBackendFromStatus(status: LooseObj): void {
   if (raw === "claude" || raw === "llama") {
     updateBackendSwitch(raw);
   }
-}
-
-function updateEmailCaptureSwitch(mode: EmailCaptureMode): void {
-  dialogEl?.querySelectorAll<HTMLButtonElement>("[data-email-capture]").forEach((btn) => {
-    const active = btn.dataset.emailCapture === mode;
-    btn.classList.toggle("active", active);
-    btn.setAttribute("aria-pressed", active ? "true" : "false");
-  });
-  const note = dialogEl?.querySelector(".settings-labels-note") as HTMLParagraphElement | null;
-  if (note) note.hidden = mode !== "labels";
-}
-
-function setEmailCaptureDisabled(disabled: boolean): void {
-  dialogEl?.querySelectorAll<HTMLButtonElement>("[data-email-capture]").forEach((btn) => {
-    btn.disabled = disabled;
-  });
 }
 
 function fillLookbackDaysField(days: number): void {
@@ -213,18 +190,11 @@ async function setBackend(backend: BackendName): Promise<void> {
   updateBackendSwitch(backend);
 }
 
-async function setEmailCapture(mode: EmailCaptureMode): Promise<void> {
-  const res = await fetch("/api/config/email-capture", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "same-origin",
-    body: JSON.stringify({ email_capture: mode }),
-  });
-  const data = (await res.json().catch(() => ({}))) as LooseObj;
-  if (!res.ok) {
-    throw new Error(str(data.error) || `Email capture update failed (${res.status})`);
-  }
-  updateEmailCaptureSwitch(parseEmailCapture(data));
+async function loadSettingsIntoDialog(): Promise<void> {
+  const data = await fetchAppConfig();
+  updateBackendSwitch(parseBackend(data));
+  fillScheduleFields(parseSchedule((data.schedule as LooseObj) ?? {}));
+  fillLookbackDaysField(parseLookbackDays(data));
 }
 
 async function saveLookbackDays(days: number): Promise<number> {
@@ -255,14 +225,6 @@ async function saveSchedule(config: ScheduleConfig): Promise<ScheduleConfig> {
   return parseSchedule((data.schedule as LooseObj) ?? config);
 }
 
-async function loadSettingsIntoDialog(): Promise<void> {
-  const data = await fetchAppConfig();
-  updateBackendSwitch(parseBackend(data));
-  updateEmailCaptureSwitch(parseEmailCapture(data));
-  fillScheduleFields(parseSchedule((data.schedule as LooseObj) ?? {}));
-  fillLookbackDaysField(parseLookbackDays(data));
-}
-
 export function mountSettingsDialog(): void {
   if (document.getElementById("settings-dialog")) return;
 
@@ -282,16 +244,6 @@ export function mountSettingsDialog(): void {
             <button type="button" class="backend-switch-btn" data-backend="claude" aria-pressed="false">Claude</button>
           </div>
         </div>
-      </section>
-
-      <section class="settings-section" aria-labelledby="settings-email-heading">
-        <h3 id="settings-email-heading">Email source</h3>
-        <p class="settings-lead">Choose how mail enters Fivelanes.</p>
-        <div class="backend-switch settings-segmented" id="email-capture-switch" role="group" aria-label="Email capture mode">
-          <button type="button" class="backend-switch-btn" data-email-capture="forwards" aria-pressed="false">Forwards</button>
-          <button type="button" class="backend-switch-btn" data-email-capture="labels" aria-pressed="false">Labels</button>
-        </div>
-        <p class="settings-labels-note" hidden>Label capture is not available yet — forwards are still used.</p>
       </section>
 
       <section class="settings-section" aria-labelledby="settings-schedule-heading">
@@ -345,7 +297,6 @@ export function mountSettingsDialog(): void {
 export function setSettingsControlsLocked(locked: boolean): void {
   controlsLocked = locked;
   setBackendControlsDisabled(locked);
-  setEmailCaptureDisabled(locked);
 }
 
 export function bindSettingsPanel(): void {
@@ -381,25 +332,6 @@ export function bindSettingsPanel(): void {
           setDialogError(msg);
         } finally {
           if (!controlsLocked) setBackendControlsDisabled(false);
-        }
-      })();
-    });
-  });
-
-  dialogEl.querySelectorAll<HTMLButtonElement>("[data-email-capture]").forEach((el) => {
-    el.addEventListener("click", () => {
-      const mode = el.dataset.emailCapture as EmailCaptureMode | undefined;
-      if (!mode || el.classList.contains("active") || el.disabled) return;
-      void (async () => {
-        try {
-          setDialogError("");
-          setEmailCaptureDisabled(true);
-          await setEmailCapture(mode);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          setDialogError(msg);
-        } finally {
-          if (!controlsLocked) setEmailCaptureDisabled(false);
         }
       })();
     });

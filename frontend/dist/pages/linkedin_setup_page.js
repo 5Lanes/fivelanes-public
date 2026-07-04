@@ -5,8 +5,8 @@ const PAGE_HTML = `
   <header class="texts-setup-header">
     <h2>LinkedIn threads</h2>
     <p class="texts-setup-lead">
-      Pull fresh messages for selected conversations, then choose which threads to track on
-      <a href="/threads">Threads</a>.
+      Pull fresh messages for selected conversations, then choose which threads to track on the
+      <a href="/dashboard">dashboard</a>.
     </p>
   </header>
 

@@ -40,8 +40,8 @@ FEATURE_REGISTRY: dict[str, FeatureTier] = {
     "pipeline": FeatureTier.OS,
     "meeting_prep": FeatureTier.OS,
     "email_reply": FeatureTier.OS,
-    "meet_recordings": FeatureTier.OS,
     # Premium — enabled when premium is unlocked
+    "meet_recordings": FeatureTier.PREMIUM,
     "texts": FeatureTier.PREMIUM,
     "slack": FeatureTier.PREMIUM,
     "linkedin": FeatureTier.PREMIUM,

@@ -1,6 +1,7 @@
 import { listSection, partitionThreadsBySnooze, threadEmailSubject, } from "../shared/thread_domain.js";
-import { applyLaneArchived, applyLaneCreated, applyLaneRemoved, applyLaneSummary, applyLaneThreadMembership, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getLaneSummary, getLaneThreadIds, getLanes, getBundleMutationGeneration, loadLatestBundle, normalizeBundle, setBundle, setBundleFromNetwork, } from "../shared/summaries_store.js";
-import { escapeHtml, str } from "../shared/utils.js";
+import { applyLaneArchived, applyLaneAreaAssigned, applyLaneCreated, applyLaneRemoved, applyLaneSummary, applyLaneThreadMembership, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getLaneAreas, getLaneSummary, getLaneThreadIds, getLanes, getBundleMutationGeneration, loadLatestBundle, normalizeBundle, setBundle, setBundleFromNetwork, } from "../shared/summaries_store.js";
+import { laneAreaColorVar, sourcePillHtml, threadChannelForThread } from "../shared/source_ui.js";
+import { escapeHtml, str, threadPageHref } from "../shared/utils.js";
 const LANES_SORT_KEY = "fivelanes_lanes_sort_v2";
 const PAGE_HTML = `
 <div class="view-lanes">
@@ -26,7 +27,9 @@ const PAGE_HTML = `
 let interactionsBound = false;
 let assignLaneId = null;
 let activeLaneTabId = null;
+let activeAreaTabId = null;
 let showArchivedLanes = false;
+const collapsedTracks = new Set();
 const laneSummaryErrors = new Map();
 const laneSummaryPending = new Set();
 const laneSummaryWatching = new Set();
@@ -110,6 +113,26 @@ function syncLaneSortSelect() {
 function lanesForCurrentView(data) {
     return getLanes(data).filter((lane) => Boolean(lane.archived) === showArchivedLanes);
 }
+function areaTabTrackCount(data, areaId) {
+    const base = getLanes(data);
+    if (areaId === 0)
+        return base.filter((lane) => lane.area_id == null).length;
+    return base.filter((lane) => lane.area_id === areaId).length;
+}
+function trackAreaSelectHtml(lane, data) {
+    const areas = getLaneAreas(data);
+    if (areas.length <= 1)
+        return "";
+    const options = areas
+        .map((area) => {
+        const selected = lane.area_id === area.id ? " selected" : "";
+        return `<option value="${area.id}"${selected}>${escapeHtml(area.name)}</option>`;
+    })
+        .join("");
+    return `<label class="track-area-label">Lane tab
+    <select class="track-area-select thread-sort-select" data-lane-id="${lane.id}" aria-label="Move track to lane tab">${options}</select>
+  </label>`;
+}
 function syncArchivedViewToolbar() {
     const toggleBtn = document.getElementById("lanes-show-archived-btn");
     const createBtn = document.getElementById("create-lane-btn");
@@ -153,7 +176,29 @@ function threadPickerHtml(laneId, selectedIds) {
     <div class="lane-thread-options">${rows}</div>
   </div>`;
 }
-function laneSummaryHtml(summary, laneId) {
+function channelForHighlight(highlight, threads) {
+    const text = highlight.toLowerCase();
+    for (const thread of threads) {
+        const subject = threadEmailSubject(thread).toLowerCase();
+        if (subject.length >= 4 && (text.includes(subject.slice(0, 24)) || subject.includes(text.slice(0, 24)))) {
+            return threadChannelForThread(thread);
+        }
+    }
+    return "email";
+}
+function highlightsSectionHtml(highlights, threadIds) {
+    if (!highlights.length)
+        return "";
+    const threads = getCurrentThreads().filter((t) => threadIds.includes(t.id));
+    const items = highlights
+        .map((highlight) => {
+        const channel = channelForHighlight(highlight, threads);
+        return `<li class="source-highlight" data-source="${channel}">${sourcePillHtml(channel)}${escapeHtml(highlight)}</li>`;
+    })
+        .join("");
+    return `<div class="section"><h4>Highlights</h4><ul class="source-highlight-list">${items}</ul></div>`;
+}
+function laneSummaryHtml(summary, laneId, threadIds = [], useSourceHighlights = false) {
     const err = laneSummaryErrors.get(laneId);
     if (err) {
         return `<p class="lane-summary-error">${escapeHtml(err)}</p>`;
@@ -180,7 +225,7 @@ function laneSummaryHtml(summary, laneId) {
     return `<div class="lane-summary">
     ${meta}
     ${body}
-    ${listSection("Highlights", summary.highlights)}
+    ${useSourceHighlights ? highlightsSectionHtml(summary.highlights, threadIds) : listSection("Highlights", summary.highlights)}
     ${listSection("Current priorities", summary.current_priorities)}
     ${listSection("Waiting on others", summary.waiting_on_others)}
   </div>`;
@@ -192,7 +237,12 @@ function laneCardHtml(lane, threadIds, summary, expanded, opts = {}) {
         const thread = getCurrentThreads().find((t) => t.id === tid);
         if (!thread)
             return "";
-        return `<li>${escapeHtml(threadEmailSubject(thread))}</li>`;
+        const label = escapeHtml(threadEmailSubject(thread));
+        const pill = sourcePillHtml(threadChannelForThread(thread));
+        if (opts.linkThreads) {
+            return `<li><a class="lane-thread-link" href="${escapeHtml(threadPageHref(tid))}">${pill}${label}</a></li>`;
+        }
+        return `<li>${pill}${label}</li>`;
     })
         .filter(Boolean)
         .join("");
@@ -200,6 +250,43 @@ function laneCardHtml(lane, threadIds, summary, expanded, opts = {}) {
         ? `<ul class="lane-assigned-threads">${threadLabels}</ul>`
         : `<p class="lane-empty-threads">No threads yet.</p>`;
     const picker = expanded ? threadPickerHtml(lane.id, selected) : "";
+    const summaryPreview = summary?.summary?.trim()
+        ? escapeHtml(summary.summary.trim().slice(0, 120))
+        : "No summary yet.";
+    const data = getCurrentData();
+    const areaSelect = opts.trackMode && data ? trackAreaSelectHtml(lane, data) : "";
+    const actions = `<div class="user-lane-actions item-actions">
+      ${areaSelect}
+      <button type="button" class="lane-refresh-summary-btn" data-lane-id="${lane.id}"${threadIds.length && !laneSummaryPending.has(lane.id) ? "" : " disabled"}>
+        ${laneSummaryPending.has(lane.id) ? "Refreshing…" : "Refresh summary"}
+      </button>
+      <button type="button" class="lane-edit-threads-btn" data-lane-id="${lane.id}">
+        ${expanded ? "Done" : threadIds.length ? "Edit threads" : "Add threads"}
+      </button>
+      <button type="button" class="lane-archive-btn" data-lane-id="${lane.id}" data-lane-name="${escapeHtml(lane.name)}" data-archived="${opts.archivedView ? "true" : "false"}">
+        ${opts.archivedView ? "Unarchive" : "Archive"}
+      </button>
+      <button type="button" class="lane-delete-btn" data-lane-id="${lane.id}" data-lane-name="${escapeHtml(lane.name)}">
+        Delete lane
+      </button>
+    </div>`;
+    if (opts.trackMode) {
+        const collapsed = opts.collapsed !== false;
+        return `<li class="track-section${collapsed ? " is-collapsed" : ""}" data-lane-id="${lane.id}">
+      <header class="lane-section-head track-head" data-track-toggle="${lane.id}">
+        <div class="lane-name-wrap">
+          <h4 class="track-name">${escapeHtml(lane.name)}</h4>
+          <span class="track-summary-preview">${summaryPreview}</span>
+        </div>
+      </header>
+      <div class="track-body">
+        ${laneSummaryHtml(summary, lane.id, threadIds, true)}
+        ${threadsBlock}
+        ${picker}
+        ${actions}
+      </div>
+    </li>`;
+    }
     const header = opts.tabbed
         ? ""
         : `<header class="user-lane-header">
@@ -208,27 +295,101 @@ function laneCardHtml(lane, threadIds, summary, expanded, opts = {}) {
     </header>`;
     const tag = opts.tabbed ? "div" : "article";
     const className = opts.tabbed ? "user-lane-panel" : "user-lane-card";
-    const archiveLabel = opts.archivedView ? "Unarchive" : "Archive";
     return `<${tag} class="${className}" data-lane-id="${lane.id}">
     ${header}
     ${laneSummaryHtml(summary, lane.id)}
     ${threadsBlock}
     ${picker}
-    <div class="user-lane-actions">
-      <button type="button" class="lane-refresh-summary-btn" data-lane-id="${lane.id}"${threadIds.length && !laneSummaryPending.has(lane.id) ? "" : " disabled"}>
-        ${laneSummaryPending.has(lane.id) ? "Refreshing…" : "Refresh summary"}
-      </button>
-      <button type="button" class="lane-edit-threads-btn" data-lane-id="${lane.id}">
-        ${expanded ? "Done" : threadIds.length ? "Edit threads" : "Add threads"}
-      </button>
-      <button type="button" class="lane-archive-btn" data-lane-id="${lane.id}" data-lane-name="${escapeHtml(lane.name)}" data-archived="${opts.archivedView ? "true" : "false"}">
-        ${archiveLabel}
-      </button>
-      <button type="button" class="lane-delete-btn" data-lane-id="${lane.id}" data-lane-name="${escapeHtml(lane.name)}">
-        Delete lane
-      </button>
-    </div>
+    ${actions}
   </${tag}>`;
+}
+function areaTabTracks(data, areaId) {
+    const base = lanesForCurrentView(data);
+    const filtered = areaId === 0
+        ? base.filter((l) => l.area_id == null)
+        : base.filter((l) => l.area_id === areaId);
+    return sortLanes(filtered, getLaneSortMode(), data);
+}
+function renderAreaToolbar() {
+    return `<div class="thread-toolbar dashboard-lanes-toolbar" id="lanes-toolbar">
+    <div class="thread-control-group">
+      <span class="thread-control-label" id="track-inbox-label">Show</span>
+      <div class="thread-segmented" role="group" aria-labelledby="track-inbox-label">
+        <button type="button" class="lanes-show-archived-btn${showArchivedLanes ? "" : " active"}" data-track-inbox="active" aria-pressed="${showArchivedLanes ? "false" : "true"}">Active</button>
+        <button type="button" class="lanes-show-archived-btn${showArchivedLanes ? " active" : ""}" data-track-inbox="archived" aria-pressed="${showArchivedLanes ? "true" : "false"}">Archived</button>
+      </div>
+    </div>
+    <div class="thread-control-group">
+      <label class="thread-control-label" for="lanes-sort">Sort</label>
+      <select id="lanes-sort" class="lanes-sort-select thread-sort-select" aria-label="Sort tracks">
+        <option value="updated-desc">Recently updated</option>
+        <option value="created-desc">Recently added</option>
+      </select>
+    </div>
+    <div class="thread-control-group">
+      <button type="button" class="create-lane-btn" id="create-lane-btn">Create track</button>
+    </div>
+  </div>`;
+}
+function renderDashboardLaneAreaTabs(listEl, data) {
+    const areas = getLaneAreas(data);
+    const unassigned = lanesForCurrentView(data).filter((l) => l.area_id == null);
+    const tabs = [
+        ...areas.map((a) => ({ id: a.id, name: a.name, color_index: a.color_index })),
+    ];
+    if (unassigned.length)
+        tabs.push({ id: 0, name: "Unassigned", color_index: 0 });
+    if (!tabs.length) {
+        renderDashboardLanesTabs(listEl, lanesForCurrentView(data), data);
+        return;
+    }
+    const tabIds = new Set(tabs.map((t) => t.id));
+    if (activeAreaTabId == null || !tabIds.has(activeAreaTabId)) {
+        activeAreaTabId = tabs[0]?.id ?? null;
+    }
+    const tabButtons = tabs
+        .map((tab) => {
+        const trackCount = areaTabTrackCount(data, tab.id);
+        const active = tab.id === activeAreaTabId;
+        const color = laneAreaColorVar(tab.color_index);
+        return `<button type="button" class="lane-tab${active ? " is-active" : ""}" role="tab" aria-selected="${active ? "true" : "false"}" id="area-tab-${tab.id}" aria-controls="area-panel-${tab.id}" data-area-id="${tab.id}">
+        <span class="lane-tab-color" style="background: ${color};"></span>
+        <span class="lane-tab-label">${escapeHtml(tab.name)}</span>
+        <span class="lane-tab-count">${trackCount}</span>
+      </button>`;
+    })
+        .join("");
+    const panels = tabs
+        .map((tab) => {
+        const tracks = areaTabTracks(data, tab.id);
+        const active = tab.id === activeAreaTabId;
+        const trackItems = tracks
+            .map((lane) => {
+            const threadIds = getLaneThreadIds(data, lane.id);
+            const summary = getLaneSummary(data, lane.id);
+            const expanded = assignLaneId === lane.id;
+            const collapsed = collapsedTracks.has(lane.id);
+            return laneCardHtml(lane, threadIds, summary, expanded, {
+                trackMode: true,
+                archivedView: showArchivedLanes,
+                linkThreads: true,
+                collapsed,
+            });
+        })
+            .join("");
+        const empty = tracks.length
+            ? `<ul class="track-stack">${trackItems}</ul>`
+            : `<p class="tracks-empty">No tracks in this lane.</p>`;
+        return `<div class="lanes-tab-panel${active ? " is-active" : ""}" role="tabpanel" id="area-panel-${tab.id}" aria-labelledby="area-tab-${tab.id}" data-area-id="${tab.id}"${active ? "" : " hidden"}>
+        ${active ? renderAreaToolbar() : ""}
+        ${empty}
+      </div>`;
+    })
+        .join("");
+    listEl.innerHTML = `<div class="lanes-tabs">
+    <div class="lanes-tab-bar" role="tablist" aria-label="Lanes">${tabButtons}</div>
+    <div class="lanes-tab-panels">${panels}</div>
+  </div>`;
 }
 function renderDashboardLanesTabs(listEl, lanes, data) {
     const laneIds = new Set(lanes.map((lane) => lane.id));
@@ -252,7 +413,7 @@ function renderDashboardLanesTabs(listEl, lanes, data) {
         const expanded = assignLaneId === lane.id;
         const active = lane.id === activeLaneTabId;
         return `<div class="lanes-tab-panel${active ? " is-active" : ""}" role="tabpanel" id="lane-panel-${lane.id}" aria-labelledby="lane-tab-${lane.id}" data-lane-id="${lane.id}"${active ? "" : " hidden"}>
-        ${laneCardHtml(lane, threadIds, summary, expanded, { tabbed: true, archivedView: showArchivedLanes })}
+        ${laneCardHtml(lane, threadIds, summary, expanded, { tabbed: true, archivedView: showArchivedLanes, linkThreads: true })}
       </div>`;
     })
         .join("");
@@ -277,7 +438,12 @@ function renderLanesList() {
         return;
     }
     if (isDashboardLanesList(listEl)) {
-        renderDashboardLanesTabs(listEl, lanes, data);
+        if (getLaneAreas(data).length || getLanes(data).some((l) => l.area_id != null)) {
+            renderDashboardLaneAreaTabs(listEl, data);
+        }
+        else {
+            renderDashboardLanesTabs(listEl, lanes, data);
+        }
         return;
     }
     listEl.innerHTML = lanes
@@ -290,11 +456,24 @@ function renderLanesList() {
         .join("");
 }
 export { renderLanesList };
-async function persistLaneCreate(name) {
+async function persistLaneAssignArea(laneId, areaId) {
+    const res = await fetch("/api/lanes/assign-area", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lane_id: laneId, area_id: areaId }),
+    });
+    const body = (await res.json().catch(() => ({})));
+    if (!res.ok)
+        throw new Error(str(body.error) || `Assign area failed (${res.status})`);
+}
+async function persistLaneCreate(name, areaId) {
+    const payload = { name };
+    if (areaId != null && areaId > 0)
+        payload.area_id = areaId;
     const res = await fetch("/api/lanes/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify(payload),
     });
     const body = (await res.json().catch(() => ({})));
     if (!res.ok)
@@ -306,6 +485,7 @@ async function persistLaneCreate(name) {
         created_at: str(laneRaw.created_at),
         updated_at: str(laneRaw.updated_at),
         archived: Boolean(laneRaw.archived),
+        area_id: laneRaw.area_id == null ? null : Number(laneRaw.area_id) || null,
     };
 }
 async function persistLaneThread(laneId, threadId, inLane) {
@@ -563,8 +743,9 @@ export function bindLanesInteractions() {
         const target = ev.target;
         if (!target || !isLaneUi(target))
             return;
-        if (target.closest("#lanes-show-archived-btn")) {
-            showArchivedLanes = !showArchivedLanes;
+        if (target.closest(".lanes-show-archived-btn")) {
+            const btn = target.closest(".lanes-show-archived-btn");
+            showArchivedLanes = btn.dataset.trackInbox === "archived";
             assignLaneId = null;
             activeLaneTabId = null;
             renderLanesList();
@@ -588,7 +769,49 @@ export function bindLanesInteractions() {
             showLaneCreateError("");
             return;
         }
-        const tabBtn = target.closest(".lane-tab");
+        if (target.closest("#collapse-all-tracks")) {
+            const data = getCurrentData();
+            if (!data)
+                return;
+            for (const lane of areaTabTracks(data, activeAreaTabId ?? 0)) {
+                collapsedTracks.add(lane.id);
+            }
+            renderLanesList();
+            return;
+        }
+        if (target.closest("#expand-all-tracks")) {
+            const data = getCurrentData();
+            if (!data)
+                return;
+            for (const lane of areaTabTracks(data, activeAreaTabId ?? 0)) {
+                collapsedTracks.delete(lane.id);
+            }
+            renderLanesList();
+            return;
+        }
+        const trackHead = target.closest("[data-track-toggle]");
+        if (trackHead) {
+            const laneId = Number(trackHead.dataset.trackToggle) || 0;
+            if (!laneId)
+                return;
+            if (collapsedTracks.has(laneId))
+                collapsedTracks.delete(laneId);
+            else
+                collapsedTracks.add(laneId);
+            renderLanesList();
+            return;
+        }
+        const areaTabBtn = target.closest(".lane-tab[data-area-id]");
+        if (areaTabBtn) {
+            const areaId = Number(areaTabBtn.dataset.areaId);
+            if (Number.isNaN(areaId) || areaId === activeAreaTabId)
+                return;
+            activeAreaTabId = areaId;
+            assignLaneId = null;
+            renderLanesList();
+            return;
+        }
+        const tabBtn = target.closest(".lane-tab[data-lane-id]");
         if (tabBtn) {
             const laneId = Number(tabBtn.dataset.laneId) || 0;
             if (!laneId || laneId === activeLaneTabId)
@@ -725,7 +948,8 @@ export function bindLanesInteractions() {
                 submitBtn.disabled = true;
             showLaneCreateError("");
             try {
-                const lane = await persistLaneCreate(name);
+                const areaId = activeAreaTabId != null && activeAreaTabId > 0 ? activeAreaTabId : null;
+                const lane = await persistLaneCreate(name, areaId);
                 applyLaneCreated(lane);
                 assignLaneId = lane.id;
                 activeLaneTabId = lane.id;
@@ -753,6 +977,35 @@ export function bindLanesInteractions() {
                 setLaneSortMode(mode);
                 renderLanesList();
             }
+            return;
+        }
+        const areaSelect = ev.target?.closest(".track-area-select");
+        if (areaSelect && isLaneUi(areaSelect)) {
+            const laneId = Number(areaSelect.dataset.laneId) || 0;
+            const areaId = Number(areaSelect.value) || 0;
+            if (!laneId || !areaId)
+                return;
+            const previous = getLanes(getCurrentData()).find((lane) => lane.id === laneId)?.area_id ?? null;
+            if (previous === areaId)
+                return;
+            areaSelect.disabled = true;
+            void (async () => {
+                try {
+                    applyLaneAreaAssigned(laneId, areaId);
+                    renderLanesList();
+                    await persistLaneAssignArea(laneId, areaId);
+                    await reloadLanesFromServer();
+                }
+                catch (err) {
+                    applyLaneAreaAssigned(laneId, previous);
+                    renderLanesList();
+                    console.error(err);
+                    window.alert(err instanceof Error ? err.message : String(err));
+                }
+                finally {
+                    areaSelect.disabled = false;
+                }
+            })();
             return;
         }
         const checkbox = ev.target?.closest(".lane-thread-checkbox");

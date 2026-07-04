@@ -36,18 +36,18 @@ The dashboard is split into a base open-source layer and optional premium capabi
 | Tier | Capabilities |
 |------|----------------|
 | **Base** | Threads, dashboard, meetings, plans, lanes, meeting prep, email-reply drafting, pipeline |
-| **Premium** | Text threads (iMessage/SMS exports), Slack DMs, LinkedIn DMs, calendar availability export and open-slots UI |
+| **Premium** | Text threads (iMessage/SMS exports), Slack DMs, LinkedIn DMs, Meet recording notes (Google Docs), calendar availability export and open-slots UI |
 
 Premium features are disabled in the public repo unless unlocked (e.g. via a premium add-on or `FIVELANES_PREMIUM=1` for local development). The README documents the full product; runtime gating lives in code.
 
 ## Input sources
 
-Fivelanes accepts data through seven channels. The scheduled pipeline (`fivelanes.main` / dashboard scheduler) pulls email and calendar automatically; Meet recording notes, text, Slack, and LinkedIn threads are cataloged and must be selected in the dashboard before they appear on Threads.
+Fivelanes accepts data through seven channels. The scheduled pipeline (`fivelanes.main` / dashboard scheduler) pulls email and calendar automatically; Meet recording notes (premium), text, Slack, and LinkedIn threads are cataloged and must be selected in the dashboard before they appear on Threads.
 
 | Channel | How data arrives | Where it lands | Processing |
 |---------|------------------|----------------|------------|
 | **Email** | Mail to `SOURCE_ACCOUNT` (forward, Cc/Bcc, or direct To) | Gmail API → `thread_tracking`, `timeline_entries` | Segmentation + LLM summary (same as inbox pipeline) |
-| **Meet recordings** | Pull Doc names/dates from Drive, then select which to import | `thread_tracking` (`meet:` prefix), `timeline_entries` (`type=meeting`, `source_id` `docs:…`) | Conversation-summary tab only (not the full transcript tab); summary on track / pipeline |
+| **Meet recordings** | Pull Doc names/dates from Drive, then select which to import | `thread_tracking` (`meet:` prefix), `timeline_entries` (`type=meeting`, `source_id` `docs:…`) | Conversation-summary tab only (not the full transcript tab); summary on track / pipeline; **premium** |
 | **Text** | JSON files in your data directory's `conversations/` (iMessage export shape) | `thread_tracking` (`text:` prefix) when tracked | Summary only (no email-style segmentation); **premium** |
 | **Slack** | Pull DMs via `SLACK_USER_TOKEN`, stored as JSON under `slack-dms/` | `thread_tracking` (`slack:` prefix) when tracked | Summary only; **premium** |
 | **LinkedIn** | CSV from LinkedIn data export under `linkedin-messages/messages.csv` | `thread_tracking` (`linkedin:` prefix) when tracked | Summary only; **premium** |
@@ -84,9 +84,9 @@ Fivelanes does not sync texts from a phone automatically. Export conversations e
 
 ### Meet recording notes
 
-Google Meet / Gemini notes Docs are handled like Slack: open **Meet notes** (`/meet-recordings-setup`), pull Doc **names and dates** from Drive into `$FIVELANES_DATA_ROOT/meet-recordings/index.json`, then choose which recordings to import. Import fetches only the **conversation-summary** tab (never the full transcript tab) and registers `thread_tracking` rows with `inbox_thread_id` `meet:<drive_file_id>`. Summaries run via **Generate summaries** or `fivelanes.main`.
+**Premium.** Google Meet / Gemini notes Docs are handled like Slack: open **Meet notes** (`/meet-recordings-setup`), pull Doc **names and dates** from Drive into `$FIVELANES_DATA_ROOT/meet-recordings/index.json`, then choose which recordings to import. Import fetches only the **conversation-summary** tab (never the full transcript tab) and registers `thread_tracking` rows with `inbox_thread_id` `meet:<drive_file_id>`. Summaries run via **Generate summaries** or `fivelanes.main`.
 
-Uses the same OAuth tokens (`drive.readonly`, `documents.readonly`). Re-run `python utils/add_account.py …` after upgrading so tokens include the new scopes.
+Uses the same OAuth tokens (`drive.readonly`, `documents.readonly`). Enable **Drive** and **Docs** APIs in the Cloud project (a “Found 0 docs” pull with no error usually means Drive API is disabled). Re-run `python utils/add_account.py …` after upgrading so tokens include the new scopes.
 
 ```bash
 python -c "from services.meet_recordings import pull_meet_recording_catalog; print(pull_meet_recording_catalog())"
@@ -104,7 +104,7 @@ python scripts/pull_calendar_availability.py
 
 ### Dashboard and scheduler
 
-`dashboard_server.py` serves the UI and JSON API. Besides Meet notes selection and text/Slack/LinkedIn thread selection (premium), the dashboard accepts snooze/remove on threads, lane and plan edits, meeting-prep and email-reply prompts (user intent → LLM), and manual pipeline runs (`POST /api/pipeline/run`).
+`dashboard_server.py` serves the UI and JSON API. Besides Meet notes, text, Slack, and LinkedIn thread selection (all premium), the dashboard accepts snooze/remove on threads, lane and plan edits, meeting-prep and email-reply prompts (user intent → LLM), and manual pipeline runs (`POST /api/pipeline/run`).
 
 The background scheduler (`utils/run_fivelanes_scheduler.py`, also started with the dashboard) runs the full cycle every `FIVELANES_INTERVAL_SEC` (default 15 minutes) during the active window (default 06:00–19:00 local; quiet hours 19:00–06:00 via `FIVELANES_QUIET_START_HOUR` / `FIVELANES_QUIET_END_HOUR` in `FIVELANES_SCHEDULER_TZ`).
 
@@ -129,7 +129,11 @@ The background scheduler (`utils/run_fivelanes_scheduler.py`, also started with 
 
 5. **Google OAuth** (Gmail, Calendar, Meet recording Docs):
    - Copy [`credentials/credentials.example.json`](credentials/credentials.example.json) to `$FIVELANES_DATA_ROOT/credentials/credentials.json`
-   - In Google Cloud Console, enable **Gmail**, **Google Calendar**, **Google Drive**, and **Google Docs** APIs, and add the readonly scopes used by `services/gmail_client.py`
+   - In Google Cloud Console (same project as that OAuth client), enable:
+     - [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com)
+     - [Google Calendar API](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com)
+     - [Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com) (required for Meet notes catalog)
+     - [Google Docs API](https://console.cloud.google.com/apis/library/docs.googleapis.com) (required to import summary tabs)
    - From the repo root: `python utils/add_account.py you@example.com` to create `$FIVELANES_DATA_ROOT/credentials/tokens.json`
    - Optional: copy [`credentials/calendar_scheduling_rules.example.json`](credentials/calendar_scheduling_rules.example.json) to `$FIVELANES_DATA_ROOT/credentials/calendar_scheduling_rules.json`
 

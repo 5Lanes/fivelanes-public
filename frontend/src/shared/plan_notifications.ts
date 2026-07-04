@@ -43,10 +43,16 @@ function planListHtml(plans: PlanView[], heading: string): string {
 }
 
 function renderBanner(overdue: PlanView[], dueToday: PlanView[]): void {
+  const onDashboard = location.pathname.replace(/\/+$/, "") === "/dashboard";
+  const existing = document.getElementById(BANNER_ID);
+  if (onDashboard) {
+    existing?.remove();
+    return;
+  }
+
   const appBody = document.querySelector(".app-body");
   if (!appBody) return;
 
-  const existing = document.getElementById(BANNER_ID);
   if (!overdue.length && !dueToday.length) {
     existing?.remove();
     sessionStorage.removeItem(SESSION_BANNER_DISMISS_KEY);
@@ -88,7 +94,7 @@ function renderBanner(overdue: PlanView[], dueToday: PlanView[]): void {
     <p class="plan-notifications-title">${escapeHtml(bannerSummary(overdue, dueToday))}</p>
     <div class="plan-notifications-actions">
       ${enableBtn}
-      <a href="/plans" class="plan-notifications-view-link">View plans</a>
+      <a href="/dashboard#schedule-plans" class="plan-notifications-view-link">View plans</a>
       <button type="button" class="plan-notifications-dismiss" aria-label="Dismiss">×</button>
     </div>
   </div>

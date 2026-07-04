@@ -7,13 +7,17 @@ const PAGE_HTML = `
     <p class="texts-setup-lead">
       Pull Google Docs for Meet / Gemini notes (names and dates), then choose which to import.
       Only the conversation-summary tab is imported — not the full transcript.
-      Tracked notes appear on <a href="/threads">Threads</a>.
+      Tracked notes appear on the <a href="/dashboard">dashboard</a>.
     </p>
   </header>
 
   <section class="texts-setup-card" aria-labelledby="meet-pull-heading">
     <h3 id="meet-pull-heading">Pull from Google Drive</h3>
-    <p class="texts-setup-hint">Uses connected Google OAuth accounts (Drive + Docs readonly scopes).</p>
+    <p class="texts-setup-hint">
+      Uses connected Google OAuth accounts. Enable
+      <strong>Google Drive API</strong> and <strong>Google Docs API</strong> in the same
+      Cloud project as <code>credentials.json</code>, then re-authorize if needed.
+    </p>
     <div class="texts-setup-actions">
       <button type="button" class="texts-save-tracked-btn" id="meet-pull-btn">Pull doc names</button>
     </div>

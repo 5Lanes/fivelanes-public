@@ -13,6 +13,9 @@ export function escapeHtml(s) {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
 }
+export function threadPageHref(threadId) {
+    return `/threads?thread=${encodeURIComponent(threadId)}`;
+}
 /** Lowercase; strip ``+tag`` from local part (Gmail alias matching). */
 export function normalizeGmailAddress(email) {
     const e = email.trim().toLowerCase();

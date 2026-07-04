@@ -6,7 +6,7 @@ const PAGE_HTML = `
     <h2>Text threads</h2>
     <p class="texts-setup-lead">
       Conversations are loaded from your data directory's <code>conversations/</code> folder (JSON export format).
-      Select which threads to track; tracked threads appear on <a href="/threads">Threads</a>.
+      Select which threads to track; tracked threads appear on the <a href="/dashboard">dashboard</a>.
     </p>
   </header>
 

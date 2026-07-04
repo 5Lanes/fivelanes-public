@@ -1,9 +1,8 @@
-import { applySavedThreadDraft, applyThreadSummary, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, setBundle, } from "../shared/summaries_store.js";
+import { applySavedThreadDraft, applyThreadSummary, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, setBundle, threadTrackPath, } from "../shared/summaries_store.js";
 import { counterpartyAvailabilityForSummary, counterpartyAvailabilitySectionHtml, formatDraftReplyMarkdown, formatChatSenderLabel, latestUpdatesForThread, listSection, ownerNextStepsForThread, messageSourceDetailsHtml, nextStepsSectionHtml, partitionThreadsBySnooze, pendingMessageCountForThread, pendingMessagePillHtml, shouldShowThreadMessageBlocks, threadIsEmail, threadIsLinkedin, threadIsMeetRecording, threadIsSlack, threadIsText, threadLabel, threadMessagesForDisplay, threadMessagesForReply, threadSummaryErrorHtml, threadSummaryForDisplay, } from "../shared/thread_domain.js";
 import { escapeHtml, formatDate, formatRecipients, str, toneClass } from "../shared/utils.js";
-import { ensureAvailabilityDocLoaded } from "../shared/availability_windows.js";
 import { applyNavFeatureVisibility, isFeatureEnabled } from "../shared/features.js";
-import { refreshAvailabilityPanel } from "../availability_panel.js";
+import { sourcePillHtml, threadChannelForThread } from "../shared/source_ui.js";
 const PAGE_HTML = `
 <div class="dashboard-layout dashboard-layout--threads">
   <aside class="thread-nav" id="thread-nav">
@@ -15,13 +14,6 @@ const PAGE_HTML = `
     <div id="lanes" class="lanes-grid" hidden></div>
     <div id="cards" class="cards"></div>
   </div>
-  <aside class="availability-rail" id="availability-rail" aria-label="Your availability" data-feature="availability">
-    <section id="availability-section" class="availability-section" aria-labelledby="availability-heading" hidden>
-      <h2 id="availability-heading" class="availability-section-title">Open slots · next 7 days</h2>
-      <p class="availability-meta" id="availability-meta"></p>
-      <div id="availability-agenda" class="availability-agenda"></div>
-    </section>
-  </aside>
 </div>`;
 function isMobileThreadsLayout() {
     return window.matchMedia("(max-width: 640px)").matches;
@@ -50,13 +42,25 @@ function openMobileThreadDetail(threadId) {
 }
 let threadViewMode = "active";
 let threadChannelFilter = "all";
+const SOURCE_FILTER_DEFS = [
+    { id: "email", label: "Email" },
+    { id: "text", label: "Text", feature: "texts" },
+    { id: "slack", label: "Slack", feature: "slack" },
+    { id: "linkedin", label: "LinkedIn", feature: "linkedin" },
+    { id: "meet", label: "Meet", feature: "meet_recordings" },
+];
+let threadSourceFilters = new Set(SOURCE_FILTER_DEFS.map((s) => s.id));
+let threadAssignmentFilter = "all";
+let threadSortMode = "recent-updates";
+let dashboardToolbarBound = false;
 let navObserver = null;
 let interactionsBound = false;
 let cardsRenderToken = 0;
 const INITIAL_CARD_BATCH = 10;
 const CARD_BATCH_SIZE = 10;
 function cardsEl() {
-    return document.getElementById("cards");
+    return (document.getElementById("cards") ||
+        document.getElementById("dashboard-threads-cards"));
 }
 function navListEl() {
     return document.getElementById("thread-nav-list");
@@ -82,6 +86,104 @@ async function requestEmailReplyDraft(threadId, responseIntent, threadSubject) {
     }
     return data;
 }
+function threadUpdatedAt(thread) {
+    const row = thread.messages[0];
+    return str(row?.cleaned?.datetime || row?.summary?.datetime);
+}
+function threadCreatedAt(thread) {
+    const row = thread.messages[thread.messages.length - 1] || thread.messages[0];
+    return str(row?.cleaned?.datetime || row?.summary?.datetime);
+}
+function threadIsAssignedToTrack(data, threadId) {
+    return threadTrackPath(data, threadId) !== null;
+}
+function enabledSourceFilterDefs() {
+    return SOURCE_FILTER_DEFS.filter((s) => !s.feature || isFeatureEnabled(s.feature));
+}
+function filterThreadsBySourceSet(threads) {
+    return threads.filter((t) => threadSourceFilters.has(threadChannelForThread(t)));
+}
+function filterThreadsByAssignment(threads, data) {
+    if (threadAssignmentFilter !== "unassigned")
+        return threads;
+    return threads.filter((t) => !threadIsAssignedToTrack(data, t.id));
+}
+function sortDashboardThreads(threads, data) {
+    const copy = [...threads];
+    if (threadSortMode === "newest") {
+        return copy.sort((a, b) => threadCreatedAt(b).localeCompare(threadCreatedAt(a)));
+    }
+    if (threadSortMode === "lane") {
+        return copy.sort((a, b) => {
+            const assignedA = threadIsAssignedToTrack(data, a.id);
+            const assignedB = threadIsAssignedToTrack(data, b.id);
+            if (assignedA !== assignedB)
+                return assignedA ? -1 : 1;
+            const pathA = threadTrackPath(data, a.id) || "";
+            const pathB = threadTrackPath(data, b.id) || "";
+            if (pathA !== pathB)
+                return pathA.localeCompare(pathB);
+            return threadUpdatedAt(b).localeCompare(threadUpdatedAt(a));
+        });
+    }
+    return copy.sort((a, b) => threadUpdatedAt(b).localeCompare(threadUpdatedAt(a)));
+}
+function sourceFilterCounts(threads) {
+    const counts = {
+        email: 0,
+        text: 0,
+        slack: 0,
+        linkedin: 0,
+        meet: 0,
+    };
+    for (const thread of threads) {
+        counts[threadChannelForThread(thread)] += 1;
+    }
+    return counts;
+}
+function updateSourceDropdownLabel() {
+    const trigger = document.getElementById("thread-source-trigger");
+    if (!trigger)
+        return;
+    const enabled = enabledSourceFilterDefs();
+    const selected = enabled.filter((s) => threadSourceFilters.has(s.id));
+    if (!selected.length)
+        trigger.textContent = "No sources";
+    else if (selected.length === enabled.length)
+        trigger.textContent = "All sources";
+    else if (selected.length === 1)
+        trigger.textContent = selected[0].label;
+    else
+        trigger.textContent = `${selected.length} sources`;
+}
+function positionSourceDropdownPanel() {
+    const trigger = document.getElementById("thread-source-trigger");
+    const panel = document.getElementById("thread-source-panel");
+    if (!trigger || !panel)
+        return;
+    const rect = trigger.getBoundingClientRect();
+    panel.style.top = `${rect.bottom + 4}px`;
+    panel.style.left = `${rect.left}px`;
+}
+function setSourceDropdownOpen(open) {
+    const panel = document.getElementById("thread-source-panel");
+    const trigger = document.getElementById("thread-source-trigger");
+    if (!panel || !trigger)
+        return;
+    panel.hidden = !open;
+    trigger.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open)
+        positionSourceDropdownPanel();
+}
+function syncThreadSourceFiltersFromCheckboxes() {
+    threadSourceFilters = new Set();
+    document.querySelectorAll("#thread-source-panel input[data-source-filter]").forEach((input) => {
+        if (input.disabled)
+            return;
+        if (input.checked)
+            threadSourceFilters.add(input.dataset.sourceFilter);
+    });
+}
 function filterThreadsByChannel(threads) {
     if (threadChannelFilter === "all")
         return threads;
@@ -106,6 +208,14 @@ function channelFilterEmptyMessage() {
         return "No Meet recording threads in this view.";
     return "No email threads in this view.";
 }
+function threadNavItemLabel(thread, data) {
+    const pendingCount = pendingMessageCountForThread(thread, data);
+    const label = threadLabel(thread);
+    return pendingCount > 0 ? `${label} (${pendingCount} pending)` : label;
+}
+function threadNavChannelBadgeHtml(thread) {
+    return sourcePillHtml(threadChannelForThread(thread));
+}
 function buildThreadCard(thread) {
     const data = getCurrentData();
     const primary = thread.messages[0] || { cleaned: null, summary: null };
@@ -124,6 +234,7 @@ function buildThreadCard(thread) {
     const isText = threadIsText(thread);
     const isSlack = threadIsSlack(thread);
     const isLinkedin = threadIsLinkedin(thread);
+    const isMeet = threadIsMeetRecording(thread);
     const updates = latestUpdatesForThread(thread);
     const nextSteps = ownerNextStepsForThread(thread);
     const counterpartySlots = counterpartyAvailabilityForSummary(s);
@@ -150,13 +261,14 @@ function buildThreadCard(thread) {
     const savedIntent = savedDraft ? str(savedDraft.response_intent) : "";
     const savedMd = savedDraft ? str(savedDraft.markdown) : "";
     const showSavedOut = Boolean(savedMd);
+    const channelPill = sourcePillHtml(threadChannelForThread(thread));
     const art = document.createElement("article");
     art.className = "card";
     art.id = `thread-${thread.id}`;
     art.innerHTML =
-        `<div class="card-top"><time datetime="${escapeHtml(dt)}">${formatDate(dt)}</time>${tone ? `<span class="tone ${toneClass(tone)}">${escapeHtml(tone)}</span>` : ""}<span class="count-pill">${nMsg} msg${nMsg > 1 ? " (thread)" : ""}</span>${pendingMessagePillHtml(pendingCount)}${isText ? `<span class="count-pill channel-text">Text</span>` : isSlack ? `<span class="count-pill channel-slack">Slack</span>` : isLinkedin ? `<span class="count-pill channel-linkedin">LinkedIn</span>` : ""}` +
+        `<div class="card-top"><time datetime="${escapeHtml(dt)}">${formatDate(dt)}</time>${tone ? `<span class="tone ${toneClass(tone)}">${escapeHtml(tone)}</span>` : ""}<span class="count-pill">${nMsg} msg${nMsg > 1 ? " (thread)" : ""}</span>${pendingMessagePillHtml(pendingCount)}${channelPill}` +
             `<div class="card-actions">` +
-            `<a href="/plans?thread=${encodeURIComponent(thread.id)}" class="create-plan-link">Create a plan</a>` +
+            `<a href="/dashboard?thread=${encodeURIComponent(thread.id)}#schedule-plans" class="create-plan-link">Create a plan</a>` +
             `<button type="button" class="thread-refresh-summary-btn" data-refresh-thread-id="${escapeHtml(thread.id)}">Refresh summary</button>` +
             `<button type="button" class="draft-reply-toggle" data-draft-thread-id="${escapeHtml(thread.id)}">Draft reply</button>` +
             `<button type="button" class="snooze-btn" data-snooze-thread-id="${escapeHtml(thread.id)}">${Number(s.snoozed || 0) === 1 ? "Unsnooze" : "Snooze"}</button>` +
@@ -186,6 +298,8 @@ function buildThreadCard(thread) {
 function renderCards(threads) {
     const token = ++cardsRenderToken;
     const el = cardsEl();
+    if (!el)
+        return;
     el.innerHTML = "";
     if (!threads.length) {
         el.innerHTML = `<p class="empty-state">${channelFilterEmptyMessage()}</p>`;
@@ -302,12 +416,17 @@ function renderNav(threads, snoozedCount, removedCount, channelCounts) {
         const li = document.createElement("li");
         const btn = document.createElement("button");
         btn.type = "button";
-        const pendingCount = pendingMessageCountForThread(thread, data);
-        btn.textContent =
-            pendingCount > 0
-                ? `${threadLabel(thread)} (${pendingCount} pending)`
-                : threadLabel(thread);
+        btn.className = "thread-nav-thread-btn";
         btn.dataset.threadId = thread.id;
+        const labelSpan = document.createElement("span");
+        labelSpan.className = "thread-nav-thread-label";
+        labelSpan.textContent = threadNavItemLabel(thread, data);
+        btn.appendChild(labelSpan);
+        const badgeWrap = document.createElement("span");
+        badgeWrap.innerHTML = threadNavChannelBadgeHtml(thread);
+        const badge = badgeWrap.firstElementChild;
+        if (badge)
+            btn.appendChild(badge);
         btn.addEventListener("click", () => {
             document.querySelectorAll("#thread-nav button[data-thread-id]").forEach((el) => el.classList.remove("active"));
             btn.classList.add("active");
@@ -398,20 +517,226 @@ function reloadFromStore() {
     const data = getCurrentData();
     if (data) {
         setBundle(data, getCurrentSourceLabel());
-        void renderThreadsPage();
+        if (document.getElementById("dashboard-threads-root")) {
+            void renderDashboardThreadsInline();
+        }
+        else {
+            void renderThreadsPage();
+        }
     }
+}
+function focusThreadFromQuery(visible) {
+    const threadId = new URLSearchParams(location.search).get("thread")?.trim() ?? "";
+    if (!threadId)
+        return;
+    if (!visible.some((t) => t.id === threadId))
+        return;
+    const card = document.getElementById(`thread-${threadId}`);
+    if (!card)
+        return;
+    card.scrollIntoView({ behavior: "smooth", block: "start" });
+    openMobileThreadDetail(threadId);
+    document.querySelectorAll("#thread-nav button[data-thread-id]").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.threadId === threadId);
+    });
 }
 export function mountThreadsPage(root) {
     root.innerHTML = PAGE_HTML;
+}
+function ensureDashboardThreadsShell() {
+    const root = document.getElementById("dashboard-threads-root");
+    if (!root || root.dataset.mounted === "1")
+        return;
+    root.innerHTML = `
+    <div class="thread-toolbar" id="dashboard-thread-toolbar"></div>
+    <p class="thread-empty" id="thread-empty" hidden>No threads match these filters.</p>
+    <div id="dashboard-threads-cards" class="cards dashboard-threads-cards"></div>`;
+    root.dataset.mounted = "1";
+    bindDashboardToolbarInteractions();
+}
+function bindDashboardToolbarInteractions() {
+    if (dashboardToolbarBound)
+        return;
+    dashboardToolbarBound = true;
+    document.addEventListener("click", (ev) => {
+        const target = ev.target;
+        const toolbar = document.getElementById("dashboard-thread-toolbar");
+        if (!toolbar?.contains(target) && !document.getElementById("thread-source-panel")?.contains(target)) {
+            setSourceDropdownOpen(false);
+        }
+    });
+    document.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape")
+            setSourceDropdownOpen(false);
+    });
+    window.addEventListener("scroll", () => {
+        const panel = document.getElementById("thread-source-panel");
+        if (panel && !panel.hidden)
+            positionSourceDropdownPanel();
+    }, true);
+    window.addEventListener("resize", () => {
+        const panel = document.getElementById("thread-source-panel");
+        if (panel && !panel.hidden)
+            positionSourceDropdownPanel();
+    });
+    document.getElementById("dashboard-threads-root")?.addEventListener("click", (ev) => {
+        const target = ev.target;
+        const toolbar = document.getElementById("dashboard-thread-toolbar");
+        if (!toolbar)
+            return;
+        const modeBtn = target.closest("[data-thread-mode]");
+        if (modeBtn && toolbar.contains(modeBtn)) {
+            const mode = modeBtn.dataset.threadMode;
+            if (!mode || modeBtn.disabled)
+                return;
+            threadViewMode = mode;
+            void renderDashboardThreadsInline();
+            return;
+        }
+        const assignmentBtn = target.closest("[data-thread-assignment]");
+        if (assignmentBtn && toolbar.contains(assignmentBtn)) {
+            const assignment = assignmentBtn.dataset.threadAssignment;
+            if (!assignment || assignmentBtn.disabled)
+                return;
+            threadAssignmentFilter = assignment;
+            void renderDashboardThreadsInline();
+            return;
+        }
+        if (target.closest("#thread-source-trigger")) {
+            ev.stopPropagation();
+            const panel = document.getElementById("thread-source-panel");
+            setSourceDropdownOpen(Boolean(panel?.hidden));
+            return;
+        }
+        if (target.closest("#thread-source-select-all")) {
+            document.querySelectorAll("#thread-source-panel input[data-source-filter]").forEach((input) => {
+                if (!input.disabled)
+                    input.checked = true;
+            });
+            syncThreadSourceFiltersFromCheckboxes();
+            updateSourceDropdownLabel();
+            void renderDashboardThreadsInline();
+            return;
+        }
+        if (target.closest("#thread-source-select-none")) {
+            document.querySelectorAll("#thread-source-panel input[data-source-filter]").forEach((input) => {
+                if (!input.disabled)
+                    input.checked = false;
+            });
+            syncThreadSourceFiltersFromCheckboxes();
+            updateSourceDropdownLabel();
+            void renderDashboardThreadsInline();
+        }
+    });
+    document.getElementById("dashboard-threads-root")?.addEventListener("change", (ev) => {
+        const input = ev.target.closest("input[data-source-filter]");
+        if (!input)
+            return;
+        syncThreadSourceFiltersFromCheckboxes();
+        updateSourceDropdownLabel();
+        void renderDashboardThreadsInline();
+    });
+}
+function renderDashboardThreadsToolbar(inboxThreads, snoozedCount, removedCount) {
+    const toolbar = document.getElementById("dashboard-thread-toolbar");
+    if (!toolbar)
+        return;
+    const counts = sourceFilterCounts(inboxThreads);
+    let unassignedCount = 0;
+    const data = getCurrentData();
+    for (const thread of inboxThreads) {
+        if (!threadIsAssignedToTrack(data, thread.id))
+            unassignedCount += 1;
+    }
+    if (threadAssignmentFilter === "unassigned" && unassignedCount === 0) {
+        threadAssignmentFilter = "all";
+    }
+    const modeButtons = [
+        { id: "active", label: "Active" },
+        { id: "snoozed", label: `Snoozed (${snoozedCount})`, disabled: snoozedCount === 0 },
+        { id: "removed", label: `Removed (${removedCount})`, disabled: removedCount === 0 },
+    ]
+        .map(({ id, label, disabled }) => `<button type="button" class="nav-mode-btn${threadViewMode === id ? " active" : ""}" data-thread-mode="${id}"${disabled ? " disabled" : ""}>${escapeHtml(label)}</button>`)
+        .join("");
+    const sourceOptions = enabledSourceFilterDefs()
+        .map(({ id, label }) => {
+        const count = counts[id];
+        const disabled = count === 0;
+        const checked = !disabled && threadSourceFilters.has(id);
+        if (disabled)
+            threadSourceFilters.delete(id);
+        else if (checked)
+            threadSourceFilters.add(id);
+        return `<label class="thread-source-dropdown-option${disabled ? " is-disabled" : ""}"><input type="checkbox" data-source-filter="${id}"${checked ? " checked" : ""}${disabled ? " disabled" : ""} />${sourcePillHtml(id, label)}</label>`;
+    })
+        .join("");
+    const assignmentAllLabel = inboxThreads.length > 0 ? `All (${inboxThreads.length})` : "All";
+    const assignmentUnassignedLabel = unassignedCount > 0 ? `Unassigned (${unassignedCount})` : "Unassigned";
+    toolbar.innerHTML = `
+    <div class="thread-control-group">
+      <span class="thread-control-label" id="thread-inbox-label">Show</span>
+      <div class="thread-segmented" role="group" aria-labelledby="thread-inbox-label">${modeButtons}</div>
+    </div>
+    <div class="thread-control-group">
+      <span class="thread-control-label" id="thread-source-label">Source</span>
+      <div class="thread-source-dropdown" id="thread-source-dropdown">
+        <button type="button" class="thread-source-dropdown-trigger" id="thread-source-trigger" aria-haspopup="true" aria-expanded="false" aria-controls="thread-source-panel">All sources</button>
+        <div class="thread-source-dropdown-panel" id="thread-source-panel" hidden>
+          <div class="thread-source-dropdown-actions">
+            <button type="button" id="thread-source-select-all">All</button>
+            <button type="button" id="thread-source-select-none">None</button>
+          </div>
+          ${sourceOptions}
+        </div>
+      </div>
+    </div>
+    <div class="thread-control-group">
+      <span class="thread-control-label" id="thread-assignment-label">Assignment</span>
+      <div class="thread-segmented" role="group" aria-labelledby="thread-assignment-label">
+        <button type="button" class="nav-mode-btn${threadAssignmentFilter === "all" ? " active" : ""}" data-thread-assignment="all">${escapeHtml(assignmentAllLabel)}</button>
+        <button type="button" class="nav-mode-btn${threadAssignmentFilter === "unassigned" ? " active" : ""}" data-thread-assignment="unassigned"${unassignedCount === 0 ? " disabled" : ""}>${escapeHtml(assignmentUnassignedLabel)}</button>
+      </div>
+    </div>
+    <div class="thread-control-group">
+      <label class="thread-control-label" for="thread-sort">Sort</label>
+      <select class="thread-sort-select" id="thread-sort" aria-label="Sort threads">
+        <option value="recent-updates"${threadSortMode === "recent-updates" ? " selected" : ""}>Recent updates</option>
+        <option value="newest"${threadSortMode === "newest" ? " selected" : ""}>Newest added</option>
+        <option value="lane"${threadSortMode === "lane" ? " selected" : ""}>By lane</option>
+      </select>
+    </div>`;
+    updateSourceDropdownLabel();
+    document.getElementById("thread-sort")?.addEventListener("change", (ev) => {
+        const value = ev.target.value;
+        if (value === "recent-updates" || value === "newest" || value === "lane") {
+            threadSortMode = value;
+            void renderDashboardThreadsInline();
+        }
+    });
+}
+export async function renderDashboardThreadsInline() {
+    const data = getCurrentData();
+    if (!data)
+        return;
+    ensureDashboardThreadsShell();
+    const { active, snoozed, removed, snoozedCount, removedCount } = partitionThreadsBySnooze(getCurrentThreads());
+    const bySnooze = threadViewMode === "snoozed" ? snoozed : threadViewMode === "removed" ? removed : active;
+    renderDashboardThreadsToolbar(bySnooze, snoozedCount, removedCount);
+    let visible = filterThreadsBySourceSet(bySnooze);
+    visible = filterThreadsByAssignment(visible, data);
+    visible = sortDashboardThreads(visible, data);
+    const emptyEl = document.getElementById("thread-empty");
+    const cardsEl = document.getElementById("dashboard-threads-cards");
+    emptyEl?.classList.toggle("is-visible", visible.length === 0);
+    emptyEl?.toggleAttribute("hidden", visible.length > 0);
+    cardsEl?.toggleAttribute("hidden", visible.length === 0);
+    renderCards(visible);
 }
 export async function renderThreadsPage() {
     const data = getCurrentData();
     if (!data)
         return;
     applyNavFeatureVisibility();
-    if (isFeatureEnabled("availability")) {
-        await ensureAvailabilityDocLoaded();
-    }
     const { active, snoozed, removed, snoozedCount, removedCount } = partitionThreadsBySnooze(getCurrentThreads());
     const bySnooze = threadViewMode === "snoozed" ? snoozed : threadViewMode === "removed" ? removed : active;
     const channelCounts = {
@@ -443,9 +768,7 @@ export async function renderThreadsPage() {
     renderCards(visible);
     renderNav(visible, snoozedCount, removedCount, channelCounts);
     bindScrollNavHighlight();
-    if (isFeatureEnabled("availability")) {
-        await refreshAvailabilityPanel();
-    }
+    focusThreadFromQuery(visible);
 }
 export function bindThreadsInteractions() {
     if (interactionsBound)

@@ -1,6 +1,6 @@
 import { mergeRows, setDisplaySourceAccount } from "./thread_domain.js";
 import { isTodoPlanThreadId } from "./plan_helpers.js";
-import type { LaneSummaryView, LaneView, LooseObj, ThreadView, PlanView } from "./types.js";
+import type { LaneAreaView, LaneSummaryView, LaneView, LooseObj, ThreadView, PlanView } from "./types.js";
 import { str } from "./utils.js";
 
 export const SUMMARIES_BUNDLE_URL = "/api/summaries/bundle";
@@ -105,6 +105,7 @@ export function normalizeBundle(data: LooseObj): LooseObj {
   if (!data.thread_drafts || typeof data.thread_drafts !== "object") data.thread_drafts = {};
   if (!data.meeting_preps || typeof data.meeting_preps !== "object") data.meeting_preps = {};
   if (!Array.isArray(data.lanes)) data.lanes = [];
+  if (!Array.isArray(data.lane_areas)) data.lane_areas = [];
   if (!data.lane_threads || typeof data.lane_threads !== "object") data.lane_threads = {};
   if (!data.lane_summaries || typeof data.lane_summaries !== "object") data.lane_summaries = {};
   if (!Array.isArray(data.thread_plans)) data.thread_plans = [];
@@ -113,6 +114,21 @@ export function normalizeBundle(data: LooseObj): LooseObj {
   }
   if (typeof data.source_account !== "string") data.source_account = "";
   return data;
+}
+
+export function getLaneAreas(data: LooseObj | null): LaneAreaView[] {
+  if (!data || !Array.isArray(data.lane_areas)) return [];
+  return (data.lane_areas as LooseObj[])
+    .map((row) => ({
+      id: Number(row.id) || 0,
+      name: str(row.name),
+      color_index: Number(row.color_index) || 0,
+      sort_order: Number(row.sort_order) || 0,
+      created_at: str(row.created_at),
+      updated_at: str(row.updated_at),
+    }))
+    .filter((area) => area.id > 0 && area.name)
+    .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
 }
 
 export function getLanes(data: LooseObj | null): LaneView[] {
@@ -124,8 +140,29 @@ export function getLanes(data: LooseObj | null): LaneView[] {
       created_at: str(row.created_at),
       updated_at: str(row.updated_at),
       archived: Boolean(row.archived),
+      area_id: row.area_id == null || row.area_id === "" ? null : Number(row.area_id) || null,
     }))
     .filter((lane) => lane.id > 0 && lane.name);
+}
+
+export function getTracksForArea(data: LooseObj | null, areaId: number): LaneView[] {
+  return getLanes(data).filter((lane) => lane.area_id === areaId);
+}
+
+export function threadTrackPath(data: LooseObj | null, threadId: string): string | null {
+  if (!data || !data.lane_threads || typeof data.lane_threads !== "object") return null;
+  const memberships = data.lane_threads as LooseObj;
+  for (const [laneKey, ids] of Object.entries(memberships)) {
+    if (!Array.isArray(ids) || !ids.map((id) => str(id)).includes(threadId)) continue;
+    const laneId = Number(laneKey) || 0;
+    const lane = getLanes(data).find((l) => l.id === laneId);
+    if (!lane) continue;
+    const area =
+      lane.area_id != null ? getLaneAreas(data).find((a) => a.id === lane.area_id) : null;
+    if (area) return `${area.name} → ${lane.name}`;
+    return lane.name;
+  }
+  return null;
 }
 
 export function getLaneThreadIds(data: LooseObj | null, laneId: number): string[] {
@@ -212,6 +249,16 @@ export function applyLaneArchived(laneId: number, archived: boolean): void {
   for (const row of currentData.lanes as LooseObj[]) {
     if (Number(row.id) === laneId) {
       row.archived = archived;
+      return;
+    }
+  }
+}
+
+export function applyLaneAreaAssigned(laneId: number, areaId: number | null): void {
+  if (!currentData || !Array.isArray(currentData.lanes)) return;
+  for (const row of currentData.lanes as LooseObj[]) {
+    if (Number(row.id) === laneId) {
+      row.area_id = areaId;
       return;
     }
   }

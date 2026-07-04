@@ -14,86 +14,51 @@
 </head>
 <body>
   <a class="skip-link" href="#page-root">Skip to main content</a>
-  <div class="wrap">
-    <header class="app-header">
-      <div class="app-header-row">
-        <div class="brand">
-          <img src="/square5.jpg" alt="" class="brand-logo" width="52" height="52" decoding="async" />
-          <div class="brand-text">
-            <h1>Fivelanes</h1>
-          </div>
-        </div>
-        <div class="header-controls">
-          <button
-            type="button"
-            id="settings-btn"
-            class="app-nav-settings-btn header-settings-btn"
-            aria-haspopup="dialog"
-            aria-controls="settings-dialog"
-          >
-            <svg class="app-nav-settings-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path
-                d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
-                stroke="currentColor"
-                stroke-width="1.75"
-              />
-              <path
-                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
-                stroke="currentColor"
-                stroke-width="1.75"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-            <span class="app-nav-settings-label">Settings</span>
-          </button>
-          <button type="button" id="run-fivelanes-btn" class="run-fivelanes-btn" aria-label="Run fivelanes">
-            <span class="run-fivelanes-btn-label">Run fivelanes</span>
-          </button>
-        </div>
-      </div>
-      <div class="brand-lanes" aria-hidden="true">
-        <span></span><span></span><span></span><span></span><span></span><span></span>
-      </div>
-      <p class="pipeline-status" id="pipeline-status" hidden></p>
-      <p class="run-meta" id="run-meta" hidden></p>
-    </header>
 
+  <header class="app-top-bar">
+    <div class="app-top-bar-lead">
+      <a href="/dashboard" class="app-top-bar-brand app-nav-link" data-route="dashboard">
+        <img src="/square5.jpg" alt="" class="app-top-bar-logo" width="40" height="40" decoding="async" />
+        <strong class="app-top-bar-name">Fivelanes</strong>
+      </a>
+      <p class="run-meta" id="run-meta" hidden></p>
+      <p class="pipeline-status" id="pipeline-status" hidden></p>
+    </div>
+    <div class="app-top-bar-actions">
+      <a href="/sources" class="header-icon-btn app-nav-link" data-route="sources">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 7h16M4 12h10M4 17h14" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+        </svg>
+        Sources
+      </a>
+      <button
+        type="button"
+        id="settings-btn"
+        class="header-icon-btn"
+        aria-haspopup="dialog"
+        aria-controls="settings-dialog"
+      >
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.75"/>
+          <path
+            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        Settings
+      </button>
+      <button type="button" id="run-fivelanes-btn" class="run-fivelanes-btn" aria-label="Run fivelanes">
+        <span class="run-fivelanes-btn-label">Run fivelanes</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="wrap">
     <div class="app-shell">
-      <nav class="app-nav" id="app-nav" aria-label="Main">
-        <ul id="app-nav-list" class="app-nav-tabs">
-          <li><a href="/dashboard" class="app-nav-link" data-route="dashboard" data-short="Home"><span class="app-nav-link-text">Dashboard</span></a></li>
-          <li><a href="/threads" class="app-nav-link" data-route="threads" data-short="Threads"><span class="app-nav-link-text">Threads</span></a></li>
-          <li><a href="/meetings" class="app-nav-link" data-route="meetings" data-short="Meet"><span class="app-nav-link-text">Meetings</span></a></li>
-          <li><a href="/lanes" class="app-nav-link" data-route="lanes" data-short="Lanes"><span class="app-nav-link-text">Lanes</span></a></li>
-          <li><a href="/plans" class="app-nav-link" data-route="plans" data-short="Plans"><span class="app-nav-link-text">Plans</span></a></li>
-        </ul>
-        <div class="app-nav-group app-nav-sources-desktop" id="app-nav-sources" data-nav-group="sources">
-          <span class="app-nav-group-label">Sources</span>
-          <ul class="app-nav-sublist" aria-label="Sources">
-            <li><a href="/texts-setup" class="app-nav-link" data-route="texts-setup" data-feature="texts"><span class="app-nav-link-text">Texts</span></a></li>
-            <li><a href="/slack-setup" class="app-nav-link" data-route="slack-setup" data-feature="slack"><span class="app-nav-link-text">Slack</span></a></li>
-            <li><a href="/linkedin-setup" class="app-nav-link" data-route="linkedin-setup" data-feature="linkedin"><span class="app-nav-link-text">LinkedIn</span></a></li>
-            <li><a href="/meet-recordings-setup" class="app-nav-link" data-route="meet-recordings-setup" data-feature="meet_recordings"><span class="app-nav-link-text">Meet notes</span></a></li>
-          </ul>
-        </div>
-        <details class="app-nav-more" id="app-nav-more">
-          <summary class="app-nav-more-trigger" aria-label="More pages">
-            <span class="app-nav-more-icon" aria-hidden="true">⋯</span>
-            <span class="app-nav-more-label">More</span>
-          </summary>
-          <div class="app-nav-more-panel" role="menu">
-            <p class="app-nav-more-heading">Sources</p>
-            <a href="/texts-setup" class="app-nav-link app-nav-more-link" data-route="texts-setup" data-feature="texts" role="menuitem">Texts</a>
-            <a href="/slack-setup" class="app-nav-link app-nav-more-link" data-route="slack-setup" data-feature="slack" role="menuitem">Slack</a>
-            <a href="/linkedin-setup" class="app-nav-link app-nav-more-link" data-route="linkedin-setup" data-feature="linkedin" role="menuitem">LinkedIn</a>
-            <a href="/meet-recordings-setup" class="app-nav-link app-nav-more-link" data-route="meet-recordings-setup" data-feature="meet_recordings" role="menuitem">Meet notes</a>
-          </div>
-        </details>
-      </nav>
-      <div class="app-body">
-        <main id="page-root" tabindex="-1"></main>
-      </div>
+      <main id="page-root" tabindex="-1"></main>
     </div>
   </div>
 

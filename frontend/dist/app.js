@@ -6,6 +6,7 @@ import { bindLanesInteractions, mountLanesPage, renderLanesPage } from "./pages/
 import { mountMeetingsPage, renderMeetingsPage } from "./pages/meetings_page.js";
 import { bindPlansInteractions, mountPlansPage, renderPlansPage } from "./pages/plans_page.js";
 import { bindThreadsInteractions, mountThreadsPage, renderThreadsPage } from "./pages/threads_page.js";
+import { bindSourcesInteractions, mountSourcesPage, renderSourcesPage, } from "./pages/sources_page.js";
 import { bindLinkedinSetupInteractions, mountLinkedinSetupPage, renderLinkedinSetupPage, } from "./pages/linkedin_setup_page.js";
 import { bindSlackSetupInteractions, mountSlackSetupPage, renderSlackSetupPage, } from "./pages/slack_setup_page.js";
 import { bindTextsSetupInteractions, mountTextsSetupPage, renderTextsSetupPage, } from "./pages/texts_setup_page.js";
@@ -19,6 +20,45 @@ import { setDisplaySourceAccount } from "./shared/thread_domain.js";
 import { escapeHtml } from "./shared/utils.js";
 const runMetaEl = document.getElementById("run-meta");
 const pageRoot = document.getElementById("page-root");
+const LEGACY_SETUP_REDIRECTS = {
+    "/texts-setup": "/sources#texts",
+    "/slack-setup": "/sources#slack",
+    "/linkedin-setup": "/sources#linkedin",
+    "/meet-recordings-setup": "/sources#meet",
+};
+/** Returns true if the browser is navigating away (legacy redirect). */
+export function applyLegacyRouteRedirect(pathname, search = location.search) {
+    const path = pathname.replace(/\/+$/, "") || "/";
+    const params = new URLSearchParams(search);
+    if (path === "/" || path === "/summaries.html") {
+        location.replace("/dashboard");
+        return true;
+    }
+    if (path === "/threads") {
+        const thread = params.get("thread")?.trim();
+        location.replace(thread ? `/dashboard?thread=${encodeURIComponent(thread)}` : "/dashboard");
+        return true;
+    }
+    if (path === "/meetings") {
+        location.replace("/dashboard#schedule");
+        return true;
+    }
+    if (path === "/lanes") {
+        location.replace("/dashboard#lanes");
+        return true;
+    }
+    if (path === "/plans") {
+        const thread = params.get("thread")?.trim();
+        location.replace(thread ? `/dashboard?thread=${encodeURIComponent(thread)}#schedule-plans` : "/dashboard#schedule-plans");
+        return true;
+    }
+    const setupTarget = LEGACY_SETUP_REDIRECTS[path];
+    if (setupTarget) {
+        location.replace(setupTarget);
+        return true;
+    }
+    return false;
+}
 async function rerenderCurrentPage() {
     await renderPage(routeFromPathname(location.pathname));
     refreshPlanNotifications();
@@ -27,6 +67,8 @@ export function routeFromPathname(pathname) {
     const path = pathname.replace(/\/+$/, "") || "/";
     if (path === "/dashboard")
         return "dashboard";
+    if (path === "/sources")
+        return "sources";
     if (path === "/meetings")
         return "meetings";
     if (path === "/lanes")
@@ -43,14 +85,11 @@ export function routeFromPathname(pathname) {
         return "meet-recordings-setup";
     if (path === "/threads" || path === "/" || path === "/summaries.html")
         return "threads";
-    return "threads";
+    return "dashboard";
 }
 function setActiveNav(route) {
     document.querySelectorAll(".app-nav-link[data-route]").forEach((link) => {
         link.classList.toggle("active", link.dataset.route === route);
-    });
-    document.querySelectorAll(".app-nav-group").forEach((group) => {
-        group.classList.toggle("has-active-child", group.querySelector(".app-nav-link.active") !== null);
     });
 }
 function showBootstrapError(message) {
@@ -75,7 +114,14 @@ async function renderPage(route) {
         mountDashboardPage(pageRoot);
         bindDashboardInteractions();
         bindLanesInteractions();
+        bindThreadsInteractions();
         await renderDashboardPage();
+        return;
+    }
+    if (route === "sources") {
+        mountSourcesPage(pageRoot);
+        bindSourcesInteractions();
+        await renderSourcesPage();
         return;
     }
     if (route === "meetings") {
@@ -136,6 +182,8 @@ async function bootstrap() {
         showBootstrapError("This view loads data from the server; open it via the dashboard (not as a file:// URL).");
         return;
     }
+    if (applyLegacyRouteRedirect(location.pathname, location.search))
+        return;
     prefetchMeetings(MEETINGS_LOOKAHEAD_DAYS);
     void refreshPipelineRunMeta(runMetaEl);
     mountSettingsDialog();
@@ -148,7 +196,8 @@ async function bootstrap() {
     const needsBundle = route !== "texts-setup" &&
         route !== "slack-setup" &&
         route !== "linkedin-setup" &&
-        route !== "meet-recordings-setup";
+        route !== "meet-recordings-setup" &&
+        route !== "sources";
     const cached = needsBundle ? readCachedBundle() : null;
     try {
         if (cached) {

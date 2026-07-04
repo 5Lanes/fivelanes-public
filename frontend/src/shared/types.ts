@@ -11,10 +11,20 @@ export type AppRoute =
   | "meetings"
   | "lanes"
   | "plans"
+  | "sources"
   | "texts-setup"
   | "slack-setup"
   | "linkedin-setup"
   | "meet-recordings-setup";
+
+export type LaneAreaView = {
+  id: number;
+  name: string;
+  color_index: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
 
 export type LaneView = {
   id: number;
@@ -22,7 +32,11 @@ export type LaneView = {
   created_at: string;
   updated_at: string;
   archived?: boolean;
+  area_id?: number | null;
 };
+
+/** Track is the same row as LaneView (project card within a lane area tab). */
+export type TrackView = LaneView;
 
 export type LaneSummaryView = {
   summary: string;

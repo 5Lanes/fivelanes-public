@@ -56,12 +56,6 @@ function parseBackend(data) {
     }
     return backend;
 }
-function parseEmailCapture(data) {
-    const mode = str(data.email_capture).toLowerCase();
-    if (mode !== "forwards" && mode !== "labels")
-        return "forwards";
-    return mode;
-}
 function backendSwitchEl() {
     return dialogEl?.querySelector("#backend-switch") ?? null;
 }
@@ -101,21 +95,6 @@ export function syncBackendFromStatus(status) {
     if (raw === "claude" || raw === "llama") {
         updateBackendSwitch(raw);
     }
-}
-function updateEmailCaptureSwitch(mode) {
-    dialogEl?.querySelectorAll("[data-email-capture]").forEach((btn) => {
-        const active = btn.dataset.emailCapture === mode;
-        btn.classList.toggle("active", active);
-        btn.setAttribute("aria-pressed", active ? "true" : "false");
-    });
-    const note = dialogEl?.querySelector(".settings-labels-note");
-    if (note)
-        note.hidden = mode !== "labels";
-}
-function setEmailCaptureDisabled(disabled) {
-    dialogEl?.querySelectorAll("[data-email-capture]").forEach((btn) => {
-        btn.disabled = disabled;
-    });
 }
 function fillLookbackDaysField(days) {
     const el = dialogEl?.querySelector("#schedule-lookback-days");
@@ -183,18 +162,11 @@ async function setBackend(backend) {
     }
     updateBackendSwitch(backend);
 }
-async function setEmailCapture(mode) {
-    const res = await fetch("/api/config/email-capture", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ email_capture: mode }),
-    });
-    const data = (await res.json().catch(() => ({})));
-    if (!res.ok) {
-        throw new Error(str(data.error) || `Email capture update failed (${res.status})`);
-    }
-    updateEmailCaptureSwitch(parseEmailCapture(data));
+async function loadSettingsIntoDialog() {
+    const data = await fetchAppConfig();
+    updateBackendSwitch(parseBackend(data));
+    fillScheduleFields(parseSchedule(data.schedule ?? {}));
+    fillLookbackDaysField(parseLookbackDays(data));
 }
 async function saveLookbackDays(days) {
     const res = await fetch("/api/config/lookback-days", {
@@ -222,13 +194,6 @@ async function saveSchedule(config) {
     }
     return parseSchedule(data.schedule ?? config);
 }
-async function loadSettingsIntoDialog() {
-    const data = await fetchAppConfig();
-    updateBackendSwitch(parseBackend(data));
-    updateEmailCaptureSwitch(parseEmailCapture(data));
-    fillScheduleFields(parseSchedule(data.schedule ?? {}));
-    fillLookbackDaysField(parseLookbackDays(data));
-}
 export function mountSettingsDialog() {
     if (document.getElementById("settings-dialog"))
         return;
@@ -248,16 +213,6 @@ export function mountSettingsDialog() {
             <button type="button" class="backend-switch-btn" data-backend="claude" aria-pressed="false">Claude</button>
           </div>
         </div>
-      </section>
-
-      <section class="settings-section" aria-labelledby="settings-email-heading">
-        <h3 id="settings-email-heading">Email source</h3>
-        <p class="settings-lead">Choose how mail enters Fivelanes.</p>
-        <div class="backend-switch settings-segmented" id="email-capture-switch" role="group" aria-label="Email capture mode">
-          <button type="button" class="backend-switch-btn" data-email-capture="forwards" aria-pressed="false">Forwards</button>
-          <button type="button" class="backend-switch-btn" data-email-capture="labels" aria-pressed="false">Labels</button>
-        </div>
-        <p class="settings-labels-note" hidden>Label capture is not available yet — forwards are still used.</p>
       </section>
 
       <section class="settings-section" aria-labelledby="settings-schedule-heading">
@@ -310,7 +265,6 @@ export function mountSettingsDialog() {
 export function setSettingsControlsLocked(locked) {
     controlsLocked = locked;
     setBackendControlsDisabled(locked);
-    setEmailCaptureDisabled(locked);
 }
 export function bindSettingsPanel() {
     const btn = document.getElementById("settings-btn");
@@ -349,28 +303,6 @@ export function bindSettingsPanel() {
                 finally {
                     if (!controlsLocked)
                         setBackendControlsDisabled(false);
-                }
-            })();
-        });
-    });
-    dialogEl.querySelectorAll("[data-email-capture]").forEach((el) => {
-        el.addEventListener("click", () => {
-            const mode = el.dataset.emailCapture;
-            if (!mode || el.classList.contains("active") || el.disabled)
-                return;
-            void (async () => {
-                try {
-                    setDialogError("");
-                    setEmailCaptureDisabled(true);
-                    await setEmailCapture(mode);
-                }
-                catch (err) {
-                    const msg = err instanceof Error ? err.message : String(err);
-                    setDialogError(msg);
-                }
-                finally {
-                    if (!controlsLocked)
-                        setEmailCaptureDisabled(false);
                 }
             })();
         });

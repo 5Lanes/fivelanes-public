@@ -100,6 +100,8 @@ export function normalizeBundle(data) {
         data.meeting_preps = {};
     if (!Array.isArray(data.lanes))
         data.lanes = [];
+    if (!Array.isArray(data.lane_areas))
+        data.lane_areas = [];
     if (!data.lane_threads || typeof data.lane_threads !== "object")
         data.lane_threads = {};
     if (!data.lane_summaries || typeof data.lane_summaries !== "object")
@@ -113,6 +115,21 @@ export function normalizeBundle(data) {
         data.source_account = "";
     return data;
 }
+export function getLaneAreas(data) {
+    if (!data || !Array.isArray(data.lane_areas))
+        return [];
+    return data.lane_areas
+        .map((row) => ({
+        id: Number(row.id) || 0,
+        name: str(row.name),
+        color_index: Number(row.color_index) || 0,
+        sort_order: Number(row.sort_order) || 0,
+        created_at: str(row.created_at),
+        updated_at: str(row.updated_at),
+    }))
+        .filter((area) => area.id > 0 && area.name)
+        .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+}
 export function getLanes(data) {
     if (!data || !Array.isArray(data.lanes))
         return [];
@@ -123,8 +140,30 @@ export function getLanes(data) {
         created_at: str(row.created_at),
         updated_at: str(row.updated_at),
         archived: Boolean(row.archived),
+        area_id: row.area_id == null || row.area_id === "" ? null : Number(row.area_id) || null,
     }))
         .filter((lane) => lane.id > 0 && lane.name);
+}
+export function getTracksForArea(data, areaId) {
+    return getLanes(data).filter((lane) => lane.area_id === areaId);
+}
+export function threadTrackPath(data, threadId) {
+    if (!data || !data.lane_threads || typeof data.lane_threads !== "object")
+        return null;
+    const memberships = data.lane_threads;
+    for (const [laneKey, ids] of Object.entries(memberships)) {
+        if (!Array.isArray(ids) || !ids.map((id) => str(id)).includes(threadId))
+            continue;
+        const laneId = Number(laneKey) || 0;
+        const lane = getLanes(data).find((l) => l.id === laneId);
+        if (!lane)
+            continue;
+        const area = lane.area_id != null ? getLaneAreas(data).find((a) => a.id === lane.area_id) : null;
+        if (area)
+            return `${area.name} → ${lane.name}`;
+        return lane.name;
+    }
+    return null;
 }
 export function getLaneThreadIds(data, laneId) {
     if (!data || !data.lane_threads || typeof data.lane_threads !== "object")
@@ -216,6 +255,16 @@ export function applyLaneArchived(laneId, archived) {
     for (const row of currentData.lanes) {
         if (Number(row.id) === laneId) {
             row.archived = archived;
+            return;
+        }
+    }
+}
+export function applyLaneAreaAssigned(laneId, areaId) {
+    if (!currentData || !Array.isArray(currentData.lanes))
+        return;
+    for (const row of currentData.lanes) {
+        if (Number(row.id) === laneId) {
+            row.area_id = areaId;
             return;
         }
     }

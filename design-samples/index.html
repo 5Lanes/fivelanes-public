@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fivelanes design samples</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101216;
+      --surface: #171b21;
+      --border: #2a3038;
+      --text: #e8ebef;
+      --muted: #8b939e;
+      --accent: #3dbfb0;
+      --font-ui: system-ui, -apple-system, sans-serif;
+      --font-display: "Iowan Old Style", Palatino, Georgia, serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font-ui);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 2rem 1.25rem 4rem;
+    }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    h1 {
+      font-family: var(--font-display);
+      font-size: 1.75rem;
+      margin: 0 0 0.35rem;
+    }
+    .lead { color: var(--muted); margin: 0 0 2rem; }
+    .grid { display: flex; flex-direction: column; gap: 1rem; }
+    a.card {
+      display: block;
+      padding: 1.25rem 1.35rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color 150ms;
+    }
+    a.card:hover { border-color: var(--accent); }
+    a.card h2 { margin: 0 0 0.35rem; font-size: 1.1rem; }
+    a.card p { margin: 0; font-size: 0.9rem; color: var(--muted); }
+    .tag {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--accent);
+      margin-bottom: 0.5rem;
+    }
+    .note {
+      margin-top: 2rem;
+      padding: 1rem;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+      border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+    code { font-size: 0.85em; color: var(--text); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Dashboard vision</h1>
+    <p class="lead">Interactive preview at full app width (1280px). Not wired into the production app.</p>
+
+    <div class="grid">
+      <a class="card" href="g-dashboard-vision.html">
+        <span class="tag">Dashboard</span>
+        <h2>Dashboard</h2>
+        <p>Lanes, tracks, threads, and a schedule rail with calendar (open slots + meetings) and plans.</p>
+      </a>
+
+      <a class="card" href="g-dashboard-vision-sources.html">
+        <span class="tag">Sources</span>
+        <h2>Source setup</h2>
+        <p>Tabbed import configuration for email, texts, Slack, LinkedIn, and Meet notes.</p>
+      </a>
+    </div>
+
+    <p class="note">These files live in <code>design-samples/</code>. Use them to iterate on layout and UX before changing production pages.</p>
+  </div>
+</body>
+</html>

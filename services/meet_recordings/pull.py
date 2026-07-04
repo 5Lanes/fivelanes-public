@@ -87,6 +87,27 @@ def _drive_query(lookback_days: int) -> str:
     )
 
 
+def _drive_api_error_message(exc: HttpError) -> str:
+    """Human-readable message for Drive API failures (esp. API-not-enabled)."""
+    status = int(getattr(exc, "status_code", None) or getattr(exc.resp, "status", 0) or 0)
+    text = str(exc)
+    if status == 403 and (
+        "accessNotConfigured" in text
+        or "has not been used" in text
+        or "is disabled" in text
+    ):
+        return (
+            "Google Drive API is not enabled for this OAuth project. "
+            "Enable it at https://console.cloud.google.com/apis/library/drive.googleapis.com "
+            "and Google Docs API at "
+            "https://console.cloud.google.com/apis/library/docs.googleapis.com "
+            "(same project as credentials.json), wait a minute, then retry."
+        )
+    if status == 403:
+        return f"Drive API permission denied: {exc}"
+    return f"Drive API error: {exc}"
+
+
 def list_meet_recording_docs(
     drive_service: Any,
     *,
@@ -98,8 +119,8 @@ def list_meet_recording_docs(
     query = _drive_query(lookback_days)
     files: List[Dict[str, Any]] = []
     page_token: Optional[str] = None
-    try:
-        while True:
+    while True:
+        try:
             resp = (
                 drive_service.files()
                 .list(
@@ -117,39 +138,40 @@ def list_meet_recording_docs(
                 )
                 .execute()
             )
-            for item in resp.get("files") or []:
-                if not isinstance(item, dict):
-                    continue
-                file_id = str(item.get("id") or "").strip()
-                if not file_id:
-                    continue
-                owners = item.get("owners") or []
-                owner_email = ""
-                if owners and isinstance(owners[0], dict):
-                    owner_email = str(owners[0].get("emailAddress") or "").strip()
-                name = str(item.get("name") or "").strip()
-                created = str(item.get("createdTime") or "").strip()
-                modified = str(item.get("modifiedTime") or "").strip()
-                files.append(
-                    {
-                        "id": file_id,
-                        "name": name,
-                        "label": meeting_title_from_doc_name(name) or name,
-                        "created_time": created,
-                        "modified_time": modified,
-                        "doc_date": created or modified,
-                        "owner_email": owner_email,
-                        "web_view_link": str(item.get("webViewLink") or "").strip(),
-                        "account_id": account_id,
-                    }
-                )
-                if len(files) >= max_results:
-                    return files
-            page_token = resp.get("nextPageToken") or None
-            if not page_token:
-                break
-    except HttpError as exc:
-        log.warning("Drive files.list failed: %s", exc)
+        except HttpError as exc:
+            log.warning("Drive files.list failed for %s: %s", account_id or "?", exc)
+            raise RuntimeError(_drive_api_error_message(exc)) from exc
+        for item in resp.get("files") or []:
+            if not isinstance(item, dict):
+                continue
+            file_id = str(item.get("id") or "").strip()
+            if not file_id:
+                continue
+            owners = item.get("owners") or []
+            owner_email = ""
+            if owners and isinstance(owners[0], dict):
+                owner_email = str(owners[0].get("emailAddress") or "").strip()
+            name = str(item.get("name") or "").strip()
+            created = str(item.get("createdTime") or "").strip()
+            modified = str(item.get("modifiedTime") or "").strip()
+            files.append(
+                {
+                    "id": file_id,
+                    "name": name,
+                    "label": meeting_title_from_doc_name(name) or name,
+                    "created_time": created,
+                    "modified_time": modified,
+                    "doc_date": created or modified,
+                    "owner_email": owner_email,
+                    "web_view_link": str(item.get("webViewLink") or "").strip(),
+                    "account_id": account_id,
+                }
+            )
+            if len(files) >= max_results:
+                return files
+        page_token = resp.get("nextPageToken") or None
+        if not page_token:
+            break
     return files
 
 
@@ -168,14 +190,27 @@ def pull_meet_recording_catalog(
     root = out_dir or MEET_RECORDINGS_DIR
     root.mkdir(parents=True, exist_ok=True)
 
-    by_id: Dict[str, Dict[str, Any]] = {}
-    for aid, drive in get_drive_services(account_id):
-        files = list_meet_recording_docs(
-            drive,
-            lookback_days=lookback_days,
-            max_results=max_results_per_account,
-            account_id=aid,
+    services = get_drive_services(account_id)
+    if not services:
+        raise RuntimeError(
+            "No connected Google accounts with valid OAuth tokens. "
+            "Run: python utils/add_account.py <account> --serve --open"
         )
+
+    by_id: Dict[str, Dict[str, Any]] = {}
+    errors: List[str] = []
+    for aid, drive in services:
+        try:
+            files = list_meet_recording_docs(
+                drive,
+                lookback_days=lookback_days,
+                max_results=max_results_per_account,
+                account_id=aid,
+            )
+        except RuntimeError as exc:
+            errors.append(f"{aid}: {exc}")
+            log.warning("Meet recording catalog failed for %s: %s", aid, exc)
+            continue
         log.info(
             "Meet recording catalog: account=%s candidates=%d",
             aid,
@@ -188,6 +223,16 @@ def pull_meet_recording_catalog(
                 prev.get("modified_time") or ""
             ):
                 by_id[file_id] = meta
+
+    if not by_id and errors:
+        # Prefer a single clear message when every account failed the same way.
+        messages = []
+        for err in errors:
+            # "Account: message" → message
+            msg = err.split(": ", 1)[-1] if ": " in err else err
+            if msg not in messages:
+                messages.append(msg)
+        raise RuntimeError(messages[0] if len(messages) == 1 else "; ".join(errors))
 
     docs = sorted(
         by_id.values(),
@@ -204,9 +249,12 @@ def pull_meet_recording_catalog(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    return {
+    result: Dict[str, Any] = {
         "ok": True,
         "doc_count": len(docs),
         "meet_recordings_dir": str(root),
         "pulled_at": payload["pulled_at"],
     }
+    if errors:
+        result["warnings"] = errors
+    return result

@@ -6,7 +6,7 @@ const PAGE_HTML = `
     <h2>Slack DMs</h2>
     <p class="texts-setup-lead">
       Pull your 1:1 Slack DMs, then choose which conversations to track.
-      Tracked threads appear on <a href="/threads">Threads</a>.
+      Tracked threads appear on the <a href="/dashboard">dashboard</a>.
     </p>
   </header>
 

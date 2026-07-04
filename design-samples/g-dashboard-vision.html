@@ -1,0 +1,3996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard vision — Fivelanes</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --lane-coral: #e88b7f;
+      --lane-orange: #f0a04b;
+      --lane-yellow: #e8c547;
+      --lane-teal: #3dbfb0;
+      --lane-blue: #5b8fd9;
+      --lane-purple: #9b7ec8;
+      --lane-coral-soft: color-mix(in srgb, var(--lane-coral) 12%, var(--surface));
+      --lane-teal-soft: color-mix(in srgb, var(--lane-teal) 12%, var(--surface));
+      --lane-orange-soft: color-mix(in srgb, var(--lane-orange) 12%, var(--surface));
+      --lane-blue-soft: color-mix(in srgb, var(--lane-blue) 12%, var(--surface));
+      --lane-purple-soft: color-mix(in srgb, var(--lane-purple) 12%, var(--surface));
+      --source-email: var(--lane-coral);
+      --source-email-soft: var(--lane-coral-soft);
+      --source-text: var(--lane-teal);
+      --source-text-soft: var(--lane-teal-soft);
+      --source-slack: var(--lane-blue);
+      --source-slack-soft: var(--lane-blue-soft);
+      --source-linkedin: var(--lane-purple);
+      --source-linkedin-soft: var(--lane-purple-soft);
+      --source-meet: var(--lane-orange);
+      --source-meet-soft: var(--lane-orange-soft);
+      --bg: #101216;
+      --surface: #171b21;
+      --surface-raised: #1e232b;
+      --border: #2a3038;
+      --text: #e8ebef;
+      --muted: #8b939e;
+      --accent: var(--lane-teal);
+      --accent-soft: color-mix(in srgb, var(--lane-teal) 12%, var(--surface));
+      --warn-soft: color-mix(in srgb, var(--lane-orange) 12%, var(--surface));
+      --hover: color-mix(in srgb, var(--text) 6%, transparent);
+      --elevated: var(--surface-raised);
+      --border-strong: #3a424c;
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+      --info: var(--lane-blue);
+      --info-soft: color-mix(in srgb, var(--lane-blue) 12%, var(--surface));
+      --warn: var(--lane-orange);
+      --error: var(--lane-coral);
+      --font-ui: system-ui, -apple-system, sans-serif;
+      --font-display: "Iowan Old Style", Palatino, Georgia, serif;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 15px/1.5 var(--font-ui); background: var(--bg); color: var(--text); padding-bottom: 3rem; }
+    .sample-bar {
+      position: sticky; top: 0; z-index: 10;
+      padding: 0.65rem 1.25rem;
+      background: #0a0c0f;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.85rem;
+      display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+    }
+    .sample-bar strong { color: var(--accent); }
+    .sample-bar a { color: var(--muted); text-decoration: none; }
+    .sample-bar a:hover { color: var(--text); }
+    .sample-bar-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-shrink: 0;
+    }
+    .sample-bar-lead {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+      min-width: 0;
+    }
+    .run-meta {
+      margin: 0;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .pipeline-status {
+      margin: 0;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .pipeline-status[data-kind="error"] {
+      color: var(--error);
+    }
+    .run-fivelanes-btn {
+      font: inherit;
+      font-size: 0.78rem;
+      font-weight: 500;
+      padding: 0.35rem 0.65rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--accent-soft);
+      color: var(--accent);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .run-fivelanes-btn:hover:not(:disabled) {
+      background: var(--hover);
+    }
+    .run-fivelanes-btn:disabled {
+      opacity: 0.65;
+      cursor: wait;
+    }
+    .header-icon-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font: inherit;
+      font-size: 0.78rem;
+      font-weight: 500;
+      padding: 0.35rem 0.65rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+    }
+    .header-icon-btn:hover {
+      background: var(--hover);
+      border-color: var(--border-strong);
+    }
+    .header-icon-btn svg {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      opacity: 0.85;
+    }
+    .vision-dialog {
+      width: min(34rem, calc(100vw - 2rem));
+      max-height: calc(100vh - 2rem);
+      padding: 0;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+      color: var(--text);
+      box-shadow: var(--shadow-sm);
+    }
+    .vision-dialog::backdrop {
+      background: rgba(0, 0, 0, 0.55);
+    }
+    .vision-dialog-form {
+      padding: 1.1rem 1.15rem 1rem;
+      max-height: calc(100vh - 2rem);
+      overflow: auto;
+    }
+    .vision-dialog-form h2 {
+      margin: 0 0 0.35rem;
+      font-family: var(--font-display);
+      font-size: 1.2rem;
+    }
+    .vision-dialog-lead {
+      margin: 0 0 1rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .vision-dialog-section {
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+    }
+    .vision-dialog-section:first-of-type {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: none;
+    }
+    .vision-dialog-section h3 {
+      margin: 0 0 0.45rem;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+    }
+    .vision-dialog-hint {
+      margin: 0 0 0.65rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .vision-field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      margin-bottom: 0.65rem;
+      font-size: 0.82rem;
+    }
+    .vision-field span { color: var(--muted); }
+    .vision-field input,
+    .vision-field select {
+      font: inherit;
+      font-size: 0.82rem;
+      padding: 0.4rem 0.55rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+    }
+    .vision-checkboxes {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem 1rem;
+      margin-top: 0.35rem;
+    }
+    .vision-checkbox {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.82rem;
+      cursor: pointer;
+    }
+    .vision-checkbox input { accent-color: var(--accent); }
+    .vision-dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      margin-top: 1rem;
+      padding-top: 0.85rem;
+      border-top: 1px solid var(--border);
+    }
+    .dialog-segmented {
+      display: inline-flex;
+      flex-wrap: wrap;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      background: var(--surface);
+    }
+    .dialog-segmented button {
+      font: inherit;
+      font-size: 0.76rem;
+      font-weight: 600;
+      padding: 0.32rem 0.6rem;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .dialog-segmented button.active {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+    .dialog-segmented button + button {
+      border-left: 1px solid var(--border);
+    }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 1.25rem; }
+    .spec {
+      margin-bottom: 1.25rem; padding: 0.85rem 1rem;
+      border-radius: var(--radius-sm);
+      background: color-mix(in srgb, var(--lane-blue) 8%, var(--surface));
+      border: 1px solid color-mix(in srgb, var(--lane-blue) 22%, var(--border));
+      font-size: 0.88rem; color: var(--muted);
+    }
+    .spec ul { margin: 0.5rem 0 0; padding-left: 1.2rem; }
+    .spec li { margin-bottom: 0.25rem; }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 1.25rem;
+      align-items: start;
+    }
+    .section-title {
+      margin: 0 0 0.75rem;
+      font-family: var(--font-display);
+      font-size: 1.15rem;
+    }
+    .lanes-hint {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin: -0.35rem 0 0.85rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem 0.65rem;
+    }
+    .lanes-actions {
+      display: inline-flex;
+      gap: 0.5rem;
+    }
+    .lanes-actions button {
+      font: inherit;
+      font-size: 0.78rem;
+      color: var(--accent);
+      background: none;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .lanes-actions button:hover { color: var(--text); }
+    .track-section.is-filtered-out { display: none; }
+    .tracks-empty {
+      margin: 0;
+      padding: 1rem 0.85rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+      text-align: center;
+      border: 1px dashed var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+    }
+
+    /* Lane tabs */
+    .lanes-tabs {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      min-width: 0;
+    }
+    .lanes-tab-bar {
+      display: flex;
+      width: 100%;
+      gap: 0.25rem;
+      padding-bottom: 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .lanes-tabs > .thread-toolbar {
+      margin-top: 0.75rem;
+    }
+    .lane-tab {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      min-width: 0;
+      font: inherit;
+      font-size: 0.85rem;
+      font-weight: 500;
+      padding: 0.5rem 0.5rem;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .lane-tab:hover {
+      color: var(--text);
+      background: var(--hover);
+    }
+    .lane-tab.is-active {
+      color: var(--text);
+      background: var(--surface);
+      border-color: var(--border);
+      border-bottom-color: var(--surface);
+      margin-bottom: -1px;
+      font-weight: 600;
+    }
+    .lane-tab-color {
+      width: 3px;
+      align-self: stretch;
+      border-radius: 999px;
+      flex-shrink: 0;
+      min-height: 1rem;
+    }
+    .lane-tab-label {
+      outline: none;
+      border-radius: 2px;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .lane-tab-label:focus {
+      box-shadow: 0 0 0 2px var(--accent);
+    }
+    .lane-tab-count {
+      flex-shrink: 0;
+      font-size: 0.72rem;
+      font-variant-numeric: tabular-nums;
+      padding: 0.1rem 0.38rem;
+      border-radius: 999px;
+      background: var(--elevated);
+      color: var(--muted);
+    }
+    .lane-tab.is-active .lane-tab-count {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+    .lanes-tab-panels {
+      min-width: 0;
+    }
+    .lanes-tab-panel[hidden] {
+      display: none;
+    }
+    .lanes-tab-panel .track-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    .lane-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+    .lane-section.is-collapsed .lane-section-head {
+      border-bottom: none;
+    }
+    .lane-section.is-collapsed .lane-body {
+      display: none;
+    }
+    .lane-section.is-collapsed .lane-name-hint {
+      display: none;
+    }
+    .lane-section-head {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.55rem 0.85rem;
+      background: var(--surface-raised);
+      border-bottom: 1px solid var(--border);
+      width: 100%;
+      text-align: left;
+    }
+    .lane-collapse-btn {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.65rem;
+      height: 1.65rem;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .lane-collapse-btn:hover {
+      color: var(--text);
+      border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+    }
+    .lane-collapse-icon {
+      display: block;
+      width: 0.45rem;
+      height: 0.45rem;
+      border-right: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: rotate(45deg) translate(-1px, -1px);
+      transition: transform 150ms ease;
+    }
+    .lane-section.is-collapsed .lane-collapse-icon {
+      transform: rotate(-45deg) translate(-1px, 1px);
+    }
+    .lane-color {
+      width: 4px;
+      align-self: stretch;
+      border-radius: 999px;
+      flex-shrink: 0;
+      min-height: 1.25rem;
+    }
+    .lane-name-wrap { flex: 1; min-width: 0; }
+    .lane-name {
+      margin: 0;
+      font-size: 0.95rem;
+      font-weight: 600;
+      outline: none;
+      border-radius: var(--radius-sm);
+      padding: 0.1rem 0.35rem;
+      margin-left: -0.35rem;
+      cursor: text;
+    }
+    .lane-name:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+    .lane-name:focus {
+      background: var(--bg);
+      box-shadow: 0 0 0 2px var(--accent);
+    }
+    .lane-name-hint {
+      display: block;
+      font-size: 0.7rem;
+      font-weight: 400;
+      color: var(--muted);
+      margin-top: 0.1rem;
+    }
+    .lane-track-count {
+      font-size: 0.75rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .lane-body { padding: 0.75rem 0.85rem 0.85rem; }
+
+    .tracks-label {
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin: 0 0 0.45rem;
+    }
+    .tracks-note {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin: 0 0 0.5rem;
+    }
+    /* Tracks = thread groupings; expandable within each lane */
+    .track-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .track-section {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+    }
+    .track-section.is-collapsed .lane-section-head {
+      border-bottom: none;
+    }
+    .track-section.is-collapsed .track-body {
+      display: none;
+    }
+    .track-section.is-collapsed .track-summary-preview {
+      display: none;
+    }
+    .track-section .lane-section-head {
+      padding: 0.45rem 0.65rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .track-name {
+      margin: 0;
+      font-size: 0.88rem;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+    .track-summary-preview {
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 400;
+      color: var(--muted);
+      margin-top: 0.1rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .track-section:not(.is-collapsed) .track-summary-preview {
+      display: none;
+    }
+    .track-meta-head {
+      font-size: 0.72rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .track-body {
+      padding: 0.65rem 0.75rem 0.75rem;
+    }
+    .track-body .lane-summary {
+      margin: 0 0 0.75rem;
+      padding: 0.65rem 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: color-mix(in srgb, var(--text) 2%, var(--bg));
+    }
+    .track-body .lane-summary-meta {
+      margin: 0 0 0.4rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    .track-body .lane-summary-text {
+      margin: 0 0 0.55rem;
+      font-size: 0.85rem;
+      line-height: 1.45;
+    }
+    .track-body .lane-summary .section {
+      margin-top: 0.5rem;
+    }
+    .track-body .lane-summary .section h4 {
+      margin: 0 0 0.3rem;
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .track-body .lane-summary .section ul {
+      margin: 0;
+      padding-left: 1.1rem;
+      font-size: 0.82rem;
+    }
+    .track-body .lane-summary .section li {
+      margin-bottom: 0.25rem;
+    }
+    .track-body .lane-assigned-threads {
+      margin: 0 0 0.65rem;
+      padding-left: 1.1rem;
+      font-size: 0.85rem;
+    }
+    .track-body .lane-assigned-threads li {
+      margin-bottom: 0.3rem;
+    }
+    .track-body .lane-assigned-threads .lane-thread-link {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .track-body .lane-assigned-threads .lane-thread-link:hover {
+      text-decoration: underline;
+    }
+
+    /* Shared action toolbars (tracks + threads) */
+    .item-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem 0.75rem;
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--border);
+    }
+    .item-actions-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      align-items: center;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font: inherit;
+      font-size: 0.78rem;
+      font-weight: 500;
+      padding: 0.38rem 0.7rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--elevated);
+      color: var(--text);
+      cursor: pointer;
+      text-decoration: none;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+    .btn:hover {
+      background: var(--hover);
+    }
+    .btn--primary {
+      background: var(--accent-soft);
+      color: var(--accent);
+      border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+    }
+    .btn--primary:hover {
+      background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+    }
+    .btn--ghost {
+      background: transparent;
+      color: var(--muted);
+    }
+    .btn--ghost:hover {
+      color: var(--text);
+      background: var(--hover);
+    }
+    .btn--danger {
+      color: var(--lane-coral);
+      border-color: color-mix(in srgb, var(--lane-coral) 35%, var(--border));
+      background: color-mix(in srgb, var(--lane-coral) 8%, var(--surface));
+    }
+    .btn--danger:hover {
+      background: color-mix(in srgb, var(--lane-coral) 14%, var(--surface));
+    }
+
+    .meetings-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 0.85rem 1rem;
+      position: sticky;
+      top: 3rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      min-width: 0;
+    }
+    .schedule-tabs {
+      width: 100%;
+    }
+    .schedule-tabs button {
+      flex: 1;
+      text-align: center;
+    }
+    .schedule-view[hidden] { display: none; }
+    .calendar-week-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.35rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .calendar-week-nav button {
+      font: inherit;
+      font-size: 0.85rem;
+      padding: 0.15rem 0.4rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .calendar-week-nav button:hover {
+      color: var(--text);
+      background: var(--hover);
+    }
+    .calendar-week-strip {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 0.2rem;
+    }
+    .calendar-day {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.2rem;
+      padding: 0.35rem 0.15rem;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      font: inherit;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .calendar-day:hover { background: var(--hover); color: var(--text); }
+    .calendar-day.is-today {
+      border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+    .calendar-day.is-selected {
+      border-color: var(--accent);
+      color: var(--text);
+      font-weight: 600;
+    }
+    .calendar-day-dow {
+      font-size: 0.62rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .calendar-day-num {
+      font-size: 0.82rem;
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+    }
+    .calendar-day-dot {
+      width: 4px;
+      height: 4px;
+      border-radius: 999px;
+      background: var(--accent);
+      opacity: 0;
+    }
+    .calendar-day.has-events .calendar-day-dot { opacity: 1; }
+    .calendar-agenda-filter {
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin: 0;
+    }
+    .calendar-agenda-filter button {
+      font: inherit;
+      font-size: inherit;
+      color: var(--accent);
+      background: none;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .meet-day.is-filtered-out { display: none; }
+    .calendar-row.is-filtered-out { display: none; }
+    .calendar-display-bar {
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+    }
+    .calendar-display-bar .thread-segmented {
+      width: 100%;
+    }
+    .calendar-display-bar .thread-segmented button {
+      flex: 1;
+      text-align: center;
+    }
+    .calendar-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 0.65rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      font-size: 0.68rem;
+      color: var(--muted);
+    }
+    .calendar-legend li {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+    .calendar-legend i {
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 2px;
+      flex-shrink: 0;
+      font-style: normal;
+    }
+    .calendar-legend .swatch-open { background: var(--lane-teal-soft); border: 1px solid color-mix(in srgb, var(--lane-teal) 40%, var(--border)); }
+    .calendar-legend .swatch-virtual { background: var(--lane-orange-soft); border: 1px solid color-mix(in srgb, var(--lane-orange) 40%, var(--border)); }
+    .calendar-legend .swatch-meeting { background: var(--lane-blue-soft); border: 1px solid color-mix(in srgb, var(--lane-blue) 40%, var(--border)); }
+    .calendar-row {
+      display: grid;
+      grid-template-columns: 4.5rem 1fr;
+      gap: 0.5rem;
+      padding: 0.45rem 0.5rem;
+      margin-bottom: 0.35rem;
+      font-size: 0.78rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+    }
+    .calendar-row:last-child { margin-bottom: 0; }
+    .calendar-row--open {
+      background: var(--lane-teal-soft);
+      border-color: color-mix(in srgb, var(--lane-teal) 40%, var(--border));
+    }
+    .calendar-row--virtual {
+      background: var(--lane-orange-soft);
+      border-color: color-mix(in srgb, var(--lane-orange) 40%, var(--border));
+    }
+    .meet-row[data-kind="meeting"] {
+      padding: 0.45rem 0.5rem;
+      margin-bottom: 0.35rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid color-mix(in srgb, var(--lane-blue) 40%, var(--border));
+      background: var(--lane-blue-soft);
+    }
+    .calendar-row-title,
+    .meet-row[data-kind="meeting"] .meet-title {
+      font-weight: 600;
+      font-size: 0.78rem;
+    }
+    .calendar-row-range {
+      display: block;
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 0.1rem;
+    }
+    .plans-rail-toolbar {
+      display: flex;
+      justify-content: flex-end;
+    }
+    .plans-rail-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+      max-height: calc(100vh - 12rem);
+      overflow-y: auto;
+    }
+    .plan-card-rail {
+      padding: 0.65rem 0.7rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+    .plan-card-rail.plan-due--due-today {
+      border-color: color-mix(in srgb, var(--warn) 40%, var(--border));
+      background: color-mix(in srgb, var(--warn) 8%, var(--surface));
+    }
+    .plan-card-rail.plan-due--overdue {
+      border-color: color-mix(in srgb, var(--error) 40%, var(--border));
+      background: color-mix(in srgb, var(--error) 8%, var(--surface));
+    }
+    .plan-card-rail h3 {
+      margin: 0 0 0.25rem;
+      font-size: 0.84rem;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+    .plan-card-rail .plan-thread-link {
+      display: block;
+      margin: 0 0 0.25rem;
+      font-size: 0.74rem;
+      color: var(--muted);
+      text-decoration: none;
+    }
+    .plan-card-rail .plan-thread-link:hover { color: var(--accent); }
+    .plan-card-rail .plan-meta {
+      margin: 0;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .plan-due-badge {
+      display: inline-block;
+      margin-right: 0.35rem;
+      padding: 0.08rem 0.35rem;
+      border-radius: 999px;
+      font-size: 0.6rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      vertical-align: middle;
+    }
+    .plan-due-badge--due-today {
+      background: color-mix(in srgb, var(--warn) 22%, var(--surface));
+      color: var(--warn);
+    }
+    .plan-due-badge--overdue {
+      background: color-mix(in srgb, var(--error) 22%, var(--surface));
+      color: var(--error);
+    }
+    .meet-day { margin-bottom: 1rem; }
+    .meet-day:last-child { margin-bottom: 0; }
+    .meet-day-head {
+      font-size: 0.78rem; font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.4rem;
+      padding-bottom: 0.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .meet-row {
+      display: grid;
+      grid-template-columns: 4.5rem 1fr;
+      gap: 0.5rem;
+      padding: 0.45rem 0;
+      font-size: 0.82rem;
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    }
+    .meet-row:last-child { border-bottom: none; }
+    .meet-time { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .meet-title { font-weight: 500; }
+    .meet-thread { font-size: 0.75rem; color: var(--accent); text-decoration: none; }
+    .meet-thread:hover { text-decoration: underline; }
+    .meet-track-link {
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-decoration: none;
+    }
+    .meet-track-link:hover {
+      color: var(--accent);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .dashboard-main-column {
+      display: flex;
+      flex-direction: column;
+      gap: 1.75rem;
+      min-width: 0;
+    }
+
+    .threads-section {
+      padding-top: 0.25rem;
+      border-top: 1px solid var(--border);
+    }
+    .threads-hint {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin: -0.35rem 0 0.65rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem 0.65rem;
+    }
+
+    .thread-toolbar {
+      display: flex;
+      flex-wrap: nowrap;
+      align-items: center;
+      gap: 0.5rem 0.65rem;
+      margin-bottom: 0.5rem;
+      padding: 0.5rem 0.65rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      overflow: visible;
+    }
+    .thread-control-group {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 0.3rem;
+      min-width: 0;
+      flex-shrink: 0;
+    }
+    .thread-control-label {
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .thread-segmented {
+      display: inline-flex;
+      flex-wrap: nowrap;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      background: var(--bg);
+    }
+    .thread-segmented button {
+      font: inherit;
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 0.28rem 0.5rem;
+      border: none;
+      border-right: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .thread-segmented button:last-child { border-right: none; }
+    .thread-segmented button:hover:not(:disabled) {
+      color: var(--text);
+      background: var(--hover);
+    }
+    .thread-segmented button.active {
+      background: var(--surface-raised);
+      color: var(--text);
+    }
+    .thread-source-dropdown {
+      position: relative;
+    }
+    .thread-source-dropdown-trigger {
+      font: inherit;
+      font-size: 0.78rem;
+      font-weight: 500;
+      padding: 0.28rem 1.5rem 0.28rem 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%238b939e' d='M1 1l4 4 4-4'/%3E%3C/svg%3E") no-repeat right 0.35rem center;
+      color: var(--text);
+      cursor: pointer;
+      white-space: nowrap;
+      min-width: 5.5rem;
+      text-align: left;
+    }
+    .thread-source-dropdown-trigger:hover {
+      background-color: var(--hover);
+    }
+    .thread-source-dropdown-panel {
+      position: fixed;
+      z-index: 50;
+      min-width: 8.5rem;
+      padding: 0.25rem 0;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm);
+      box-shadow: var(--shadow-sm);
+    }
+    .thread-source-dropdown-panel[hidden] {
+      display: none;
+    }
+    .thread-source-dropdown-actions {
+      display: flex;
+      gap: 0.35rem;
+      padding: 0.15rem 0.45rem 0.3rem;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 0.1rem;
+    }
+    .thread-source-dropdown-actions button {
+      font: inherit;
+      font-size: 0.68rem;
+      font-weight: 600;
+      padding: 0.1rem 0.3rem;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .thread-source-dropdown-actions button:hover {
+      color: var(--text);
+      background: var(--hover);
+    }
+    .thread-source-dropdown-option {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.28rem 0.5rem;
+      font-size: 0.78rem;
+      cursor: pointer;
+    }
+    .thread-source-dropdown-option:hover {
+      background: var(--hover);
+    }
+    .thread-source-dropdown-option input {
+      margin: 0;
+      flex-shrink: 0;
+      accent-color: var(--accent);
+    }
+    .thread-source-dropdown-option.is-disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .thread-segmented button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .thread-sort-select {
+      font: inherit;
+      font-size: 0.78rem;
+      font-weight: 500;
+      padding: 0.28rem 1.5rem 0.28rem 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%238b939e' d='M1 1l4 4 4-4'/%3E%3C/svg%3E") no-repeat right 0.35rem center;
+      color: var(--text);
+      cursor: pointer;
+      appearance: none;
+      min-width: 7.5rem;
+    }
+    .thread-sort-select {
+      display: none;
+      text-align: center;
+      padding: 2rem 1rem;
+      color: var(--muted);
+      font-size: 0.88rem;
+      border: 1px dashed var(--border);
+      border-radius: var(--radius-md);
+    }
+    .thread-empty.is-visible { display: block; }
+    .thread-section.is-filtered-out { display: none; }
+
+    .thread-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .thread-section .lane-section-head {
+      cursor: default;
+    }
+    .thread-section.is-collapsed .thread-track-path,
+    .thread-section.is-collapsed .thread-from-preview {
+      display: none;
+    }
+    .thread-title {
+      margin: 0;
+      font-size: 0.95rem;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+    .thread-track-path {
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 400;
+      color: var(--accent);
+      margin-top: 0.12rem;
+      font-style: italic;
+    }
+    .thread-track-path.is-unassigned {
+      color: var(--muted);
+      font-style: normal;
+    }
+    .thread-from-preview {
+      display: block;
+      font-size: 0.7rem;
+      font-weight: 400;
+      color: var(--muted);
+      margin-top: 0.1rem;
+    }
+    .thread-head-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.35rem 0.5rem;
+      flex-shrink: 0;
+    }
+    .thread-head-meta time {
+      font-size: 0.72rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .source-pill,
+    .thread-channel-badge {
+      display: inline-block;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      line-height: 1.2;
+      padding: 0.1rem 0.35rem;
+      border-radius: 999px;
+      vertical-align: baseline;
+    }
+    .source-pill--email,
+    .thread-channel-badge.email {
+      background: var(--source-email-soft);
+      color: var(--source-email);
+    }
+    .source-pill--text,
+    .thread-channel-badge.text {
+      background: var(--source-text-soft);
+      color: var(--source-text);
+    }
+    .source-pill--slack,
+    .thread-channel-badge.slack {
+      background: var(--source-slack-soft);
+      color: var(--source-slack);
+    }
+    .source-pill--linkedin,
+    .thread-channel-badge.linkedin {
+      background: var(--source-linkedin-soft);
+      color: var(--source-linkedin);
+    }
+    .source-pill--meet,
+    .thread-channel-badge.meet {
+      background: var(--source-meet-soft);
+      color: var(--source-meet);
+    }
+    .thread-section[data-channel="email"] .lane-color { background: var(--source-email); }
+    .thread-section[data-channel="text"] .lane-color { background: var(--source-text); }
+    .thread-section[data-channel="slack"] .lane-color { background: var(--source-slack); }
+    .thread-section[data-channel="linkedin"] .lane-color { background: var(--source-linkedin); }
+    .thread-section[data-channel="meet"] .lane-color { background: var(--source-meet); }
+    .source-highlight-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .source-highlight-list .source-highlight {
+      padding: 0.35rem 0.5rem 0.35rem 0.55rem;
+      margin-bottom: 0.35rem;
+      border-left: 2px solid var(--border);
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    }
+    .source-highlight-list .source-highlight[data-source="email"] {
+      border-left-color: var(--source-email);
+      background: color-mix(in srgb, var(--source-email) 8%, transparent);
+    }
+    .source-highlight-list .source-highlight[data-source="text"] {
+      border-left-color: var(--source-text);
+      background: color-mix(in srgb, var(--source-text) 8%, transparent);
+    }
+    .source-highlight-list .source-highlight[data-source="slack"] {
+      border-left-color: var(--source-slack);
+      background: color-mix(in srgb, var(--source-slack) 8%, transparent);
+    }
+    .source-highlight-list .source-highlight[data-source="linkedin"] {
+      border-left-color: var(--source-linkedin);
+      background: color-mix(in srgb, var(--source-linkedin) 8%, transparent);
+    }
+    .source-highlight-list .source-highlight[data-source="meet"] {
+      border-left-color: var(--source-meet);
+      background: color-mix(in srgb, var(--source-meet) 8%, transparent);
+    }
+    .source-highlight-list .source-pill {
+      margin-right: 0.35rem;
+      font-size: 0.6rem;
+      padding: 0.08rem 0.3rem;
+    }
+    .lane-assigned-threads .lane-thread-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+    }
+    .lane-summary .section ul.source-highlight-list {
+      padding-left: 0;
+    }
+    .tone {
+      font-size: 0.62rem;
+      font-family: var(--font-ui);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .tone.informational { background: var(--info-soft); color: var(--info); }
+    .tone.request { background: var(--warn-soft); color: var(--warn); }
+    .next-step-type {
+      display: inline-block;
+      margin-right: 0.25rem;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--accent);
+    }
+    .next-step-type.follow-up { color: var(--warn); }
+    .next-step-when { color: var(--muted); font-size: 0.88em; }
+
+    .thread-body .thread-label {
+      margin: 0 0 0.5rem;
+      font-size: 0.82rem;
+      font-style: italic;
+      color: var(--accent);
+    }
+    .thread-body .meta {
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin-bottom: 0.65rem;
+    }
+    .thread-body .meta strong {
+      color: var(--text);
+      font-weight: 500;
+    }
+    .thread-body .section h4 {
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin: 0 0 0.35rem;
+      font-weight: 600;
+    }
+    .thread-body .section ul {
+      margin: 0;
+      padding-left: 1.1rem;
+      font-size: 0.85rem;
+    }
+    .thread-body .section ul.next-steps,
+    .thread-body .section ul.counterparty-slots {
+      padding-left: 0;
+      list-style: none;
+    }
+    .thread-body .section li { margin-bottom: 0.3rem; }
+    .counterparty-slots li { margin: 0.3rem 0; }
+    .counterparty-slot-party,
+    .counterparty-slot-note {
+      font-size: 0.88em;
+      color: var(--muted);
+    }
+    .counterparty-slot-party::before { content: " · "; }
+    .slot-mention {
+      display: inline-block;
+      padding: 0.02rem 0.35rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.06);
+      font-family: ui-monospace, Menlo, monospace;
+      font-size: 0.85em;
+    }
+    .slot-mention--open {
+      border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
+    }
+    .thread-messages {
+      margin-top: 0.85rem;
+      padding-top: 0.65rem;
+      border-top: 1px solid var(--border);
+    }
+    .message-block {
+      padding: 0.75rem 0 0;
+      margin-top: 0.75rem;
+      border-top: 1px solid var(--border);
+    }
+    .message-block:first-child {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: none;
+    }
+    .message-block .card-top time {
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .message-block h4.msg-subject {
+      margin: 0.25rem 0 0.35rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      line-height: 1.35;
+      text-transform: none;
+      letter-spacing: normal;
+      color: var(--text);
+    }
+    .message-block .meta { margin-bottom: 0.35rem; }
+    .draft-reply-panel {
+      margin-bottom: 0.75rem;
+      padding: 0.65rem 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+    }
+    .draft-reply-panel[hidden] { display: none; }
+    .draft-reply-hint {
+      margin: 0 0 0.45rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .draft-intent-input,
+    .draft-markdown-output {
+      width: 100%;
+      font: inherit;
+      font-size: 0.82rem;
+      padding: 0.45rem 0.55rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      color: var(--text);
+      resize: vertical;
+    }
+    .draft-intent-input { min-height: 2.5rem; margin-bottom: 0.45rem; }
+    .draft-markdown-output {
+      font-family: ui-monospace, Menlo, monospace;
+      font-size: 0.78rem;
+      min-height: 6rem;
+      margin-top: 0.35rem;
+    }
+    .draft-output-label {
+      display: block;
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+    .draft-reply-actions { margin-bottom: 0.35rem; }
+
+    .dashboard-status-banner-wrap {
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .dashboard-status-banner-wrap[hidden] { display: none; }
+    .dashboard-status-banner-wrap .wrap {
+      padding-top: 0.85rem;
+      padding-bottom: 0.85rem;
+    }
+    .dashboard-status-banner {
+      margin: 0;
+      padding: 0.85rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface-raised);
+    }
+    .dashboard-status-banner--due-today {
+      border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+      background: var(--warn-soft);
+    }
+    .dashboard-status-banner-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .dashboard-status-banner-summary {
+      margin: 0;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.45;
+    }
+    .dashboard-status-banner-sep {
+      margin: 0 0.35rem;
+      color: var(--muted);
+      font-weight: 400;
+    }
+    .dashboard-status-banner-messages {
+      font-weight: 400;
+    }
+    .dashboard-status-banner-messages strong {
+      font-weight: 600;
+      color: var(--text);
+    }
+    .dashboard-status-banner-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .dashboard-status-banner-btn,
+    .dashboard-status-banner-dismiss {
+      font: inherit;
+      font-size: 0.82rem;
+    }
+    .dashboard-status-banner-btn {
+      padding: 0.25rem 0.55rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+    }
+    .dashboard-status-banner-btn:hover {
+      background: var(--hover);
+    }
+    .dashboard-status-banner-dismiss {
+      padding: 0.1rem 0.45rem;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1.1rem;
+      line-height: 1;
+    }
+    .dashboard-status-banner-dismiss:hover {
+      color: var(--text);
+      background: var(--hover);
+    }
+    .dashboard-status-banner-group {
+      margin-top: 0.65rem;
+    }
+    .dashboard-status-banner-subhead {
+      margin: 0 0 0.35rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+    .dashboard-status-banner-list {
+      margin: 0;
+      padding-left: 1.1rem;
+    }
+    .dashboard-status-banner-list li { margin: 0.2rem 0; }
+    .dashboard-status-banner-link {
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .dashboard-status-banner-link:hover { text-decoration: underline; }
+    .dashboard-status-banner-context {
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    @media (max-width: 900px) {
+      .dashboard-grid { grid-template-columns: 1fr; }
+      .meetings-panel { position: static; }
+      .thread-head-meta { max-width: 45%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="sample-bar">
+    <div class="sample-bar-lead">
+      <span><strong>Dashboard vision</strong> — lanes, tracks, threads, calendar & plans</span>
+      <p class="run-meta" id="run-meta">Last pipeline run: Jul 4, 9:15 AM (scheduled · Claude)</p>
+      <p class="pipeline-status" id="pipeline-status" hidden></p>
+    </div>
+    <div class="sample-bar-actions">
+      <a href="g-dashboard-vision-sources.html" class="header-icon-btn" id="sources-btn">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 7h16M4 12h10M4 17h14" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+        </svg>
+        Sources
+      </a>
+      <button type="button" class="header-icon-btn" id="settings-btn" aria-haspopup="dialog" aria-controls="settings-dialog">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.75"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Settings
+      </button>
+      <button type="button" id="run-fivelanes-btn" class="run-fivelanes-btn" aria-label="Run fivelanes">
+        <span class="run-fivelanes-btn-label">Run fivelanes</span>
+      </button>
+      <a href="index.html">← All samples</a>
+    </div>
+  </div>
+
+  <div class="dashboard-status-banner-wrap" id="status-banner-wrap">
+    <div class="wrap">
+      <aside class="dashboard-status-banner dashboard-status-banner--due-today" id="status-banner" role="status" aria-live="polite">
+        <div class="dashboard-status-banner-head">
+          <p class="dashboard-status-banner-summary">
+            <span><strong>3 plans due today</strong></span>
+            <span class="dashboard-status-banner-sep" aria-hidden="true">·</span>
+            <span class="dashboard-status-banner-messages"><strong>4 new messages</strong> since last refresh at 9:15 AM</span>
+          </p>
+          <div class="dashboard-status-banner-actions">
+            <button type="button" class="dashboard-status-banner-btn" id="status-banner-plans-btn">View plans</button>
+            <button type="button" class="dashboard-status-banner-btn" id="status-banner-threads-btn">View threads</button>
+            <button type="button" class="dashboard-status-banner-dismiss" id="status-banner-dismiss" aria-label="Dismiss">×</button>
+          </div>
+        </div>
+        <div class="dashboard-status-banner-group">
+          <h3 class="dashboard-status-banner-subhead">Due today</h3>
+          <ul class="dashboard-status-banner-list">
+            <li><a href="#thread-dentist" class="dashboard-status-banner-link status-banner-thread-link">Reply with appointment slot</a> <span class="dashboard-status-banner-context">Personal → Health</span></li>
+            <li><a href="#thread-sow" class="dashboard-status-banner-link status-banner-thread-link">Send countersigned SOW</a> <span class="dashboard-status-banner-context">Consulting → Acme Corp</span></li>
+            <li><a href="#thread-roadmap" class="dashboard-status-banner-link status-banner-thread-link">Confirm design review agenda</a> <span class="dashboard-status-banner-context">Work → Product</span></li>
+          </ul>
+        </div>
+        <div class="dashboard-status-banner-group">
+          <h3 class="dashboard-status-banner-subhead">New since refresh</h3>
+          <ul class="dashboard-status-banner-list">
+            <li><a href="#thread-sow" class="dashboard-status-banner-link status-banner-thread-link">Re: Acme consulting SOW — final review</a> <span class="source-pill source-pill--email">Email</span></li>
+            <li><a href="#thread-dentist" class="dashboard-status-banner-link status-banner-thread-link">Appointment change?</a> <span class="source-pill source-pill--text">Text</span></li>
+            <li><a href="#thread-roadmap" class="dashboard-status-banner-link status-banner-thread-link">Q3 roadmap blockers</a> <span class="source-pill source-pill--slack">Slack</span></li>
+            <li><a href="#thread-jordan" class="dashboard-status-banner-link status-banner-thread-link">Jordan Lee interview loop</a> <span class="source-pill source-pill--email">Email</span></li>
+          </ul>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="spec">
+      <strong>Terminology in this vision</strong>
+      <ul>
+        <li><strong>Sources</strong> — each channel has a fixed color: Email coral, Text teal, Slack blue, LinkedIn purple, Meet notes orange. Used on pills, thread stripes, and highlights.</li>
+        <li><strong>Status banner</strong> — plans due today and new messages since the last pipeline refresh; links jump to the schedule rail or threads.</li>
+        <li><strong>Lane</strong> — top-level life area as tabs (logo color order). Select a tab to see its tracks; the first track opens automatically. Sort by recently updated or recently added.</li>
+        <li><strong>Track</strong> — same card as today's <em>Lanes</em> page: summary, highlights, priorities, assigned threads, and lane actions. Expand within a lane to open. Use <em>Show → Archived</em> to review archived tracks.</li>
+        <li><strong>Threads</strong> — full conversation detail below lanes: summary label, sender meta, latest updates, their availability, next steps, and message history (email). Filter by source, assignment, or sort.</li>
+        <li><strong>Collapse</strong> — chevron on tracks and threads; collapse/expand controls above each section.</li>
+        <li><strong>Schedule rail</strong> — <em>Calendar</em> shows open slots, virtual-only windows, and meetings (filter with All / Open / Meetings). <em>Plans</em> lists due next steps.</li>
+        <li><strong>Header</strong> — <em>Run fivelanes</em> (manual pipeline refresh), <em>Settings</em> (backend, schedule, quiet hours), and <em>Sources</em> (tabbed setup page per channel) in the top bar.</li>
+      </ul>
+    </div>
+
+    <div class="dashboard-grid">
+      <div class="dashboard-main-column">
+      <section aria-labelledby="lanes-heading">
+        <h2 id="lanes-heading" class="section-title">Lanes</h2>
+        <p class="lanes-hint">
+          <span class="lanes-actions">
+            <button type="button" id="collapse-all-tracks">Collapse tracks</button>
+            <button type="button" id="expand-all-tracks">Expand tracks</button>
+          </span>
+        </p>
+
+        <div class="lanes-tabs" id="lanes-tabs">
+          <div class="lanes-tab-bar" role="tablist" aria-label="Lanes">
+          <button type="button" class="lane-tab is-active" role="tab" aria-selected="true" id="lane-tab-personal" aria-controls="lane-panel-personal" data-lane="personal">
+            <span class="lane-tab-color" style="background: var(--lane-coral);"></span>
+            <span class="lane-tab-label" contenteditable="true" spellcheck="false" data-lane-name>Personal</span>
+            <span class="lane-tab-count">2</span>
+          </button>
+          <button type="button" class="lane-tab" role="tab" aria-selected="false" id="lane-tab-consulting" aria-controls="lane-panel-consulting" data-lane="consulting">
+            <span class="lane-tab-color" style="background: var(--lane-orange);"></span>
+            <span class="lane-tab-label" contenteditable="true" spellcheck="false" data-lane-name>Consulting</span>
+            <span class="lane-tab-count">2</span>
+          </button>
+          <button type="button" class="lane-tab" role="tab" aria-selected="false" id="lane-tab-work" aria-controls="lane-panel-work" data-lane="work">
+            <span class="lane-tab-color" style="background: var(--lane-yellow);"></span>
+            <span class="lane-tab-label" contenteditable="true" spellcheck="false" data-lane-name>Work</span>
+            <span class="lane-tab-count">3</span>
+          </button>
+          <button type="button" class="lane-tab" role="tab" aria-selected="false" id="lane-tab-family" aria-controls="lane-panel-family" data-lane="family">
+            <span class="lane-tab-color" style="background: var(--lane-teal);"></span>
+            <span class="lane-tab-label" contenteditable="true" spellcheck="false" data-lane-name>Family</span>
+            <span class="lane-tab-count">2</span>
+          </button>
+          <button type="button" class="lane-tab" role="tab" aria-selected="false" id="lane-tab-divorce" aria-controls="lane-panel-divorce" data-lane="divorce">
+            <span class="lane-tab-color" style="background: var(--lane-blue);"></span>
+            <span class="lane-tab-label" contenteditable="true" spellcheck="false" data-lane-name>Divorce</span>
+            <span class="lane-tab-count">2</span>
+          </button>
+          </div>
+          <div class="thread-toolbar" id="lanes-toolbar">
+            <div class="thread-control-group">
+              <span class="thread-control-label" id="track-inbox-label">Show</span>
+              <div class="thread-segmented" role="group" aria-labelledby="track-inbox-label">
+                <button type="button" class="active" data-track-inbox="active">Active</button>
+                <button type="button" data-track-inbox="archived">Archived</button>
+              </div>
+            </div>
+            <div class="thread-control-group">
+              <label class="thread-control-label" for="track-sort">Sort</label>
+              <select class="thread-sort-select" id="track-sort" aria-label="Sort tracks">
+                <option value="updated-desc" selected>Recently updated</option>
+                <option value="created-desc">Recently added</option>
+              </select>
+            </div>
+          </div>
+          <div class="lanes-tab-panels">
+        <div class="lanes-tab-panel is-active" role="tabpanel" id="lane-panel-personal" aria-labelledby="lane-tab-personal" data-lane="personal">
+          <ul class="track-stack">
+<li class="track-section is-collapsed" data-track="personal-health" data-created="2026-05-01T10:00:00" data-updated="2026-07-04T08:00:00">
+                  <header class="lane-section-head">
+                    <div class="lane-name-wrap">
+                      <h4 class="track-name">Health</h4>
+                      <span class="track-summary-preview">Dentist reschedule pending; gym renewal due this month.</span>
+                    </div>
+                    <span class="lane-track-count">3 threads</span>
+                    <span class="track-meta-head">Today</span>
+                  </header>
+                  <div class="track-body" id="track-body-personal-health">
+                    <div class="lane-summary">
+                      <p class="lane-summary-meta">Mixed · Updated Jul 4</p>
+                      <p class="lane-summary-text">Dentist reschedule pending; gym renewal due this month.</p>
+                      <div class="section">
+                        <h4>Highlights</h4>
+                        <ul class="source-highlight-list">
+                          <li class="source-highlight" data-source="text"><span class="source-pill source-pill--text">Text</span>Dr. Kim's office offered Jul 15 or Jul 22 for hygienist visit</li>
+                          <li class="source-highlight" data-source="email"><span class="source-pill source-pill--email">Email</span>Gym renewal notice arrived with rate increase</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Current priorities</h4>
+                        <ul>
+                          <li>Reply to dentist with preferred appointment slot</li>
+                          <li>Decide on gym renewal before month end</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Waiting on others</h4>
+                        <ul>
+                          <li>Insurance confirmation from Dr. Kim's office</li>
+                        </ul>
+                      </div>
+                    </div>
+                    <ul class="lane-assigned-threads">
+                      <li><a class="lane-thread-link" href="#thread-dentist"><span class="source-pill source-pill--text">Text</span>Appointment change?</a></li>
+                      <li><a class="lane-thread-link" href="#">Gym membership renewal</a></li>
+                      <li><a class="lane-thread-link" href="#">Annual physical results</a></li>
+                    </ul>
+                    <div class="item-actions" role="toolbar" aria-label="Track actions">
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--primary">Refresh summary</button>
+                        <button type="button" class="btn btn--default">Edit threads</button>
+                      </div>
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--ghost track-archive-btn" title="Hide from dashboard">Archive</button>
+                        <button type="button" class="btn btn--danger" title="Delete this lane">Delete lane</button>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+                <li class="track-section is-collapsed" data-track="personal-home" data-archived="true" data-created="2026-04-10T09:00:00" data-updated="2026-07-02T14:00:00">
+                  <header class="lane-section-head">
+                    <div class="lane-name-wrap">
+                      <h4 class="track-name">Home</h4>
+                      <span class="track-summary-preview">Plumber quote for kitchen; HOA notice about parking.</span>
+                    </div>
+                    <span class="lane-track-count">2 threads</span>
+                    <span class="track-meta-head">2d ago</span>
+                  </header>
+                  <div class="track-body" id="track-body-personal-home">
+                    <div class="lane-summary">
+                      <p class="lane-summary-meta">Informational · Updated Jul 2</p>
+                      <p class="lane-summary-text">Plumber quote for kitchen; HOA notice about parking.</p>
+                      <div class="section">
+                        <h4>Highlights</h4>
+                        <ul>
+                          <li>Two plumber quotes received for kitchen leak</li>
+                          <li>HOA sent parking policy update for review</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Current priorities</h4>
+                        <ul>
+                          <li>Pick plumber and schedule repair</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Waiting on others</h4>
+                        <ul>
+                          <li>Second plumber to confirm availability</li>
+                        </ul>
+                      </div>
+                    </div>
+                    <ul class="lane-assigned-threads">
+                      <li><a class="lane-thread-link" href="#">Kitchen plumber quote</a></li>
+                      <li><a class="lane-thread-link" href="#">HOA parking notice</a></li>
+                    </ul>
+                    <div class="item-actions" role="toolbar" aria-label="Track actions">
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--primary">Refresh summary</button>
+                        <button type="button" class="btn btn--default">Edit threads</button>
+                      </div>
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--ghost track-archive-btn" title="Hide from dashboard">Archive</button>
+                        <button type="button" class="btn btn--danger" title="Delete this lane">Delete lane</button>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+          </ul>
+          <p class="tracks-empty" hidden>No active tracks in this lane.</p>
+        </div>
+        <div class="lanes-tab-panel" role="tabpanel" id="lane-panel-consulting" aria-labelledby="lane-tab-consulting" data-lane="consulting" hidden>
+          <ul class="track-stack">
+<li class="track-section is-collapsed" data-track="consulting-acme" data-created="2026-06-01T11:00:00" data-updated="2026-07-04T11:00:00">
+                  <header class="lane-section-head">
+                    <div class="lane-name-wrap">
+                      <h4 class="track-name">Acme Corp</h4>
+                      <span class="track-summary-preview">SOW out for signature; kickoff call scheduled Friday.</span>
+                    </div>
+                    <span class="lane-track-count">5 threads</span>
+                    <span class="track-meta-head">2h ago</span>
+                  </header>
+                  <div class="track-body" id="track-body-consulting-acme">
+                    <div class="lane-summary">
+                      <p class="lane-summary-meta">Request · Updated Jul 4</p>
+                      <p class="lane-summary-text">SOW out for signature; kickoff call scheduled Friday.</p>
+                      <div class="section">
+                        <h4>Highlights</h4>
+                        <ul class="source-highlight-list">
+                          <li class="source-highlight" data-source="email"><span class="source-pill source-pill--email">Email</span>Dana returned SOW redlines; net-30 terms acceptable</li>
+                          <li class="source-highlight" data-source="meet"><span class="source-pill source-pill--meet">Meet notes</span>Friday 3:30 PM kickoff on calendar pending signature</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Current priorities</h4>
+                        <ul>
+                          <li>Send countersigned SOW and confirm kickoff hold</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Waiting on others</h4>
+                        <ul>
+                          <li>Acme legal for final sign-off</li>
+                        </ul>
+                      </div>
+                    </div>
+                    <ul class="lane-assigned-threads">
+                      <li><a class="lane-thread-link" href="#thread-sow"><span class="source-pill source-pill--email">Email</span>Re: Acme consulting SOW — final review</a></li>
+                      <li><a class="lane-thread-link" href="#">Kickoff calendar hold</a></li>
+                      <li><a class="lane-thread-link" href="#">Invoice template question</a></li>
+                    </ul>
+                    <div class="item-actions" role="toolbar" aria-label="Track actions">
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--primary">Refresh summary</button>
+                        <button type="button" class="btn btn--default">Edit threads</button>
+                      </div>
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--ghost track-archive-btn" title="Hide from dashboard">Archive</button>
+                        <button type="button" class="btn btn--danger" title="Delete this lane">Delete lane</button>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+                <li class="track-section is-collapsed" data-track="consulting-beta" data-archived="true" data-created="2026-05-20T15:00:00" data-updated="2026-07-03T16:00:00">
+                  <header class="lane-section-head">
+                    <div class="lane-name-wrap">
+                      <h4 class="track-name">Beta Workshop</h4>
+                      <span class="track-summary-preview">Workshop dates proposed; waiting on their facilities team.</span>
+                    </div>
+                    <span class="lane-track-count">2 threads</span>
+                    <span class="track-meta-head">Yesterday</span>
+                  </header>
+                  <div class="track-body" id="track-body-consulting-beta">
+                    <div class="lane-summary">
+                      <p class="lane-summary-meta">Informational · Updated Jul 3</p>
+                      <p class="lane-summary-text">Workshop dates proposed; waiting on their facilities team.</p>
+                      <div class="section">
+                        <h4>Highlights</h4>
+                        <ul>
+                          <li>August date options sent to client</li>
+                          <li>Facilities team reviewing AV requirements</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Current priorities</h4>
+                        <ul>
+                          <li>Follow up if no date confirmation by Monday</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Waiting on others</h4>
+                        <ul>
+                          <li>Beta facilities for room availability</li>
+                        </ul>
+                      </div>
+                    </div>
+                    <ul class="lane-assigned-threads">
+                      <li><a class="lane-thread-link" href="#">Date options for August</a></li>
+                      <li><a class="lane-thread-link" href="#">Facilities AV requirements</a></li>
+                    </ul>
+                    <div class="item-actions" role="toolbar" aria-label="Track actions">
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--primary">Refresh summary</button>
+                        <button type="button" class="btn btn--default">Edit threads</button>
+                      </div>
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--ghost track-archive-btn" title="Hide from dashboard">Archive</button>
+                        <button type="button" class="btn btn--danger" title="Delete this lane">Delete lane</button>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+          </ul>
+          <p class="tracks-empty" hidden>No active tracks in this lane.</p>
+        </div>
+        <div class="lanes-tab-panel" role="tabpanel" id="lane-panel-work" aria-labelledby="lane-tab-work" data-lane="work" hidden>
+          <ul class="track-stack">
+<li class="track-section is-collapsed" data-track="work-product" data-created="2026-03-15T09:00:00" data-updated="2026-07-04T10:00:00">
+                  <header class="lane-section-head">
+                    <div class="lane-name-wrap">
+                      <h4 class="track-name">Product</h4>
+                      <span class="track-summary-preview">Q3 roadmap sync Thursday; design review prep in progress.</span>
+                    </div>
+                    <span class="lane-track-count">12 threads</span>
+                    <span class="track-meta-head">3h ago</span>
+                  </header>
+                  <div class="track-body" id="track-body-work-product">
+                    <div class="lane-summary">
+                      <p class="lane-summary-meta">Mixed · Updated Jul 4</p>
+                      <p class="lane-summary-text">Q3 roadmap sync Thursday; design review prep in progress.</p>
+                      <div class="section">
+                        <h4>Highlights</h4>
+                        <ul class="source-highlight-list">
+                          <li class="source-highlight" data-source="slack"><span class="source-pill source-pill--slack">Slack</span>Design review Friday 10 AM; roadmap sync Thursday 2 PM</li>
+                          <li class="source-highlight" data-source="slack"><span class="source-pill source-pill--slack">Slack</span>Auth migration flagged as deck dependency</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Current priorities</h4>
+                        <ul>
+                          <li>Confirm design review agenda with Priya</li>
+                          <li>Circulate draft roadmap slides tonight</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Waiting on others</h4>
+                        <ul>
+                          <li>Design for Figma links before review</li>
+                        </ul>
+                      </div>
+                    </div>
+                    <ul class="lane-assigned-threads">
+                      <li><a class="lane-thread-link" href="#thread-roadmap"><span class="source-pill source-pill--slack">Slack</span>Q3 roadmap — design review blockers</a></li>
+                      <li><a class="lane-thread-link" href="#">Design review agenda</a></li>
+                      <li><a class="lane-thread-link" href="#">Auth migration dependency</a></li>
+                    </ul>
+                    <div class="item-actions" role="toolbar" aria-label="Track actions">
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--primary">Refresh summary</button>
+                        <button type="button" class="btn btn--default">Edit threads</button>
+                      </div>
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--ghost track-archive-btn" title="Hide from dashboard">Archive</button>
+                        <button type="button" class="btn btn--danger" title="Delete this lane">Delete lane</button>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+                <li class="track-section is-collapsed" data-track="work-hiring" data-created="2026-06-10T13:00:00" data-updated="2026-07-03T09:00:00">
+                  <header class="lane-section-head">
+                    <div class="lane-name-wrap">
+                      <h4 class="track-name">Hiring</h4>
+                      <span class="track-summary-preview">Jordan Lee onsite loop; offer draft for PM role.</span>
+                    </div>
+                    <span class="lane-track-count">7 threads</span>
+                    <span class="track-meta-head">1d ago</span>
+                  </header>
+                  <div class="track-body" id="track-body-work-hiring">
+                    <div class="lane-summary">
+                      <p class="lane-summary-meta">Informational · Updated Jul 3</p>
+                      <p class="lane-summary-text">Jordan Lee onsite loop; offer draft for PM role.</p>
+                      <div class="section">
+                        <h4>Highlights</h4>
+                        <ul>
+                          <li>Jordan Lee onsite confirmed Jul 11</li>
+                          <li>Internal offer band drafted pending loop outcome</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Current priorities</h4>
+                        <ul>
+                          <li>Block debrief on calendar after onsite</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Waiting on others</h4>
+                        <ul>
+                          <li>Recruiting for panel schedule confirmation</li>
+                        </ul>
+                      </div>
+                    </div>
+                    <ul class="lane-assigned-threads">
+                      <li><a class="lane-thread-link" href="#thread-jordan"><span class="source-pill source-pill--email">Email</span>Jordan Lee — onsite interview loop</a></li>
+                      <li><a class="lane-thread-link" href="#">PM offer band draft</a></li>
+                      <li><a class="lane-thread-link" href="#">Recruiting debrief scheduling</a></li>
+                    </ul>
+                    <div class="item-actions" role="toolbar" aria-label="Track actions">
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--primary">Refresh summary</button>
+                        <button type="button" class="btn btn--default">Edit threads</button>
+                      </div>
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--ghost track-archive-btn" title="Hide from dashboard">Archive</button>
+                        <button type="button" class="btn btn--danger" title="Delete this lane">Delete lane</button>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+                <li class="track-section is-collapsed" data-track="work-fundraising" data-created="2026-06-25T10:00:00" data-updated="2026-07-04T07:30:00">
+                  <header class="lane-section-head">
+                    <div class="lane-name-wrap">
+                      <h4 class="track-name">Fundraising</h4>
+                      <span class="track-summary-preview">Term sheet follow-up with Alice; data room link pending.</span>
+                    </div>
+                    <span class="lane-track-count">4 threads</span>
+                    <span class="track-meta-head">Today</span>
+                  </header>
+                  <div class="track-body" id="track-body-work-fundraising">
+                    <div class="lane-summary">
+                      <p class="lane-summary-meta">Request · Updated Jul 4</p>
+                      <p class="lane-summary-text">Term sheet follow-up with Alice; data room link pending.</p>
+                      <div class="section">
+                        <h4>Highlights</h4>
+                        <ul>
+                          <li>Alice asked for updated cap table before term sheet</li>
+                          <li>Data room access link still outstanding</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Current priorities</h4>
+                        <ul>
+                          <li>Reply to Alice with term sheet questions</li>
+                          <li>Send data room invite</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Waiting on others</h4>
+                        <ul>
+                          <li>Legal for cap table sign-off</li>
+                        </ul>
+                      </div>
+                    </div>
+                    <ul class="lane-assigned-threads">
+                      <li><a class="lane-thread-link" href="#">Term sheet follow-up</a></li>
+                      <li><a class="lane-thread-link" href="#">Data room access</a></li>
+                      <li><a class="lane-thread-link" href="#">Cap table cleanup</a></li>
+                    </ul>
+                    <div class="item-actions" role="toolbar" aria-label="Track actions">
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--primary">Refresh summary</button>
+                        <button type="button" class="btn btn--default">Edit threads</button>
+                      </div>
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--ghost track-archive-btn" title="Hide from dashboard">Archive</button>
+                        <button type="button" class="btn btn--danger" title="Delete this lane">Delete lane</button>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+          </ul>
+          <p class="tracks-empty" hidden>No active tracks in this lane.</p>
+        </div>
+        <div class="lanes-tab-panel" role="tabpanel" id="lane-panel-family" aria-labelledby="lane-tab-family" data-lane="family" hidden>
+          <ul class="track-stack">
+<li class="track-section is-collapsed" data-track="family-school" data-created="2026-06-01T08:00:00" data-updated="2026-07-04T09:00:00">
+                  <header class="lane-section-head">
+                    <div class="lane-name-wrap">
+                      <h4 class="track-name">Kids — school</h4>
+                      <span class="track-summary-preview">Friday pickup swap; parent-teacher note to answer.</span>
+                    </div>
+                    <span class="lane-track-count">3 threads</span>
+                    <span class="track-meta-head">Today</span>
+                  </header>
+                  <div class="track-body" id="track-body-family-school">
+                    <div class="lane-summary">
+                      <p class="lane-summary-meta">Mixed · Updated Jul 4</p>
+                      <p class="lane-summary-text">Friday pickup swap; parent-teacher note to answer.</p>
+                      <div class="section">
+                        <h4>Highlights</h4>
+                        <ul>
+                          <li>Pickup swap needed for Friday afternoon</li>
+                          <li>Parent-teacher note awaiting reply</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Current priorities</h4>
+                        <ul>
+                          <li>Confirm Friday pickup with neighbor</li>
+                          <li>Answer parent-teacher note tonight</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Waiting on others</h4>
+                        <ul>
+                          <li>Neighbor to confirm swap time</li>
+                        </ul>
+                      </div>
+                    </div>
+                    <ul class="lane-assigned-threads">
+                      <li><a class="lane-thread-link" href="#">Friday pickup swap</a></li>
+                      <li><a class="lane-thread-link" href="#">Parent-teacher note</a></li>
+                      <li><a class="lane-thread-link" href="#">Field trip permission</a></li>
+                    </ul>
+                    <div class="item-actions" role="toolbar" aria-label="Track actions">
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--primary">Refresh summary</button>
+                        <button type="button" class="btn btn--default">Edit threads</button>
+                      </div>
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--ghost track-archive-btn" title="Hide from dashboard">Archive</button>
+                        <button type="button" class="btn btn--danger" title="Delete this lane">Delete lane</button>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+                <li class="track-section is-collapsed" data-track="family-trip" data-created="2026-06-20T12:00:00" data-updated="2026-06-30T12:00:00">
+                  <header class="lane-section-head">
+                    <div class="lane-name-wrap">
+                      <h4 class="track-name">Summer trip</h4>
+                      <span class="track-summary-preview">August dates to confirm; rental car options compared.</span>
+                    </div>
+                    <span class="lane-track-count">2 threads</span>
+                    <span class="track-meta-head">4d ago</span>
+                  </header>
+                  <div class="track-body" id="track-body-family-trip">
+                    <div class="lane-summary">
+                      <p class="lane-summary-meta">Informational · Updated Jun 30</p>
+                      <p class="lane-summary-text">August dates to confirm; rental car options compared.</p>
+                      <div class="section">
+                        <h4>Highlights</h4>
+                        <ul>
+                          <li>Two August windows under consideration</li>
+                          <li>Rental car options narrowed to two vendors</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Current priorities</h4>
+                        <ul>
+                          <li>Lock August dates with family</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Waiting on others</h4>
+                        <ul>
+                          <li>Partner to confirm time off</li>
+                        </ul>
+                      </div>
+                    </div>
+                    <ul class="lane-assigned-threads">
+                      <li><a class="lane-thread-link" href="#">August date options</a></li>
+                      <li><a class="lane-thread-link" href="#">Rental car comparison</a></li>
+                    </ul>
+                    <div class="item-actions" role="toolbar" aria-label="Track actions">
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--primary">Refresh summary</button>
+                        <button type="button" class="btn btn--default">Edit threads</button>
+                      </div>
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--ghost track-archive-btn" title="Hide from dashboard">Archive</button>
+                        <button type="button" class="btn btn--danger" title="Delete this lane">Delete lane</button>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+          </ul>
+          <p class="tracks-empty" hidden>No active tracks in this lane.</p>
+        </div>
+        <div class="lanes-tab-panel" role="tabpanel" id="lane-panel-divorce" aria-labelledby="lane-tab-divorce" data-lane="divorce" hidden>
+          <ul class="track-stack">
+<li class="track-section is-collapsed" data-track="divorce-legal" data-created="2026-05-01T14:00:00" data-updated="2026-07-04T08:30:00">
+                  <header class="lane-section-head">
+                    <div class="lane-name-wrap">
+                      <h4 class="track-name">Legal</h4>
+                      <span class="track-summary-preview">Financial disclosure due; attorney follow-up on timeline.</span>
+                    </div>
+                    <span class="lane-track-count">4 threads</span>
+                    <span class="track-meta-head">Today</span>
+                  </header>
+                  <div class="track-body" id="track-body-divorce-legal">
+                    <div class="lane-summary">
+                      <p class="lane-summary-meta">Request · Updated Jul 4</p>
+                      <p class="lane-summary-text">Financial disclosure due; attorney follow-up on timeline.</p>
+                      <div class="section">
+                        <h4>Highlights</h4>
+                        <ul>
+                          <li>Financial disclosure deadline this week</li>
+                          <li>Attorney requested updated asset list</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Current priorities</h4>
+                        <ul>
+                          <li>Complete disclosure documents</li>
+                          <li>Upload files to attorney portal</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Waiting on others</h4>
+                        <ul>
+                          <li>Attorney for timeline confirmation</li>
+                        </ul>
+                      </div>
+                    </div>
+                    <ul class="lane-assigned-threads">
+                      <li><a class="lane-thread-link" href="#">Financial disclosure deadline</a></li>
+                      <li><a class="lane-thread-link" href="#">Attorney timeline follow-up</a></li>
+                      <li><a class="lane-thread-link" href="#">Document upload portal</a></li>
+                    </ul>
+                    <div class="item-actions" role="toolbar" aria-label="Track actions">
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--primary">Refresh summary</button>
+                        <button type="button" class="btn btn--default">Edit threads</button>
+                      </div>
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--ghost track-archive-btn" title="Hide from dashboard">Archive</button>
+                        <button type="button" class="btn btn--danger" title="Delete this lane">Delete lane</button>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+                <li class="track-section is-collapsed" data-track="divorce-mediation" data-created="2026-05-15T11:00:00" data-updated="2026-07-03T14:00:00">
+                  <header class="lane-section-head">
+                    <div class="lane-name-wrap">
+                      <h4 class="track-name">Mediation</h4>
+                      <span class="track-summary-preview">Session confirmed Jul 14; prep docs requested.</span>
+                    </div>
+                    <span class="lane-track-count">2 threads</span>
+                    <span class="track-meta-head">Yesterday</span>
+                  </header>
+                  <div class="track-body" id="track-body-divorce-mediation">
+                    <div class="lane-summary">
+                      <p class="lane-summary-meta">Informational · Updated Jul 3</p>
+                      <p class="lane-summary-text">Session confirmed Jul 14; prep docs requested.</p>
+                      <div class="section">
+                        <h4>Highlights</h4>
+                        <ul>
+                          <li>Mediation session confirmed Jul 14 at 11 AM</li>
+                          <li>Mediator sent prep document checklist</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Current priorities</h4>
+                        <ul>
+                          <li>Gather prep documents before session</li>
+                        </ul>
+                      </div>
+                      <div class="section">
+                        <h4>Waiting on others</h4>
+                        <ul>
+                          <li>Other party to confirm attendance</li>
+                        </ul>
+                      </div>
+                    </div>
+                    <ul class="lane-assigned-threads">
+                      <li><a class="lane-thread-link" href="#">Jul 14 session confirmation</a></li>
+                      <li><a class="lane-thread-link" href="#">Prep documents request</a></li>
+                    </ul>
+                    <div class="item-actions" role="toolbar" aria-label="Track actions">
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--primary">Refresh summary</button>
+                        <button type="button" class="btn btn--default">Edit threads</button>
+                      </div>
+                      <div class="item-actions-group">
+                        <button type="button" class="btn btn--ghost track-archive-btn" title="Hide from dashboard">Archive</button>
+                        <button type="button" class="btn btn--danger" title="Delete this lane">Delete lane</button>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+          </ul>
+          <p class="tracks-empty" hidden>No active tracks in this lane.</p>
+        </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="threads-section" aria-labelledby="threads-heading">
+        <h2 id="threads-heading" class="section-title">Threads</h2>
+        <p class="threads-hint">
+          <span class="lanes-actions">
+            <button type="button" id="collapse-all-threads">Collapse all</button>
+            <button type="button" id="expand-all-threads">Expand all</button>
+          </span>
+        </p>
+        <div class="thread-toolbar">
+          <div class="thread-control-group">
+            <span class="thread-control-label" id="thread-inbox-label">Show</span>
+            <div class="thread-segmented" role="group" aria-labelledby="thread-inbox-label">
+              <button type="button" class="active" data-inbox="active">Active</button>
+              <button type="button" data-inbox="snoozed" disabled>Snoozed</button>
+              <button type="button" data-inbox="removed" disabled>Removed</button>
+            </div>
+          </div>
+          <div class="thread-control-group">
+            <span class="thread-control-label" id="thread-source-label">Source</span>
+            <div class="thread-source-dropdown" id="thread-source-dropdown">
+              <button type="button" class="thread-source-dropdown-trigger" id="thread-source-trigger" aria-haspopup="true" aria-expanded="false" aria-controls="thread-source-panel" aria-labelledby="thread-source-label thread-source-trigger">
+                All sources
+              </button>
+              <div class="thread-source-dropdown-panel" id="thread-source-panel" hidden>
+                <div class="thread-source-dropdown-actions">
+                  <button type="button" id="thread-source-select-all">All</button>
+                  <button type="button" id="thread-source-select-none">None</button>
+                </div>
+                <label class="thread-source-dropdown-option"><input type="checkbox" data-source-filter="email" checked /><span class="source-pill source-pill--email">Email</span></label>
+                <label class="thread-source-dropdown-option"><input type="checkbox" data-source-filter="text" checked /><span class="source-pill source-pill--text">Text</span></label>
+                <label class="thread-source-dropdown-option"><input type="checkbox" data-source-filter="slack" checked /><span class="source-pill source-pill--slack">Slack</span></label>
+                <label class="thread-source-dropdown-option"><input type="checkbox" data-source-filter="linkedin" checked /><span class="source-pill source-pill--linkedin">LinkedIn</span></label>
+                <label class="thread-source-dropdown-option"><input type="checkbox" data-source-filter="meet" checked /><span class="source-pill source-pill--meet">Meet</span></label>
+              </div>
+            </div>
+          </div>
+          <div class="thread-control-group">
+            <span class="thread-control-label" id="thread-assignment-label">Assignment</span>
+            <div class="thread-segmented" role="group" aria-labelledby="thread-assignment-label">
+              <button type="button" class="active" data-assignment="all">All</button>
+              <button type="button" data-assignment="unassigned">Unassigned</button>
+            </div>
+          </div>
+          <div class="thread-control-group">
+            <label class="thread-control-label" for="thread-sort">Sort</label>
+            <select class="thread-sort-select" id="thread-sort" aria-label="Sort threads">
+              <option value="recent-updates" selected>Recent updates</option>
+              <option value="newest">Newest added</option>
+              <option value="lane">By lane</option>
+            </select>
+          </div>
+        </div>
+
+        <p class="thread-empty" id="thread-empty">No threads match these filters.</p>
+
+        <div class="thread-stack" id="thread-stack">
+          <article class="lane-section thread-section" id="thread-roadmap" data-thread="roadmap"
+            data-inbox="active" data-assigned="true" data-channel="slack" data-lane="work" data-lane-order="3"
+            data-created="2026-07-03T14:00:00" data-updated="2026-07-04T09:15:00">
+            <header class="lane-section-head">
+              <span class="lane-color"></span>
+              <div class="lane-name-wrap">
+                <h3 class="thread-title">Q3 roadmap — design review blockers</h3>
+                <span class="thread-track-path">Work → Product</span>
+                <span class="thread-from-preview">Latest from Priya Sharma</span>
+              </div>
+              <div class="thread-head-meta">
+                <span class="tone request">Request</span>
+                <span class="lane-track-count">6 msg</span>
+                <span class="thread-channel-badge slack">Slack</span>
+                <time datetime="2026-07-04T09:15:00">Today, 9:15 AM</time>
+              </div>
+            </header>
+            <div class="lane-body thread-body" id="thread-body-roadmap">
+              <p class="thread-label">Design review prep · #product-roadmap</p>
+              <div class="meta"><strong>Latest from</strong> Priya Sharma</div>
+              <div class="draft-reply-panel" hidden>
+                <p class="draft-reply-hint">What should this reply communicate? (Required — keeps the draft aligned with what you want.)</p>
+                <textarea class="draft-intent-input" rows="2" placeholder="e.g. Confirm agenda items and who owns slides"></textarea>
+                <div class="draft-reply-actions"><button type="button" class="btn btn--default">Generate</button></div>
+                <label class="draft-output-label">Markdown — copy below</label>
+                <textarea class="draft-markdown-output" readonly hidden rows="8"></textarea>
+              </div>
+              <div class="section">
+                <h4>Latest updates</h4>
+                <ul>
+                  <li>Priya asked for design review agenda by EOD Friday.</li>
+                  <li>Engineering flagged dependency on auth migration — needs PM callout in roadmap deck.</li>
+                  <li>Thursday sync still on; you offered to circulate draft slides tonight.</li>
+                </ul>
+              </div>
+              <div class="section">
+                <h4>Next steps</h4>
+                <ul class="next-steps">
+                  <li><span class="next-step-type">Response required</span> Confirm agenda items and slide owner <span class="next-step-when">(today)</span></li>
+                  <li><span class="next-step-type follow-up">Follow up needed</span> Ping design for Figma links before review <span class="next-step-when">(tomorrow)</span></li>
+                </ul>
+              </div>
+              <div class="item-actions" role="toolbar" aria-label="Thread actions">
+                <div class="item-actions-group">
+                  <button type="button" class="btn btn--primary draft-reply-toggle">Draft reply</button>
+                  <a href="#" class="btn btn--default">Create plan</a>
+                  <button type="button" class="btn btn--default">Refresh summary</button>
+                </div>
+                <div class="item-actions-group">
+                  <button type="button" class="btn btn--ghost" title="Hide until later">Snooze</button>
+                  <button type="button" class="btn btn--danger" title="Stop tracking this thread">Remove</button>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="lane-section thread-section is-collapsed" id="thread-sow" data-thread="sow"
+            data-inbox="active" data-assigned="true" data-channel="email" data-lane="consulting" data-lane-order="2"
+            data-created="2026-06-15T10:00:00" data-updated="2026-07-03T16:40:00">
+            <header class="lane-section-head">
+              <span class="lane-color"></span>
+              <div class="lane-name-wrap">
+                <h3 class="thread-title">Re: Acme consulting SOW — final review</h3>
+                <span class="thread-track-path">Consulting → Acme Corp</span>
+                <span class="thread-from-preview">Latest from Dana Okonkwo</span>
+              </div>
+              <div class="thread-head-meta">
+                <span class="tone informational">Info</span>
+                <span class="lane-track-count">3 msg</span>
+                <span class="thread-channel-badge email">Email</span>
+                <time datetime="2026-07-03T16:40:00">Yesterday</time>
+              </div>
+            </header>
+            <div class="lane-body thread-body" id="thread-body-sow">
+              <p class="thread-label">Acme Corp consulting engagement</p>
+              <div class="meta"><strong>Latest from</strong> Dana Okonkwo &lt;dana@acmecorp.com&gt;</div>
+              <div class="draft-reply-panel" hidden>
+                <p class="draft-reply-hint">What should this reply communicate?</p>
+                <textarea class="draft-intent-input" rows="2" placeholder="e.g. Send countersigned SOW and confirm Friday kickoff"></textarea>
+                <div class="draft-reply-actions"><button type="button" class="btn btn--default">Generate</button></div>
+                <label class="draft-output-label">Markdown — copy below</label>
+                <textarea class="draft-markdown-output" readonly hidden rows="8"></textarea>
+              </div>
+              <div class="section">
+                <h4>Latest updates</h4>
+                <ul>
+                  <li>Dana returned redlines on payment terms; legal is comfortable with net-30.</li>
+                  <li>Kickoff call scheduled Friday 3:30 PM once SOW is signed.</li>
+                </ul>
+              </div>
+              <div class="section">
+                <h4>Next steps</h4>
+                <ul class="next-steps">
+                  <li><span class="next-step-type">Response required</span> Send countersigned PDF and calendar hold <span class="next-step-when">(today)</span></li>
+                </ul>
+              </div>
+              <div class="thread-messages">
+                <div class="message-block">
+                  <div class="card-top"><time datetime="2026-07-03T16:40:00">Jul 3, 4:40 PM</time></div>
+                  <h4 class="msg-subject">Re: Acme consulting SOW — final review</h4>
+                  <div class="meta"><strong>From</strong> Dana Okonkwo &lt;dana@acmecorp.com&gt;</div>
+                  <div class="meta"><strong>Recipients</strong> you@example.com</div>
+                </div>
+                <div class="message-block">
+                  <div class="card-top"><time datetime="2026-07-02T11:15:00">Jul 2, 11:15 AM</time></div>
+                  <h4 class="msg-subject">Re: Acme consulting SOW — final review</h4>
+                  <div class="meta"><strong>From</strong> you@example.com</div>
+                  <div class="meta"><strong>Recipients</strong> Dana Okonkwo &lt;dana@acmecorp.com&gt;</div>
+                </div>
+                <div class="message-block">
+                  <div class="card-top"><time datetime="2026-06-28T09:00:00">Jun 28, 9:00 AM</time></div>
+                  <h4 class="msg-subject">Acme consulting SOW — final review</h4>
+                  <div class="meta"><strong>From</strong> Dana Okonkwo &lt;dana@acmecorp.com&gt;</div>
+                  <div class="meta"><strong>Recipients</strong> you@example.com</div>
+                </div>
+              </div>
+              <div class="item-actions" role="toolbar" aria-label="Thread actions">
+                <div class="item-actions-group">
+                  <button type="button" class="btn btn--primary draft-reply-toggle">Draft reply</button>
+                  <a href="#" class="btn btn--default">Create plan</a>
+                  <button type="button" class="btn btn--default">Refresh summary</button>
+                </div>
+                <div class="item-actions-group">
+                  <button type="button" class="btn btn--ghost" title="Hide until later">Snooze</button>
+                  <button type="button" class="btn btn--danger" title="Stop tracking this thread">Remove</button>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="lane-section thread-section is-collapsed" id="thread-dentist" data-thread="dentist"
+            data-inbox="active" data-assigned="true" data-channel="text" data-lane="personal" data-lane-order="1"
+            data-created="2026-06-01T08:00:00" data-updated="2026-07-04T08:02:00">
+            <header class="lane-section-head">
+              <span class="lane-color"></span>
+              <div class="lane-name-wrap">
+                <h3 class="thread-title">Appointment change?</h3>
+                <span class="thread-track-path">Personal → Health</span>
+                <span class="thread-from-preview">From Dr. Kim's office</span>
+              </div>
+              <div class="thread-head-meta">
+                <span class="tone request">Request</span>
+                <span class="lane-track-count">2 msg</span>
+                <span class="thread-channel-badge text">Text</span>
+                <time datetime="2026-07-04T08:02:00">Today, 8:02 AM</time>
+              </div>
+            </header>
+            <div class="lane-body thread-body" id="thread-body-dentist">
+              <p class="thread-label">Dr. Kim's office · hygienist</p>
+              <div class="meta"><strong>From</strong> Dr. Kim's office</div>
+              <div class="draft-reply-panel" hidden>
+                <p class="draft-reply-hint">What should this reply communicate?</p>
+                <textarea class="draft-intent-input" rows="2" placeholder="e.g. Jul 15 works — please confirm insurance"></textarea>
+                <div class="draft-reply-actions"><button type="button" class="btn btn--default">Generate</button></div>
+                <label class="draft-output-label">Markdown — copy below</label>
+                <textarea class="draft-markdown-output" readonly hidden rows="6"></textarea>
+              </div>
+              <div class="section">
+                <h4>Latest updates</h4>
+                <ul>
+                  <li>Office texted: hygienist out Jul 8 — offered Jul 15 or Jul 22 instead.</li>
+                </ul>
+              </div>
+              <div class="section">
+                <h4>Their availability</h4>
+                <ul class="counterparty-slots">
+                  <li><span class="slot-mention slot-mention--open">Jul 15, 9:00 AM</span><span class="counterparty-slot-party">Dr. Kim's office</span></li>
+                  <li><span class="slot-mention slot-mention--open">Jul 22, 9:00 AM</span><span class="counterparty-slot-party">Dr. Kim's office</span></li>
+                </ul>
+              </div>
+              <div class="section">
+                <h4>Next steps</h4>
+                <ul class="next-steps">
+                  <li><span class="next-step-type">Response required</span> Pick <span class="slot-mention slot-mention--open">Jul 15</span> or <span class="slot-mention slot-mention--open">Jul 22</span> and confirm insurance still on file <span class="next-step-when">(today)</span></li>
+                </ul>
+              </div>
+              <div class="item-actions" role="toolbar" aria-label="Thread actions">
+                <div class="item-actions-group">
+                  <button type="button" class="btn btn--primary draft-reply-toggle">Draft reply</button>
+                  <a href="#" class="btn btn--default">Create plan</a>
+                  <button type="button" class="btn btn--default">Refresh summary</button>
+                </div>
+                <div class="item-actions-group">
+                  <button type="button" class="btn btn--ghost" title="Hide until later">Snooze</button>
+                  <button type="button" class="btn btn--danger" title="Stop tracking this thread">Remove</button>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="lane-section thread-section is-collapsed" id="thread-jordan" data-thread="jordan"
+            data-inbox="active" data-assigned="true" data-channel="email" data-lane="work" data-lane-order="3"
+            data-created="2026-07-02T09:30:00" data-updated="2026-07-02T11:20:00">
+            <header class="lane-section-head">
+              <span class="lane-color"></span>
+              <div class="lane-name-wrap">
+                <h3 class="thread-title">Jordan Lee — onsite interview loop</h3>
+                <span class="thread-track-path">Work → Hiring</span>
+                <span class="thread-from-preview">Latest from Recruiting</span>
+              </div>
+              <div class="thread-head-meta">
+                <span class="tone informational">Info</span>
+                <span class="lane-track-count">8 msg</span>
+                <span class="thread-channel-badge email">Email</span>
+                <time datetime="2026-07-02T11:20:00">Wed, Jul 2</time>
+              </div>
+            </header>
+            <div class="lane-body thread-body" id="thread-body-jordan">
+              <p class="thread-label">Jordan Lee PM candidate · onsite loop</p>
+              <div class="meta"><strong>Latest from</strong> recruiting@company.com</div>
+              <div class="draft-reply-panel" hidden>
+                <p class="draft-reply-hint">What should this reply communicate?</p>
+                <textarea class="draft-intent-input" rows="2" placeholder="e.g. Confirm debrief slot after onsite"></textarea>
+                <div class="draft-reply-actions"><button type="button" class="btn btn--default">Generate</button></div>
+                <label class="draft-output-label">Markdown — copy below</label>
+                <textarea class="draft-markdown-output" readonly hidden rows="8"></textarea>
+              </div>
+              <div class="section">
+                <h4>Latest updates</h4>
+                <ul>
+                  <li>Onsite confirmed for Jul 11; panel includes you + two eng leads.</li>
+                  <li>Recruiting asked for written feedback within 24h of loop.</li>
+                  <li>Draft offer band shared internally — pending loop outcome.</li>
+                </ul>
+              </div>
+              <div class="section">
+                <h4>Their availability</h4>
+                <ul class="counterparty-slots">
+                  <li><span class="slot-mention slot-mention--open">Jul 11, 1:00 PM</span><span class="counterparty-slot-party">Onsite panel</span><span class="counterparty-slot-note">full loop</span></li>
+                </ul>
+              </div>
+              <div class="section">
+                <h4>Next steps</h4>
+                <ul class="next-steps">
+                  <li><span class="next-step-type follow-up">Follow up needed</span> Block debrief on calendar after onsite <span class="next-step-when">(Jul 11)</span></li>
+                </ul>
+              </div>
+              <div class="thread-messages">
+                <div class="message-block">
+                  <div class="card-top"><time datetime="2026-07-02T11:20:00">Jul 2, 11:20 AM</time></div>
+                  <h4 class="msg-subject">Jordan Lee — onsite interview loop</h4>
+                  <div class="meta"><strong>From</strong> recruiting@company.com</div>
+                  <div class="meta"><strong>Recipients</strong> you@example.com</div>
+                </div>
+                <div class="message-block">
+                  <div class="card-top"><time datetime="2026-07-01T15:45:00">Jul 1, 3:45 PM</time></div>
+                  <h4 class="msg-subject">Re: Jordan Lee — onsite interview loop</h4>
+                  <div class="meta"><strong>From</strong> you@example.com</div>
+                  <div class="meta"><strong>Recipients</strong> recruiting@company.com</div>
+                </div>
+              </div>
+              <div class="item-actions" role="toolbar" aria-label="Thread actions">
+                <div class="item-actions-group">
+                  <button type="button" class="btn btn--primary draft-reply-toggle">Draft reply</button>
+                  <a href="#" class="btn btn--default">Create plan</a>
+                  <button type="button" class="btn btn--default">Refresh summary</button>
+                </div>
+                <div class="item-actions-group">
+                  <button type="button" class="btn btn--ghost" title="Hide until later">Snooze</button>
+                  <button type="button" class="btn btn--danger" title="Stop tracking this thread">Remove</button>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="lane-section thread-section is-collapsed" id="thread-hoa" data-thread="hoa"
+            data-inbox="active" data-assigned="false" data-channel="email"
+            data-created="2026-07-03T18:00:00" data-updated="2026-07-04T07:45:00">
+            <header class="lane-section-head">
+              <span class="lane-color"></span>
+              <div class="lane-name-wrap">
+                <h3 class="thread-title">HOA parking policy update</h3>
+                <span class="thread-track-path is-unassigned">Unassigned</span>
+                <span class="thread-from-preview">From building management</span>
+              </div>
+              <div class="thread-head-meta">
+                <span class="tone informational">Info</span>
+                <span class="lane-track-count">1 msg</span>
+                <span class="thread-channel-badge email">Email</span>
+                <time datetime="2026-07-04T07:45:00">Today, 7:45 AM</time>
+              </div>
+            </header>
+            <div class="lane-body thread-body" id="thread-body-hoa">
+              <p class="thread-label">HOA guest parking policy</p>
+              <div class="meta"><strong>From</strong> building.management@hoa.example</div>
+              <div class="draft-reply-panel" hidden>
+                <p class="draft-reply-hint">What should this reply communicate?</p>
+                <textarea class="draft-intent-input" rows="2" placeholder="e.g. Acknowledge receipt of permit form"></textarea>
+                <div class="draft-reply-actions"><button type="button" class="btn btn--default">Generate</button></div>
+                <label class="draft-output-label">Markdown — copy below</label>
+                <textarea class="draft-markdown-output" readonly hidden rows="6"></textarea>
+              </div>
+              <div class="section">
+                <h4>Latest updates</h4>
+                <ul>
+                  <li>New guest-parking rules effective Aug 1; permit form attached.</li>
+                </ul>
+              </div>
+              <div class="section">
+                <h4>Next steps</h4>
+                <ul class="next-steps">
+                  <li><span class="next-step-type follow-up">Follow up needed</span> Submit guest permit before Aug 1 <span class="next-step-when">(this week)</span></li>
+                </ul>
+              </div>
+              <div class="thread-messages">
+                <div class="message-block">
+                  <div class="card-top"><time datetime="2026-07-04T07:45:00">Today, 7:45 AM</time></div>
+                  <h4 class="msg-subject">HOA parking policy update</h4>
+                  <div class="meta"><strong>From</strong> building.management@hoa.example</div>
+                  <div class="meta"><strong>Recipients</strong> you@example.com</div>
+                </div>
+              </div>
+              <div class="item-actions" role="toolbar" aria-label="Thread actions">
+                <div class="item-actions-group">
+                  <button type="button" class="btn btn--primary draft-reply-toggle">Draft reply</button>
+                  <a href="#" class="btn btn--default">Assign to track</a>
+                  <button type="button" class="btn btn--default">Refresh summary</button>
+                </div>
+                <div class="item-actions-group">
+                  <button type="button" class="btn btn--ghost" title="Hide until later">Snooze</button>
+                  <button type="button" class="btn btn--danger" title="Stop tracking this thread">Remove</button>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="lane-section thread-section is-collapsed" id="thread-recruiter" data-thread="recruiter"
+            data-inbox="active" data-assigned="false" data-channel="linkedin"
+            data-created="2026-07-04T08:30:00" data-updated="2026-07-04T08:30:00">
+            <header class="lane-section-head">
+              <span class="lane-color"></span>
+              <div class="lane-name-wrap">
+                <h3 class="thread-title">Staff PM role — Series B startup</h3>
+                <span class="thread-track-path is-unassigned">Unassigned</span>
+                <span class="thread-from-preview">From Alex Chen</span>
+              </div>
+              <div class="thread-head-meta">
+                <span class="tone informational">Info</span>
+                <span class="lane-track-count">1 msg</span>
+                <span class="thread-channel-badge linkedin">LinkedIn</span>
+                <time datetime="2026-07-04T08:30:00">Today, 8:30 AM</time>
+              </div>
+            </header>
+            <div class="lane-body thread-body" id="thread-body-recruiter">
+              <p class="thread-label">Staff PM · Series B startup</p>
+              <div class="meta"><strong>From</strong> Alex Chen</div>
+              <div class="draft-reply-panel" hidden>
+                <p class="draft-reply-hint">What should this reply communicate?</p>
+                <textarea class="draft-intent-input" rows="2" placeholder="e.g. Interested — free Thursday afternoon"></textarea>
+                <div class="draft-reply-actions"><button type="button" class="btn btn--default">Generate</button></div>
+                <label class="draft-output-label">Markdown — copy below</label>
+                <textarea class="draft-markdown-output" readonly hidden rows="6"></textarea>
+              </div>
+              <div class="section">
+                <h4>Latest updates</h4>
+                <ul>
+                  <li>Inbound recruiter message about a staff PM role; asked for a 15-min intro call.</li>
+                </ul>
+              </div>
+              <div class="section">
+                <h4>Their availability</h4>
+                <ul class="counterparty-slots">
+                  <li><span class="slot-mention slot-mention--open">Thu Jul 10, 2:00 PM</span><span class="counterparty-slot-party">Alex Chen</span><span class="counterparty-slot-note">intro call</span></li>
+                </ul>
+              </div>
+              <div class="section">
+                <h4>Next steps</h4>
+                <ul class="next-steps">
+                  <li><span class="next-step-type">Response required</span> Reply with interest and a time for intro call <span class="next-step-when">(this week)</span></li>
+                </ul>
+              </div>
+              <div class="item-actions" role="toolbar" aria-label="Thread actions">
+                <div class="item-actions-group">
+                  <button type="button" class="btn btn--primary draft-reply-toggle">Draft reply</button>
+                  <a href="#" class="btn btn--default">Assign to track</a>
+                  <button type="button" class="btn btn--default">Refresh summary</button>
+                </div>
+                <div class="item-actions-group">
+                  <button type="button" class="btn btn--ghost" title="Hide until later">Snooze</button>
+                  <button type="button" class="btn btn--danger" title="Stop tracking this thread">Remove</button>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+      </div>
+
+      <aside class="meetings-panel schedule-panel" aria-label="Schedule">
+        <div class="thread-segmented schedule-tabs" role="tablist" aria-label="Schedule view">
+          <button type="button" class="active" data-schedule-view="calendar" role="tab" aria-selected="true">Calendar</button>
+          <button type="button" data-schedule-view="plans" role="tab" aria-selected="false">Plans</button>
+        </div>
+
+        <div class="schedule-view" id="calendar-view" data-schedule-view="calendar">
+          <div class="calendar-week-nav">
+            <button type="button" id="calendar-prev-week" aria-label="Previous week">←</button>
+            <span id="calendar-week-label">Jul 7 – 13, 2026</span>
+            <button type="button" id="calendar-next-week" aria-label="Next week">→</button>
+          </div>
+          <div class="calendar-week-strip" id="calendar-week-strip" role="group" aria-label="Week days"></div>
+          <div class="calendar-display-bar">
+            <div class="thread-segmented" role="group" aria-label="Calendar display">
+              <button type="button" class="active" data-calendar-display="all">All</button>
+              <button type="button" data-calendar-display="open">Open</button>
+              <button type="button" data-calendar-display="meetings">Meetings</button>
+            </div>
+            <ul class="calendar-legend" aria-label="Availability legend">
+              <li><i class="swatch-open" aria-hidden="true"></i> Open</li>
+              <li><i class="swatch-virtual" aria-hidden="true"></i> Virtual only</li>
+              <li><i class="swatch-meeting" aria-hidden="true"></i> Meeting</li>
+            </ul>
+          </div>
+          <p class="calendar-agenda-filter" id="calendar-filter-note" hidden>
+            Showing <span id="calendar-filter-date"></span> ·
+            <button type="button" id="calendar-clear-filter">Show all</button>
+          </p>
+
+          <div class="calendar-agenda" id="calendar-agenda">
+        <div class="meet-day" data-date="2026-07-07">
+          <div class="meet-day-head">Tuesday, Jul 7</div>
+          <div class="calendar-row calendar-row--open" data-kind="open">
+            <span class="meet-time">1:00 PM</span>
+            <div>
+              <div class="calendar-row-title">Open</div>
+              <span class="calendar-row-range">1:00 – 4:00 PM</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="meet-day" data-date="2026-07-08">
+          <div class="meet-day-head">Wednesday, Jul 8</div>
+          <div class="calendar-row calendar-row--virtual" data-kind="virtual">
+            <span class="meet-time">10:00 AM</span>
+            <div>
+              <div class="calendar-row-title">Virtual only</div>
+              <span class="calendar-row-range">10:00 AM – 12:00 PM</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="meet-day" data-date="2026-07-09">
+          <div class="meet-day-head">Thursday, Jul 9</div>
+          <div class="calendar-row calendar-row--open" data-kind="open">
+            <span class="meet-time">9:00 AM</span>
+            <div>
+              <div class="calendar-row-title">Open</div>
+              <span class="calendar-row-range">9:00 – 11:30 AM</span>
+            </div>
+          </div>
+          <div class="meet-row" data-kind="meeting">
+            <span class="meet-time">2:00 PM</span>
+            <div>
+              <div class="meet-title">Q3 roadmap sync</div>
+              <a class="meet-track-link" href="#track-work-product" data-track="work-product">Work → Product</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="meet-day" data-date="2026-07-10">
+          <div class="meet-day-head">Friday, Jul 10</div>
+          <div class="calendar-row calendar-row--open" data-kind="open">
+            <span class="meet-time">8:00 AM</span>
+            <div>
+              <div class="calendar-row-title">Open</div>
+              <span class="calendar-row-range">8:00 – 9:30 AM</span>
+            </div>
+          </div>
+          <div class="meet-row" data-kind="meeting">
+            <span class="meet-time">10:00 AM</span>
+            <div>
+              <div class="meet-title">Design review</div>
+              <a class="meet-track-link" href="#track-work-product" data-track="work-product">Work → Product</a>
+            </div>
+          </div>
+          <div class="meet-row" data-kind="meeting">
+            <span class="meet-time">3:30 PM</span>
+            <div>
+              <div class="meet-title">Acme kickoff call</div>
+              <a class="meet-track-link" href="#track-consulting-acme" data-track="consulting-acme">Consulting → Acme Corp</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="meet-day" data-date="2026-07-11">
+          <div class="meet-day-head">Saturday, Jul 11</div>
+          <div class="calendar-row calendar-row--open" data-kind="open">
+            <span class="meet-time">10:00 AM</span>
+            <div>
+              <div class="calendar-row-title">Open</div>
+              <span class="calendar-row-range">10:00 AM – 2:00 PM</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="meet-day" data-date="2026-07-13">
+          <div class="meet-day-head">Monday, Jul 13</div>
+          <div class="calendar-row calendar-row--open" data-kind="open">
+            <span class="meet-time">8:00 AM</span>
+            <div>
+              <div class="calendar-row-title">Open</div>
+              <span class="calendar-row-range">8:00 – 10:30 AM</span>
+            </div>
+          </div>
+          <div class="meet-row" data-kind="meeting">
+            <span class="meet-time">11:00 AM</span>
+            <div>
+              <div class="meet-title">Mediation session</div>
+              <a class="meet-track-link" href="#track-divorce-mediation" data-track="divorce-mediation">Divorce → Mediation</a>
+            </div>
+          </div>
+        </div>
+          </div>
+        </div>
+
+        <div class="schedule-view" id="plans-view" data-schedule-view="plans" hidden>
+          <div class="plans-rail-toolbar">
+            <button type="button" class="btn btn--primary">Add plan</button>
+          </div>
+          <ul class="plans-rail-list">
+            <li>
+              <article class="plan-card-rail plan-due--due-today" data-thread="dentist">
+                <h3><span class="plan-due-badge plan-due-badge--due-today">Due today</span>Reply with appointment slot</h3>
+                <a class="plan-thread-link" href="#thread-dentist">Personal → Health · Appointment change?</a>
+                <p class="plan-meta"><span class="next-step-type">Reply</span> · by Jul 4</p>
+              </article>
+            </li>
+            <li>
+              <article class="plan-card-rail plan-due--due-today" data-thread="sow">
+                <h3><span class="plan-due-badge plan-due-badge--due-today">Due today</span>Send countersigned SOW</h3>
+                <a class="plan-thread-link" href="#thread-sow">Consulting → Acme Corp · Re: Acme consulting SOW</a>
+                <p class="plan-meta"><span class="next-step-type">Reply</span> · by Jul 4</p>
+              </article>
+            </li>
+            <li>
+              <article class="plan-card-rail plan-due--due-today" data-thread="roadmap">
+                <h3><span class="plan-due-badge plan-due-badge--due-today">Due today</span>Confirm design review agenda</h3>
+                <a class="plan-thread-link" href="#thread-roadmap">Work → Product · Q3 roadmap blockers</a>
+                <p class="plan-meta"><span class="next-step-type">Reply</span> · by Jul 4</p>
+              </article>
+            </li>
+            <li>
+              <article class="plan-card-rail" data-thread="jordan">
+                <h3>Block debrief after onsite</h3>
+                <a class="plan-thread-link" href="#thread-jordan">Work → Hiring · Jordan Lee interview loop</a>
+                <p class="plan-meta"><span class="next-step-type follow-up">Follow-up</span> · by Jul 11</p>
+              </article>
+            </li>
+          </ul>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <dialog id="settings-dialog" class="vision-dialog">
+    <form method="dialog" class="vision-dialog-form" id="settings-form">
+      <h2>Settings</h2>
+      <p class="vision-dialog-lead">Pipeline, summarization, and background run preferences.</p>
+
+      <section class="vision-dialog-section" aria-labelledby="settings-backend-heading">
+        <h3 id="settings-backend-heading">Summarization backend</h3>
+        <p class="vision-dialog-hint">Model used for lane summaries and thread updates.</p>
+        <div class="dialog-segmented" role="group" aria-label="Summarization backend">
+          <button type="button" data-setting="backend" data-value="llama">Llama</button>
+          <button type="button" class="active" data-setting="backend" data-value="claude">Claude</button>
+        </div>
+      </section>
+
+      <section class="vision-dialog-section" aria-labelledby="settings-schedule-heading">
+        <h3 id="settings-schedule-heading">Background runs</h3>
+        <p class="vision-dialog-hint">Automatic imports and processing during your active window.</p>
+        <label class="vision-field">
+          <span>Lookback days</span>
+          <input type="number" id="settings-lookback" min="1" max="365" value="30" />
+        </label>
+        <label class="vision-field">
+          <span>Run every</span>
+          <select id="settings-interval">
+            <option value="900">15 min</option>
+            <option value="1800" selected>30 min</option>
+            <option value="3600">1 hour</option>
+          </select>
+        </label>
+        <label class="vision-field">
+          <span>Timezone</span>
+          <input type="text" id="settings-timezone" placeholder="America/New_York" value="America/New_York" />
+        </label>
+        <div class="vision-checkboxes">
+          <label class="vision-checkbox">
+            <input type="checkbox" id="settings-weekdays" checked />
+            <span>Weekdays</span>
+          </label>
+          <label class="vision-checkbox">
+            <input type="checkbox" id="settings-weekends" checked />
+            <span>Weekends</span>
+          </label>
+        </div>
+      </section>
+
+      <section class="vision-dialog-section" aria-labelledby="settings-quiet-heading">
+        <h3 id="settings-quiet-heading">Quiet hours</h3>
+        <p class="vision-dialog-hint">No automatic pipeline runs during this window (e.g. overnight).</p>
+        <label class="vision-field">
+          <span>From</span>
+          <select id="settings-quiet-start" aria-label="Quiet hours start"></select>
+        </label>
+        <label class="vision-field">
+          <span>Until</span>
+          <select id="settings-quiet-end" aria-label="Quiet hours end"></select>
+        </label>
+      </section>
+
+      <div class="vision-dialog-actions">
+        <button type="button" class="btn btn--ghost vision-dialog-cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+    const LANE_TAB_KEY = "dashboard-vision-lane-tab";
+    const TRACK_COLLAPSE_KEY = "dashboard-vision-track-collapse";
+    const THREAD_COLLAPSE_KEY = "dashboard-vision-thread-collapse";
+    const TRACK_INBOX_KEY = "dashboard-vision-track-inbox";
+    const TRACK_ARCHIVED_KEY = "dashboard-vision-track-archived";
+    const TRACK_SORT_KEY = "dashboard-vision-track-sort";
+    let trackInbox = "active";
+    let trackSort = "updated-desc";
+
+    function sectionLabel(section) {
+      return (
+        section.querySelector("[data-lane-name]")?.textContent?.trim() ||
+        section.querySelector(".thread-title")?.textContent?.trim() ||
+        section.querySelector(".track-name")?.textContent?.trim() ||
+        "section"
+      );
+    }
+
+    function sectionId(section) {
+      return section.dataset.lane || section.dataset.thread || section.dataset.track || "";
+    }
+
+    function setSectionCollapsed(section, collapsed) {
+      const btn = section.querySelector(".lane-collapse-btn");
+      section.classList.toggle("is-collapsed", collapsed);
+      if (btn) {
+        btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        btn.setAttribute(
+          "aria-label",
+          collapsed ? `Expand ${sectionLabel(section)}` : `Collapse ${sectionLabel(section)}`
+        );
+      }
+    }
+
+    function saveCollapseState(selector, storageKey) {
+      const state = {};
+      document.querySelectorAll(selector).forEach((section) => {
+        const id = sectionId(section);
+        if (id) state[id] = section.classList.contains("is-collapsed");
+      });
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(state));
+      } catch {
+        /* ignore */
+      }
+    }
+
+    function loadCollapseState(selector, storageKey) {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (!raw) return;
+        const state = JSON.parse(raw);
+        document.querySelectorAll(selector).forEach((section) => {
+          const id = sectionId(section);
+          if (id && id in state) setSectionCollapsed(section, Boolean(state[id]));
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+
+    function initCollapsibleSections(selector, storageKey, bodySelector = ".lane-body") {
+      document.querySelectorAll(selector).forEach((section) => {
+        const head = section.querySelector(".lane-section-head");
+        const body = section.querySelector(bodySelector);
+        if (!head || !body || head.querySelector(".lane-collapse-btn")) return;
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "lane-collapse-btn";
+        const collapsed = section.classList.contains("is-collapsed");
+        btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        if (body.id) btn.setAttribute("aria-controls", body.id);
+        btn.setAttribute(
+          "aria-label",
+          collapsed ? `Expand ${sectionLabel(section)}` : `Collapse ${sectionLabel(section)}`
+        );
+        btn.innerHTML = '<span class="lane-collapse-icon" aria-hidden="true"></span>';
+        head.insertBefore(btn, head.firstChild);
+
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          setSectionCollapsed(section, !section.classList.contains("is-collapsed"));
+          saveCollapseState(selector, storageKey);
+        });
+      });
+    }
+
+    function activeLanePanel() {
+      return document.querySelector(".lanes-tab-panel.is-active");
+    }
+
+    function tracksInPanel(panel) {
+      return Array.from(panel?.querySelectorAll(".track-section") || []);
+    }
+
+    function isTrackArchived(track) {
+      return track.dataset.archived === "true";
+    }
+
+    function visibleTracksInPanel(panel) {
+      return tracksInPanel(panel).filter((track) => !track.classList.contains("is-filtered-out"));
+    }
+
+    function archivedTrackCount() {
+      return document.querySelectorAll('.track-section[data-archived="true"]').length;
+    }
+
+    function syncArchiveButton(track) {
+      const btn = track.querySelector(".track-archive-btn");
+      if (!btn) return;
+      const archived = isTrackArchived(track);
+      btn.textContent = archived ? "Unarchive" : "Archive";
+      btn.title = archived ? "Restore to dashboard" : "Hide from dashboard";
+    }
+
+    function saveTrackArchivedState() {
+      const state = {};
+      document.querySelectorAll(".track-section").forEach((track) => {
+        const id = sectionId(track);
+        if (id) state[id] = isTrackArchived(track);
+      });
+      try {
+        localStorage.setItem(TRACK_ARCHIVED_KEY, JSON.stringify(state));
+      } catch {
+        /* ignore */
+      }
+    }
+
+    function loadTrackArchivedState() {
+      try {
+        const raw = localStorage.getItem(TRACK_ARCHIVED_KEY);
+        if (!raw) return;
+        const state = JSON.parse(raw);
+        document.querySelectorAll(".track-section").forEach((track) => {
+          const id = sectionId(track);
+          if (!id || !(id in state)) return;
+          const archived = Boolean(state[id]);
+          if (archived) {
+            track.dataset.archived = "true";
+          } else {
+            delete track.dataset.archived;
+          }
+          syncArchiveButton(track);
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+
+    function setTrackArchived(track, archived) {
+      if (archived) {
+        track.dataset.archived = "true";
+      } else {
+        delete track.dataset.archived;
+      }
+      syncArchiveButton(track);
+      saveTrackArchivedState();
+      applyTrackVisibility();
+    }
+
+    function syncLaneTabCounts() {
+      document.querySelectorAll(".lanes-tab-panel").forEach((panel) => {
+        const visible = visibleTracksInPanel(panel);
+        const empty = panel.querySelector(".tracks-empty");
+        if (empty) {
+          empty.hidden = visible.length > 0;
+          empty.textContent =
+            trackInbox === "archived"
+              ? "No archived tracks in this lane."
+              : "No active tracks in this lane.";
+        }
+        const tab = document.querySelector(`.lane-tab[data-lane="${panel.dataset.lane}"]`);
+        const countEl = tab?.querySelector(".lane-tab-count");
+        if (countEl) countEl.textContent = String(visible.length);
+      });
+    }
+
+    function updateTrackInboxToolbar() {
+      const archivedCount = archivedTrackCount();
+      document.querySelectorAll("#lanes-toolbar [data-track-inbox]").forEach((btn) => {
+        if (!(btn instanceof HTMLButtonElement)) return;
+        const mode = btn.dataset.trackInbox;
+        if (!mode) return;
+        btn.classList.toggle("active", mode === trackInbox);
+        if (mode === "archived") {
+          btn.disabled = archivedCount === 0;
+          btn.title = archivedCount === 0 ? "No archived tracks" : "Show archived tracks";
+        }
+      });
+      if (archivedCount === 0 && trackInbox === "archived") {
+        trackInbox = "active";
+      }
+    }
+
+    function trackTimestamp(track, field) {
+      return Date.parse(track.dataset[field] || 0);
+    }
+
+    function compareLaneTracks(a, b, sortBy) {
+      if (sortBy === "created-desc") {
+        return trackTimestamp(b, "created") - trackTimestamp(a, "created");
+      }
+      return trackTimestamp(b, "updated") - trackTimestamp(a, "updated");
+    }
+
+    function sortTracksInPanel(panel) {
+      const stack = panel?.querySelector(".track-stack");
+      if (!stack) return;
+      const tracks = tracksInPanel(panel);
+      [...tracks]
+        .sort((a, b) => compareLaneTracks(a, b, trackSort))
+        .forEach((track) => stack.appendChild(track));
+    }
+
+    function applyTrackSort() {
+      document.querySelectorAll(".lanes-tab-panel").forEach(sortTracksInPanel);
+      try {
+        localStorage.setItem(TRACK_SORT_KEY, trackSort);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    function applyTrackVisibility() {
+      updateTrackInboxToolbar();
+      document.querySelectorAll(".track-section").forEach((track) => {
+        const archived = isTrackArchived(track);
+        const show = trackInbox === "archived" ? archived : !archived;
+        track.classList.toggle("is-filtered-out", !show);
+        syncArchiveButton(track);
+      });
+      syncLaneTabCounts();
+      applyTrackSort();
+      expandDefaultTrackInPanel(activeLanePanel());
+      try {
+        localStorage.setItem(TRACK_INBOX_KEY, trackInbox);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    function expandDefaultTrackInPanel(panel) {
+      const tracks = visibleTracksInPanel(panel);
+      tracksInPanel(panel).forEach((track) => {
+        if (track.classList.contains("is-filtered-out")) return;
+        setSectionCollapsed(track, track !== tracks[0]);
+      });
+      if (tracks.length) saveCollapseState(".track-section", TRACK_COLLAPSE_KEY);
+    }
+
+    function navigateToTrack(trackId) {
+      const track = document.querySelector(`.track-section[data-track="${trackId}"]`);
+      if (!track) return;
+      const laneId = track.closest(".lanes-tab-panel")?.dataset.lane;
+      if (!laneId) return;
+
+      const archived = isTrackArchived(track);
+      if ((archived && trackInbox !== "archived") || (!archived && trackInbox !== "active")) {
+        trackInbox = archived ? "archived" : "active";
+        applyTrackVisibility();
+      }
+
+      setActiveLaneTab(laneId);
+      setSectionCollapsed(track, false);
+      saveCollapseState(".track-section", TRACK_COLLAPSE_KEY);
+      track.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    function setActiveLaneTab(laneId) {
+      document.querySelectorAll(".lane-tab").forEach((tab) => {
+        const active = tab.dataset.lane === laneId;
+        tab.classList.toggle("is-active", active);
+        tab.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      let activePanel = null;
+      document.querySelectorAll(".lanes-tab-panel").forEach((panel) => {
+        const active = panel.dataset.lane === laneId;
+        panel.classList.toggle("is-active", active);
+        panel.toggleAttribute("hidden", !active);
+        if (active) activePanel = panel;
+      });
+      expandDefaultTrackInPanel(activePanel);
+      try {
+        localStorage.setItem(LANE_TAB_KEY, laneId);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    function tracksInActiveLane() {
+      return visibleTracksInPanel(activeLanePanel());
+    }
+
+    initCollapsibleSections(".track-section", TRACK_COLLAPSE_KEY, ".track-body");
+    initCollapsibleSections(".thread-section", THREAD_COLLAPSE_KEY);
+    loadCollapseState(".thread-section", THREAD_COLLAPSE_KEY);
+    loadTrackArchivedState();
+    document.querySelectorAll(".track-section").forEach(syncArchiveButton);
+
+    const trackSortEl = document.getElementById("track-sort");
+    try {
+      const savedSort = localStorage.getItem(TRACK_SORT_KEY);
+      if (savedSort === "updated-desc" || savedSort === "created-desc") trackSort = savedSort;
+    } catch {
+      /* ignore */
+    }
+    if (trackSortEl) trackSortEl.value = trackSort;
+    trackSortEl?.addEventListener("change", () => {
+      trackSort = trackSortEl.value === "created-desc" ? "created-desc" : "updated-desc";
+      applyTrackSort();
+      expandDefaultTrackInPanel(activeLanePanel());
+    });
+
+    try {
+      const savedInbox = localStorage.getItem(TRACK_INBOX_KEY);
+      if (savedInbox === "archived" || savedInbox === "active") trackInbox = savedInbox;
+    } catch {
+      /* ignore */
+    }
+    document.querySelectorAll("#lanes-toolbar [data-track-inbox]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (!(btn instanceof HTMLButtonElement) || btn.disabled) return;
+        trackInbox = btn.dataset.trackInbox || "active";
+        applyTrackVisibility();
+      });
+    });
+    applyTrackVisibility();
+
+    document.querySelectorAll(".lane-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const laneId = tab.dataset.lane;
+        if (laneId) setActiveLaneTab(laneId);
+      });
+    });
+
+    let initialLane = "personal";
+    try {
+      const savedTab = localStorage.getItem(LANE_TAB_KEY);
+      if (savedTab && document.querySelector(`.lanes-tab-panel[data-lane="${savedTab}"]`)) {
+        initialLane = savedTab;
+      }
+    } catch {
+      /* ignore */
+    }
+    setActiveLaneTab(initialLane);
+
+    document.getElementById("lanes-tabs")?.addEventListener("click", (e) => {
+      const btn = e.target.closest(".track-archive-btn");
+      if (!btn) return;
+      const track = btn.closest(".track-section");
+      if (!track) return;
+      setTrackArchived(track, !isTrackArchived(track));
+    });
+
+    document.getElementById("collapse-all-tracks")?.addEventListener("click", () => {
+      tracksInActiveLane().forEach((section) => setSectionCollapsed(section, true));
+      saveCollapseState(".track-section", TRACK_COLLAPSE_KEY);
+    });
+
+    document.getElementById("expand-all-tracks")?.addEventListener("click", () => {
+      tracksInActiveLane().forEach((section) => setSectionCollapsed(section, false));
+      saveCollapseState(".track-section", TRACK_COLLAPSE_KEY);
+    });
+
+    document.getElementById("collapse-all-threads")?.addEventListener("click", () => {
+      document.querySelectorAll(".thread-section").forEach((section) => {
+        setSectionCollapsed(section, true);
+      });
+      saveCollapseState(".thread-section", THREAD_COLLAPSE_KEY);
+    });
+
+    document.getElementById("expand-all-threads")?.addEventListener("click", () => {
+      document.querySelectorAll(".thread-section").forEach((section) => {
+        setSectionCollapsed(section, false);
+      });
+      saveCollapseState(".thread-section", THREAD_COLLAPSE_KEY);
+    });
+
+    document.querySelectorAll(".meet-track-link[href^='#track-']").forEach((link) => {
+      link.addEventListener("click", (e) => {
+        const trackId = link.dataset.track || link.getAttribute("href")?.slice(7);
+        if (!trackId) return;
+        e.preventDefault();
+        navigateToTrack(trackId);
+      });
+    });
+
+    document.querySelectorAll(".lane-thread-link[href^='#thread-']").forEach((link) => {
+      link.addEventListener("click", (e) => {
+        const href = link.getAttribute("href");
+        if (!href || href === "#") return;
+        e.preventDefault();
+        const threadId = href.slice(1);
+        const thread = document.getElementById(threadId);
+        if (!thread) return;
+        setSectionCollapsed(thread, false);
+        saveCollapseState(".thread-section", THREAD_COLLAPSE_KEY);
+        thread.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+
+    document.querySelectorAll("[data-lane-name]").forEach((el) => {
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          el.blur();
+        }
+      });
+      el.addEventListener("blur", () => {
+        if (!el.textContent.trim()) el.textContent = "Untitled lane";
+      });
+    });
+
+    const threadStack = document.getElementById("thread-stack");
+    const threadEmpty = document.getElementById("thread-empty");
+    const threadSort = document.getElementById("thread-sort");
+    const SOURCE_FILTERS = [
+      { id: "email", label: "Email" },
+      { id: "text", label: "Text" },
+      { id: "slack", label: "Slack" },
+      { id: "linkedin", label: "LinkedIn" },
+      { id: "meet", label: "Meet" },
+    ];
+    const threadSourceTrigger = document.getElementById("thread-source-trigger");
+    const threadSourcePanel = document.getElementById("thread-source-panel");
+    const threadSourceDropdown = document.getElementById("thread-source-dropdown");
+    let threadInbox = "active";
+    let threadSourceFilter = new Set(SOURCE_FILTERS.map((s) => s.id));
+    let threadAssignment = "all";
+
+    function threadSourceCheckboxes() {
+      return Array.from(
+        document.querySelectorAll(".thread-source-dropdown-option input[data-source-filter]"),
+      );
+    }
+
+    function positionSourceDropdownPanel() {
+      if (!threadSourceTrigger || !threadSourcePanel) return;
+      const rect = threadSourceTrigger.getBoundingClientRect();
+      threadSourcePanel.style.top = `${rect.bottom + 4}px`;
+      threadSourcePanel.style.left = `${rect.left}px`;
+    }
+
+    function setSourceDropdownOpen(open) {
+      if (!threadSourcePanel || !threadSourceTrigger) return;
+      threadSourcePanel.hidden = !open;
+      threadSourceTrigger.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) positionSourceDropdownPanel();
+    }
+
+    function syncThreadSourceFilterFromCheckboxes() {
+      threadSourceFilter = new Set();
+      threadSourceCheckboxes().forEach((input) => {
+        if (!(input instanceof HTMLInputElement) || input.disabled) return;
+        if (input.checked) threadSourceFilter.add(input.dataset.sourceFilter || "");
+      });
+      threadSourceFilter.delete("");
+    }
+
+    function updateSourceDropdownLabel() {
+      if (!threadSourceTrigger) return;
+      const enabled = SOURCE_FILTERS.filter((source) => {
+        const input = document.querySelector(
+          `input[data-source-filter="${source.id}"]`,
+        );
+        return input instanceof HTMLInputElement && !input.disabled;
+      });
+      const selected = enabled.filter((source) => threadSourceFilter.has(source.id));
+      if (!selected.length) {
+        threadSourceTrigger.textContent = "No sources";
+      } else if (selected.length === enabled.length) {
+        threadSourceTrigger.textContent = "All sources";
+      } else if (selected.length === 1) {
+        threadSourceTrigger.textContent = selected[0].label;
+      } else {
+        threadSourceTrigger.textContent = `${selected.length} sources`;
+      }
+    }
+
+    function setAllSourceFilters(checked) {
+      threadSourceCheckboxes().forEach((input) => {
+        if (!(input instanceof HTMLInputElement) || input.disabled) return;
+        input.checked = checked;
+      });
+      syncThreadSourceFilterFromCheckboxes();
+      updateSourceDropdownLabel();
+      applyThreadFilters();
+    }
+
+    function threadIsUnassigned(section) {
+      return section.dataset.assigned !== "true";
+    }
+
+    function threadSections() {
+      return Array.from(threadStack?.querySelectorAll(".thread-section") || []);
+    }
+
+    function threadTimestamp(section, field) {
+      return Date.parse(section.dataset[field] || 0);
+    }
+
+    function compareThreads(a, b, sortBy) {
+      if (sortBy === "lane") {
+        const unassignedA = threadIsUnassigned(a);
+        const unassignedB = threadIsUnassigned(b);
+        if (unassignedA !== unassignedB) return unassignedA ? 1 : -1;
+        const laneA = Number(a.dataset.laneOrder || 0);
+        const laneB = Number(b.dataset.laneOrder || 0);
+        if (laneA !== laneB) return laneA - laneB;
+        const trackA = a.querySelector(".thread-track-path")?.textContent || "";
+        const trackB = b.querySelector(".thread-track-path")?.textContent || "";
+        if (trackA !== trackB) return trackA.localeCompare(trackB);
+        return threadTimestamp(b, "updated") - threadTimestamp(a, "updated");
+      }
+      if (sortBy === "newest") {
+        return threadTimestamp(b, "created") - threadTimestamp(a, "created");
+      }
+      return threadTimestamp(b, "updated") - threadTimestamp(a, "updated");
+    }
+
+    function updateThreadFilterCounts() {
+      const active = threadSections().filter((s) => s.dataset.inbox === threadInbox);
+      const counts = { all: active.length, email: 0, text: 0, slack: 0, linkedin: 0, meet: 0 };
+      let unassignedCount = 0;
+      active.forEach((s) => {
+        const ch = s.dataset.channel;
+        if (ch && ch in counts) counts[ch] += 1;
+        if (threadIsUnassigned(s)) unassignedCount += 1;
+      });
+      threadSourceCheckboxes().forEach((input) => {
+        if (!(input instanceof HTMLInputElement)) return;
+        const ch = input.dataset.sourceFilter || "";
+        const n = counts[ch] ?? 0;
+        const option = input.closest(".thread-source-dropdown-option");
+        input.disabled = n === 0;
+        option?.classList.toggle("is-disabled", n === 0);
+        if (input.disabled) {
+          input.checked = false;
+          threadSourceFilter.delete(ch);
+        }
+      });
+      syncThreadSourceFilterFromCheckboxes();
+      updateSourceDropdownLabel();
+      document.querySelectorAll(".thread-toolbar [data-assignment]").forEach((btn) => {
+        if (!(btn instanceof HTMLButtonElement) || !btn.closest(".thread-segmented")) return;
+        const assignment = btn.dataset.assignment;
+        if (!assignment) return;
+        if (assignment === "all") {
+          btn.textContent = `All (${active.length})`;
+        } else if (assignment === "unassigned") {
+          btn.textContent = unassignedCount > 0 ? `Unassigned (${unassignedCount})` : "Unassigned";
+          btn.disabled = unassignedCount === 0;
+          if (btn.disabled && threadAssignment === "unassigned") threadAssignment = "all";
+        }
+      });
+    }
+
+    function applyThreadFilters() {
+      const sortBy = threadSort?.value || "recent-updates";
+      const sections = threadSections();
+      const visible = sections.filter((section) => {
+        const inboxOk = section.dataset.inbox === threadInbox;
+        const channelOk = threadSourceFilter.has(section.dataset.channel || "");
+        const assignmentOk =
+          threadAssignment === "all" ||
+          (threadAssignment === "unassigned" && threadIsUnassigned(section));
+        return inboxOk && channelOk && assignmentOk;
+      });
+
+      visible.sort((a, b) => compareThreads(a, b, sortBy));
+      visible.forEach((section) => threadStack?.appendChild(section));
+
+      sections.forEach((section) => {
+        const show = visible.includes(section);
+        section.classList.toggle("is-filtered-out", !show);
+      });
+
+      const n = visible.length;
+      threadEmpty?.classList.toggle("is-visible", n === 0);
+      threadStack?.toggleAttribute("hidden", n === 0);
+
+      document.querySelectorAll(".thread-toolbar [data-inbox]").forEach((btn) => {
+        if (btn instanceof HTMLButtonElement && btn.closest(".thread-segmented")) {
+          btn.classList.toggle("active", btn.dataset.inbox === threadInbox);
+        }
+      });
+      document.querySelectorAll(".thread-toolbar [data-assignment]").forEach((btn) => {
+        if (btn instanceof HTMLButtonElement && btn.closest(".thread-segmented")) {
+          btn.classList.toggle("active", btn.dataset.assignment === threadAssignment);
+        }
+      });
+    }
+
+    document.querySelectorAll(".thread-toolbar [data-inbox]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (!(btn instanceof HTMLButtonElement) || btn.disabled) return;
+        threadInbox = btn.dataset.inbox || "active";
+        updateThreadFilterCounts();
+        applyThreadFilters();
+      });
+    });
+
+    threadSourceTrigger?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setSourceDropdownOpen(Boolean(threadSourcePanel?.hidden));
+    });
+
+    document.getElementById("thread-source-select-all")?.addEventListener("click", () => {
+      setAllSourceFilters(true);
+    });
+
+    document.getElementById("thread-source-select-none")?.addEventListener("click", () => {
+      setAllSourceFilters(false);
+    });
+
+    threadSourceCheckboxes().forEach((input) => {
+      input.addEventListener("change", () => {
+        syncThreadSourceFilterFromCheckboxes();
+        updateSourceDropdownLabel();
+        applyThreadFilters();
+      });
+    });
+
+    document.addEventListener("click", (event) => {
+      if (!threadSourceDropdown?.contains(event.target)) {
+        setSourceDropdownOpen(false);
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") setSourceDropdownOpen(false);
+    });
+
+    window.addEventListener(
+      "scroll",
+      () => {
+        if (threadSourcePanel && !threadSourcePanel.hidden) {
+          positionSourceDropdownPanel();
+        }
+      },
+      true,
+    );
+
+    window.addEventListener("resize", () => {
+      if (threadSourcePanel && !threadSourcePanel.hidden) {
+        positionSourceDropdownPanel();
+      }
+    });
+
+    document.querySelectorAll(".thread-toolbar [data-assignment]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (!(btn instanceof HTMLButtonElement) || btn.disabled) return;
+        threadAssignment = btn.dataset.assignment || "all";
+        applyThreadFilters();
+      });
+    });
+
+    threadSort?.addEventListener("change", applyThreadFilters);
+    updateThreadFilterCounts();
+    applyThreadFilters();
+
+    document.querySelectorAll(".draft-reply-toggle").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const body = btn.closest(".thread-body");
+        const panel = body?.querySelector(".draft-reply-panel");
+        if (!panel) return;
+        const open = panel.hidden;
+        panel.hidden = !open;
+        if (open) {
+          panel.querySelector(".draft-intent-input")?.focus();
+        }
+      });
+    });
+
+    const SETTINGS_KEY = "dashboard-vision-settings";
+    const settingsDialog = document.getElementById("settings-dialog");
+
+    function setDialogSegmentedValue(group, value) {
+      group?.querySelectorAll("button[data-value]").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.value === value);
+      });
+    }
+
+    function getDialogSegmentedValue(group) {
+      return group?.querySelector("button[data-value].active")?.dataset.value || "";
+    }
+
+    function initDialogSegmented(root) {
+      root?.querySelectorAll(".dialog-segmented").forEach((group) => {
+        group.querySelectorAll("button[data-value]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            setDialogSegmentedValue(group, btn.dataset.value || "");
+          });
+        });
+      });
+    }
+
+    function hourSelectOptions() {
+      return Array.from({ length: 24 }, (_, hour) => {
+        const label = `${String(hour).padStart(2, "0")}:00`;
+        return `<option value="${hour}">${label}</option>`;
+      }).join("");
+    }
+
+    function initQuietHourSelects() {
+      const quietStart = document.getElementById("settings-quiet-start");
+      const quietEnd = document.getElementById("settings-quiet-end");
+      if (quietStart instanceof HTMLSelectElement && !quietStart.options.length) {
+        quietStart.innerHTML = hourSelectOptions();
+        quietStart.value = "19";
+      }
+      if (quietEnd instanceof HTMLSelectElement && !quietEnd.options.length) {
+        quietEnd.innerHTML = hourSelectOptions();
+        quietEnd.value = "6";
+      }
+    }
+
+    function loadSettingsDialog() {
+      initQuietHourSelects();
+      try {
+        const raw = localStorage.getItem(SETTINGS_KEY);
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        const backendGroup = settingsDialog?.querySelector('[aria-label="Summarization backend"]');
+        if (data.backend) setDialogSegmentedValue(backendGroup, data.backend);
+        if (data.lookback != null) document.getElementById("settings-lookback").value = String(data.lookback);
+        if (data.interval) document.getElementById("settings-interval").value = data.interval;
+        if (data.timezone != null) document.getElementById("settings-timezone").value = data.timezone;
+        if (data.weekdays != null) document.getElementById("settings-weekdays").checked = Boolean(data.weekdays);
+        if (data.weekends != null) document.getElementById("settings-weekends").checked = Boolean(data.weekends);
+        if (data.quiet_start != null) document.getElementById("settings-quiet-start").value = String(data.quiet_start);
+        if (data.quiet_end != null) document.getElementById("settings-quiet-end").value = String(data.quiet_end);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    function saveSettingsDialog() {
+      const backendGroup = settingsDialog?.querySelector('[aria-label="Summarization backend"]');
+      const data = {
+        backend: getDialogSegmentedValue(backendGroup) || "claude",
+        lookback: Number(document.getElementById("settings-lookback")?.value || 30),
+        interval: document.getElementById("settings-interval")?.value || "1800",
+        timezone: document.getElementById("settings-timezone")?.value || "",
+        weekdays: Boolean(document.getElementById("settings-weekdays")?.checked),
+        weekends: Boolean(document.getElementById("settings-weekends")?.checked),
+        quiet_start: Number(document.getElementById("settings-quiet-start")?.value ?? 19),
+        quiet_end: Number(document.getElementById("settings-quiet-end")?.value ?? 6),
+      };
+      try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
+      } catch {
+        /* ignore */
+      }
+    }
+
+    document.getElementById("settings-btn")?.addEventListener("click", () => {
+      loadSettingsDialog();
+      settingsDialog?.showModal();
+    });
+    document.querySelectorAll(".vision-dialog-cancel").forEach((btn) => {
+      btn.addEventListener("click", () => btn.closest("dialog")?.close());
+    });
+    document.getElementById("settings-form")?.addEventListener("submit", saveSettingsDialog);
+
+    initDialogSegmented(settingsDialog);
+    initQuietHourSelects();
+
+    const SCHEDULE_VIEW_KEY = "dashboard-vision-schedule-view";
+    const CALENDAR_DISPLAY_KEY = "dashboard-vision-calendar-display";
+    const DEMO_TODAY = new Date(2026, 6, 4);
+    const CALENDAR_MARKED_DATES = new Set([
+      "2026-07-07", "2026-07-08", "2026-07-09", "2026-07-10", "2026-07-11", "2026-07-13",
+    ]);
+    let calendarWeekStart = new Date(2026, 6, 7);
+    let calendarDayFilter = null;
+    let calendarDisplayMode = "all";
+    let scheduleView = "calendar";
+
+    function dateKey(d) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
+
+    function formatWeekLabel(start, end) {
+      const opts = { month: "short", day: "numeric" };
+      const a = start.toLocaleDateString("en-US", opts);
+      const b = end.toLocaleDateString("en-US", { ...opts, year: "numeric" });
+      return `${a} – ${b}`;
+    }
+
+    function setScheduleView(view) {
+      scheduleView = view === "plans" ? "plans" : "calendar";
+      document.querySelectorAll("[data-schedule-view]").forEach((el) => {
+        if (el.closest(".schedule-tabs")) {
+          const active = el.dataset.scheduleView === scheduleView;
+          el.classList.toggle("active", active);
+          el.setAttribute("aria-selected", active ? "true" : "false");
+          return;
+        }
+        if (el.classList.contains("schedule-view")) {
+          const active = el.dataset.scheduleView === scheduleView;
+          el.toggleAttribute("hidden", !active);
+        }
+      });
+      try {
+        localStorage.setItem(SCHEDULE_VIEW_KEY, scheduleView);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    function applyCalendarAgendaFilter() {
+      document.querySelectorAll("#calendar-agenda .meet-day").forEach((day) => {
+        const dateOk = !calendarDayFilter || day.dataset.date === calendarDayFilter;
+        let hasVisibleRow = false;
+        day.querySelectorAll("[data-kind]").forEach((row) => {
+          const kind = row.dataset.kind;
+          const modeOk =
+            calendarDisplayMode === "all" ||
+            (calendarDisplayMode === "open" && (kind === "open" || kind === "virtual")) ||
+            (calendarDisplayMode === "meetings" && kind === "meeting");
+          const show = dateOk && modeOk;
+          row.classList.toggle("is-filtered-out", !show);
+          if (show) hasVisibleRow = true;
+        });
+        day.classList.toggle("is-filtered-out", !dateOk || !hasVisibleRow);
+      });
+      document.querySelectorAll("[data-calendar-display]").forEach((btn) => {
+        if (!(btn instanceof HTMLButtonElement) || !btn.closest(".calendar-display-bar")) return;
+        btn.classList.toggle("active", btn.dataset.calendarDisplay === calendarDisplayMode);
+      });
+      const note = document.getElementById("calendar-filter-note");
+      const dateSpan = document.getElementById("calendar-filter-date");
+      if (!note || !dateSpan) return;
+      if (calendarDayFilter) {
+        note.hidden = false;
+        const d = new Date(`${calendarDayFilter}T12:00:00`);
+        dateSpan.textContent = d.toLocaleDateString("en-US", {
+          weekday: "long",
+          month: "short",
+          day: "numeric",
+        });
+      } else {
+        note.hidden = true;
+      }
+    }
+
+    function renderCalendarWeek() {
+      const strip = document.getElementById("calendar-week-strip");
+      const label = document.getElementById("calendar-week-label");
+      if (!strip || !label) return;
+
+      const end = new Date(calendarWeekStart);
+      end.setDate(end.getDate() + 6);
+      label.textContent = formatWeekLabel(calendarWeekStart, end);
+
+      strip.replaceChildren();
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(calendarWeekStart);
+        d.setDate(d.getDate() + i);
+        const key = dateKey(d);
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "calendar-day";
+        btn.dataset.date = key;
+        if (dateKey(DEMO_TODAY) === key) btn.classList.add("is-today");
+        if (calendarDayFilter === key) btn.classList.add("is-selected");
+        if (CALENDAR_MARKED_DATES.has(key)) btn.classList.add("has-events");
+        btn.innerHTML = `<span class="calendar-day-dow">${d.toLocaleDateString("en-US", { weekday: "short" })}</span><span class="calendar-day-num">${d.getDate()}</span><span class="calendar-day-dot" aria-hidden="true"></span>`;
+        btn.addEventListener("click", () => {
+          calendarDayFilter = calendarDayFilter === key ? null : key;
+          renderCalendarWeek();
+        });
+        strip.appendChild(btn);
+      }
+      applyCalendarAgendaFilter();
+    }
+
+    function shiftCalendarWeek(deltaDays) {
+      calendarWeekStart.setDate(calendarWeekStart.getDate() + deltaDays);
+      renderCalendarWeek();
+    }
+
+    document.querySelectorAll(".schedule-tabs [data-schedule-view]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        setScheduleView(btn.dataset.scheduleView || "calendar");
+      });
+    });
+    document.getElementById("calendar-prev-week")?.addEventListener("click", () => shiftCalendarWeek(-7));
+    document.getElementById("calendar-next-week")?.addEventListener("click", () => shiftCalendarWeek(7));
+    document.getElementById("calendar-clear-filter")?.addEventListener("click", () => {
+      calendarDayFilter = null;
+      renderCalendarWeek();
+    });
+
+    document.querySelectorAll("[data-calendar-display]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (!(btn instanceof HTMLButtonElement)) return;
+        const mode = btn.dataset.calendarDisplay;
+        if (mode !== "all" && mode !== "open" && mode !== "meetings") return;
+        calendarDisplayMode = mode;
+        try {
+          localStorage.setItem(CALENDAR_DISPLAY_KEY, calendarDisplayMode);
+        } catch {
+          /* ignore */
+        }
+        applyCalendarAgendaFilter();
+      });
+    });
+
+    document.querySelectorAll(".plan-thread-link[href^='#thread-']").forEach((link) => {
+      link.addEventListener("click", (e) => {
+        const href = link.getAttribute("href");
+        if (!href || href === "#") return;
+        e.preventDefault();
+        const threadId = href.slice(1);
+        const thread = document.getElementById(threadId);
+        if (!thread) return;
+        setScheduleView("calendar");
+        setSectionCollapsed(thread, false);
+        saveCollapseState(".thread-section", THREAD_COLLAPSE_KEY);
+        thread.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+
+    try {
+      const savedView = localStorage.getItem(SCHEDULE_VIEW_KEY);
+      if (savedView === "plans" || savedView === "calendar") scheduleView = savedView;
+    } catch {
+      /* ignore */
+    }
+    try {
+      const savedDisplay = localStorage.getItem(CALENDAR_DISPLAY_KEY);
+      if (savedDisplay === "all" || savedDisplay === "open" || savedDisplay === "meetings") {
+        calendarDisplayMode = savedDisplay;
+      }
+    } catch {
+      /* ignore */
+    }
+    setScheduleView(scheduleView);
+    renderCalendarWeek();
+
+    const STATUS_BANNER_DISMISS_KEY = "dashboard-vision-status-banner-dismiss";
+    const statusBannerWrap = document.getElementById("status-banner-wrap");
+    const statusBannerDismiss = document.getElementById("status-banner-dismiss");
+
+    function scrollToThread(threadId) {
+      const thread = document.getElementById(threadId);
+      if (!thread) return;
+      setSectionCollapsed(thread, false);
+      saveCollapseState(".thread-section", THREAD_COLLAPSE_KEY);
+      thread.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    try {
+      if (sessionStorage.getItem(STATUS_BANNER_DISMISS_KEY) === "1") {
+        statusBannerWrap?.setAttribute("hidden", "");
+      }
+    } catch {
+      /* ignore */
+    }
+
+    statusBannerDismiss?.addEventListener("click", () => {
+      statusBannerWrap?.setAttribute("hidden", "");
+      try {
+        sessionStorage.setItem(STATUS_BANNER_DISMISS_KEY, "1");
+      } catch {
+        /* ignore */
+      }
+    });
+
+    document.getElementById("status-banner-plans-btn")?.addEventListener("click", () => {
+      setScheduleView("plans");
+      document.querySelector(".meetings-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+
+    document.getElementById("status-banner-threads-btn")?.addEventListener("click", () => {
+      document.getElementById("threads-heading")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+
+    document.querySelectorAll(".status-banner-thread-link[href^='#thread-']").forEach((link) => {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        const href = link.getAttribute("href");
+        if (!href?.startsWith("#thread-")) return;
+        scrollToThread(href.slice(1));
+      });
+    });
+
+    const runBtn = document.getElementById("run-fivelanes-btn");
+    const pipelineStatusEl = document.getElementById("pipeline-status");
+    const runMetaEl = document.getElementById("run-meta");
+    const statusBannerMessagesEl = document.querySelector(".dashboard-status-banner-messages");
+    const settingsBtn = document.getElementById("settings-btn");
+    let demoRunInProgress = false;
+
+    function formatDemoRunTime(date) {
+      return date.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+    }
+
+    function setPipelineStatus(message, kind = "info") {
+      if (!pipelineStatusEl) return;
+      pipelineStatusEl.textContent = message;
+      pipelineStatusEl.hidden = !message;
+      pipelineStatusEl.dataset.kind = kind;
+    }
+
+    function setRunButtonRunning(running) {
+      if (!runBtn) return;
+      runBtn.disabled = running;
+      const label = runBtn.querySelector(".run-fivelanes-btn-label");
+      if (label) {
+        label.textContent = running ? "Running…" : "Run fivelanes";
+      }
+      runBtn.setAttribute("aria-busy", running ? "true" : "false");
+      if (settingsBtn instanceof HTMLButtonElement) {
+        settingsBtn.disabled = running;
+      }
+    }
+
+    runBtn?.addEventListener("click", () => {
+      if (demoRunInProgress) return;
+      demoRunInProgress = true;
+      setRunButtonRunning(true);
+      setPipelineStatus("Fivelanes is running…");
+
+      window.setTimeout(() => {
+        const finishedAt = new Date();
+        demoRunInProgress = false;
+        setRunButtonRunning(false);
+        setPipelineStatus("Run finished. Refreshing data…");
+
+        if (runMetaEl) {
+          runMetaEl.textContent = `Last pipeline run: ${formatDemoRunTime(finishedAt)} (manual · Claude)`;
+        }
+        if (statusBannerMessagesEl) {
+          const timeLabel = finishedAt.toLocaleTimeString(undefined, {
+            hour: "numeric",
+            minute: "2-digit",
+          });
+          statusBannerMessagesEl.innerHTML = `<strong>2 new messages</strong> since last refresh at ${timeLabel}`;
+        }
+        statusBannerWrap?.removeAttribute("hidden");
+        try {
+          sessionStorage.removeItem(STATUS_BANNER_DISMISS_KEY);
+        } catch {
+          /* ignore */
+        }
+
+        window.setTimeout(() => {
+          setPipelineStatus("Run finished.");
+          window.setTimeout(() => setPipelineStatus(""), 3500);
+        }, 600);
+      }, 2800);
+    });
+  </script>
+</body>
+</html>

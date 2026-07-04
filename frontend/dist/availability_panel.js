@@ -251,6 +251,23 @@ function renderAgendaHtml(data) {
     const openOnly = true;
     return `<div class="dash-avail-agenda">${days.map((d) => renderAgendaDayHtml(d, data, { openOnly })).join("")}</div>`;
 }
+/** Render availability agenda into any container (dashboard schedule rail). */
+export async function refreshAvailabilityInto(agendaEl, data) {
+    if (!isFeatureEnabled("availability")) {
+        agendaEl.innerHTML = "";
+        return;
+    }
+    if (!data) {
+        const url = `/out/availability_calendar_latest.json?cb=${Date.now()}`;
+        const res = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+        if (!res.ok) {
+            agendaEl.innerHTML = "";
+            return;
+        }
+        data = (await res.json());
+    }
+    agendaEl.innerHTML = renderAgendaHtml(data);
+}
 /** Loads /out/availability_calendar_latest.json and fills #availability-section. */
 export async function refreshAvailabilityPanel() {
     const section = document.getElementById("availability-section");

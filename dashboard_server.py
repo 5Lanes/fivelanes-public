@@ -56,10 +56,14 @@ from utils.database import (
     build_summaries_bundle,
     build_thread_draft_payload,
     create_lane,
+    create_lane_area,
     create_thread_plan,
     delete_lane,
     delete_thread_plan,
     update_thread_plan,
+    load_all_lane_areas,
+    assign_lane_to_area,
+    update_lane_area,
     fetch_meetings_rows,
     load_lane_summary,
     load_lane_thread_summaries,
@@ -1093,8 +1097,15 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_lane_name"}
             )
             return
+        area_id_raw = body.get("area_id")
+        area_id: Optional[int] = None
+        if area_id_raw is not None and str(area_id_raw).strip() != "":
+            try:
+                area_id = int(area_id_raw)
+            except (TypeError, ValueError):
+                area_id = None
         try:
-            lane = create_lane(DB_PATH, name=name)
+            lane = create_lane(DB_PATH, name=name, area_id=area_id)
         except ValueError as exc:
             self._json_response(
                 HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)}
@@ -1107,6 +1118,100 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             )
             return
         self._json_response(HTTPStatus.OK, {"ok": True, "lane": lane})
+
+    def _get_lane_areas(self) -> None:
+        areas = load_all_lane_areas(DB_PATH)
+        self._json_response(HTTPStatus.OK, {"ok": True, "lane_areas": areas})
+
+    def _post_lane_area_create(self, body: Dict[str, Any]) -> None:
+        name = str(body.get("name") or "").strip()
+        if not name:
+            self._json_response(
+                HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_lane_area_name"}
+            )
+            return
+        try:
+            color_index = int(body.get("color_index") or 0)
+        except (TypeError, ValueError):
+            color_index = 0
+        try:
+            area = create_lane_area(DB_PATH, name=name, color_index=color_index)
+        except ValueError as exc:
+            self._json_response(
+                HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)}
+            )
+            return
+        self._json_response(HTTPStatus.OK, {"ok": True, "lane_area": area})
+
+    def _post_lane_area_update(self, body: Dict[str, Any]) -> None:
+        try:
+            area_id = int(body.get("area_id") or body.get("id") or 0)
+        except (TypeError, ValueError):
+            area_id = 0
+        if area_id <= 0:
+            self._json_response(
+                HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_area_id"}
+            )
+            return
+        name = body.get("name")
+        color_index = body.get("color_index")
+        sort_order = body.get("sort_order")
+        try:
+            if color_index is not None:
+                color_index = int(color_index)
+        except (TypeError, ValueError):
+            color_index = None
+        try:
+            if sort_order is not None:
+                sort_order = int(sort_order)
+        except (TypeError, ValueError):
+            sort_order = None
+        try:
+            ok = update_lane_area(
+                DB_PATH,
+                area_id=area_id,
+                name=str(name).strip() if name is not None else None,
+                color_index=color_index,
+                sort_order=sort_order,
+            )
+        except ValueError as exc:
+            self._json_response(
+                HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)}
+            )
+            return
+        if not ok:
+            self._json_response(
+                HTTPStatus.NOT_FOUND, {"ok": False, "error": "lane_area_not_found"}
+            )
+            return
+        self._json_response(HTTPStatus.OK, {"ok": True, "area_id": area_id})
+
+    def _post_lane_assign_area(self, body: Dict[str, Any]) -> None:
+        try:
+            lane_id = int(body.get("lane_id") or 0)
+        except (TypeError, ValueError):
+            lane_id = 0
+        area_raw = body.get("area_id")
+        area_id: Optional[int] = None
+        if area_raw is not None and str(area_raw).strip() != "":
+            try:
+                area_id = int(area_raw)
+            except (TypeError, ValueError):
+                area_id = None
+        if lane_id <= 0:
+            self._json_response(
+                HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_lane_id"}
+            )
+            return
+        ok = assign_lane_to_area(DB_PATH, lane_id=lane_id, area_id=area_id)
+        if not ok:
+            self._json_response(
+                HTTPStatus.NOT_FOUND, {"ok": False, "error": "lane_or_area_not_found"}
+            )
+            return
+        self._json_response(
+            HTTPStatus.OK, {"ok": True, "lane_id": lane_id, "area_id": area_id}
+        )
 
     def _post_lane_add_thread(self, body: Dict[str, Any]) -> None:
         try:
@@ -1934,6 +2039,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if path == "/api/lanes/summary":
             self._get_lane_summary()
             return
+        if path == "/api/lane-areas":
+            self._get_lane_areas()
+            return
         if path == "/api/config":
             self._get_config()
             return
@@ -1961,6 +2069,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if path in (
             "/",
             "/dashboard",
+            "/sources",
             "/threads",
             "/meetings",
             "/lanes",
@@ -1974,12 +2083,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
         if path == "/summaries.html":
             self.send_response(HTTPStatus.MOVED_PERMANENTLY)
-            self.send_header("Location", "/threads")
+            self.send_header("Location", "/dashboard")
             self.end_headers()
             return
         if path == "/people":
             self.send_response(HTTPStatus.MOVED_PERMANENTLY)
-            self.send_header("Location", "/lanes")
+            self.send_header("Location", "/dashboard#lanes")
             self.end_headers()
             return
         super().do_GET()
@@ -2017,6 +2126,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._post_lane_archive(body)
         elif path == "/api/lanes/summary":
             self._post_lane_summary(body)
+        elif path == "/api/lane-areas":
+            self._post_lane_area_create(body)
+        elif path == "/api/lane-areas/update":
+            self._post_lane_area_update(body)
+        elif path == "/api/lanes/assign-area":
+            self._post_lane_assign_area(body)
         elif path == "/api/plans/create":
             self._post_plan_create(body)
         elif path == "/api/plans/update":

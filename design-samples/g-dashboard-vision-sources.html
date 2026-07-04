@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sources — Dashboard vision</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --lane-coral: #e88b7f;
+      --lane-orange: #f0a04b;
+      --lane-teal: #3dbfb0;
+      --lane-blue: #5b8fd9;
+      --lane-purple: #9b7ec8;
+      --lane-coral-soft: color-mix(in srgb, var(--lane-coral) 12%, var(--surface));
+      --lane-teal-soft: color-mix(in srgb, var(--lane-teal) 12%, var(--surface));
+      --lane-orange-soft: color-mix(in srgb, var(--lane-orange) 12%, var(--surface));
+      --lane-blue-soft: color-mix(in srgb, var(--lane-blue) 12%, var(--surface));
+      --lane-purple-soft: color-mix(in srgb, var(--lane-purple) 12%, var(--surface));
+      --source-email: var(--lane-coral);
+      --source-email-soft: var(--lane-coral-soft);
+      --source-text: var(--lane-teal);
+      --source-text-soft: var(--lane-teal-soft);
+      --source-slack: var(--lane-blue);
+      --source-slack-soft: var(--lane-blue-soft);
+      --source-linkedin: var(--lane-purple);
+      --source-linkedin-soft: var(--lane-purple-soft);
+      --source-meet: var(--lane-orange);
+      --source-meet-soft: var(--lane-orange-soft);
+      --bg: #101216;
+      --surface: #171b21;
+      --surface-raised: #1e232b;
+      --border: #2a3038;
+      --border-strong: #3a424c;
+      --text: #e8ebef;
+      --muted: #8b939e;
+      --accent: #3dbfb0;
+      --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--surface));
+      --warn: #f0a04b;
+      --warn-soft: color-mix(in srgb, var(--warn) 12%, var(--surface));
+      --hover: color-mix(in srgb, var(--text) 6%, transparent);
+      --font-ui: system-ui, -apple-system, sans-serif;
+      --font-display: "Iowan Old Style", Palatino, Georgia, serif;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 15px/1.5 var(--font-ui); background: var(--bg); color: var(--text); padding-bottom: 3rem; }
+    code { font-size: 0.88em; color: var(--text); }
+    .sample-bar {
+      position: sticky; top: 0; z-index: 10;
+      padding: 0.65rem 1.25rem;
+      background: #0a0c0f;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.85rem;
+      display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+    }
+    .sample-bar strong { color: var(--accent); }
+    .sample-bar a { color: var(--muted); text-decoration: none; }
+    .sample-bar a:hover { color: var(--text); }
+    .sample-bar-actions { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
+    .header-icon-btn {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      font: inherit; font-size: 0.78rem; font-weight: 500;
+      padding: 0.35rem 0.65rem; border-radius: var(--radius-sm);
+      border: 1px solid var(--border); background: var(--surface); color: var(--text);
+      cursor: pointer; text-decoration: none;
+    }
+    .header-icon-btn:hover { background: var(--hover); border-color: var(--border-strong); }
+    .header-icon-btn.is-active { border-color: var(--accent); color: var(--accent); }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 1.25rem; }
+    .page-title {
+      margin: 0 0 1rem;
+      font-family: var(--font-display);
+      font-size: 1.35rem;
+    }
+    .source-tabs { display: flex; flex-direction: column; gap: 0.85rem; min-width: 0; }
+    .source-tab-bar {
+      display: flex; flex-wrap: wrap; gap: 0.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .source-tab {
+      font: inherit; font-size: 0.85rem; font-weight: 500;
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      padding: 0.5rem 0.85rem;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+      background: transparent; color: var(--muted); cursor: pointer;
+    }
+    .source-tab::before {
+      content: "";
+      width: 0.45rem;
+      height: 0.45rem;
+      border-radius: 999px;
+      background: var(--source-tab-color, var(--muted));
+      flex-shrink: 0;
+    }
+    .source-tab[data-source="email"] { --source-tab-color: var(--source-email); }
+    .source-tab[data-source="texts"] { --source-tab-color: var(--source-text); }
+    .source-tab[data-source="slack"] { --source-tab-color: var(--source-slack); }
+    .source-tab[data-source="linkedin"] { --source-tab-color: var(--source-linkedin); }
+    .source-tab[data-source="meet"] { --source-tab-color: var(--source-meet); }
+    .source-tab:hover { color: var(--text); background: var(--hover); }
+    .source-tab.is-active {
+      color: var(--source-tab-color, var(--text));
+      background: var(--surface);
+      border-color: var(--border);
+      border-bottom-color: var(--surface);
+      margin-bottom: -1px;
+      font-weight: 600;
+      box-shadow: inset 0 -2px 0 var(--source-tab-color, var(--accent));
+    }
+    .source-pill {
+      display: inline-block;
+      font-size: 0.58rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      line-height: 1.15;
+      padding: 0.08rem 0.3rem;
+      border-radius: 999px;
+      vertical-align: baseline;
+    }
+    .source-pill--email { background: var(--source-email-soft); color: var(--source-email); }
+    .source-pill--text { background: var(--source-text-soft); color: var(--source-text); }
+    .source-pill--slack { background: var(--source-slack-soft); color: var(--source-slack); }
+    .source-pill--linkedin { background: var(--source-linkedin-soft); color: var(--source-linkedin); }
+    .source-pill--meet { background: var(--source-meet-soft); color: var(--source-meet); }
+    .source-tab-panel[hidden] { display: none; }
+    .setup-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+      gap: 1rem;
+      align-items: start;
+    }
+    .setup-header h2 {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin: 0 0 0.4rem;
+      font-family: var(--font-display);
+      font-size: 1.15rem;
+    }
+    .setup-lead {
+      margin: 0 0 1rem;
+      font-size: 0.9rem;
+      color: var(--muted);
+      line-height: 1.45;
+      max-width: 28rem;
+    }
+    .setup-card {
+      padding: 0.9rem 1rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+    }
+    .setup-card + .setup-card { margin-top: 0.85rem; }
+    .setup-card h3 {
+      margin: 0 0 0.45rem;
+      font-size: 0.95rem;
+    }
+    .setup-hint {
+      margin: 0 0 0.75rem;
+      font-size: 0.82rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .setup-toolbar {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;
+      margin-bottom: 0.65rem;
+    }
+    .setup-toolbar-meta { font-size: 0.8rem; color: var(--muted); margin-left: auto; }
+    .checklist {
+      display: flex; flex-direction: column;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      max-height: 18rem;
+      overflow-y: auto;
+    }
+    .checklist label {
+      display: flex; align-items: flex-start; gap: 0.5rem;
+      padding: 0.55rem 0.65rem;
+      font-size: 0.84rem;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .checklist label:last-child { border-bottom: none; }
+    .checklist label:hover { background: var(--hover); }
+    .checklist input { margin-top: 0.15rem; accent-color: var(--accent); flex-shrink: 0; }
+    .setup-actions {
+      display: flex; flex-wrap: wrap; gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      font: inherit; font-size: 0.78rem; font-weight: 500;
+      padding: 0.4rem 0.75rem; border-radius: var(--radius-sm);
+      border: 1px solid var(--border); background: var(--surface-raised);
+      color: var(--text); cursor: pointer; line-height: 1.2;
+    }
+    .btn:hover { background: var(--hover); }
+    .btn--primary {
+      background: var(--accent-soft); color: var(--accent);
+      border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+    }
+    .btn--primary:hover { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); }
+    .btn--ghost { background: transparent; color: var(--muted); }
+    .btn--ghost:hover { color: var(--text); background: var(--hover); }
+    .status-note {
+      margin: 0.65rem 0 0;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .status-note.ok { color: var(--accent); }
+    .segmented {
+      display: inline-flex; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); overflow: hidden; background: var(--bg);
+    }
+    .segmented button {
+      font: inherit; font-size: 0.78rem; font-weight: 600;
+      padding: 0.35rem 0.65rem; border: none; background: transparent;
+      color: var(--muted); cursor: pointer;
+    }
+    .segmented button.active { background: var(--accent-soft); color: var(--accent); }
+    .segmented button + button { border-left: 1px solid var(--border); }
+    .control-label {
+      display: block;
+      font-size: 0.68rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.05em; color: var(--muted); margin-bottom: 0.35rem;
+    }
+    @media (max-width: 900px) {
+      .setup-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="sample-bar">
+    <span><strong>Sources</strong> — dashboard vision</span>
+    <div class="sample-bar-actions">
+      <a href="g-dashboard-vision.html" class="header-icon-btn">← Dashboard</a>
+      <a href="index.html">All samples</a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h1 class="page-title">Sources</h1>
+
+    <div class="source-tabs" id="source-tabs">
+      <div class="source-tab-bar" role="tablist" aria-label="Sources">
+        <button type="button" class="source-tab is-active" role="tab" aria-selected="true" id="source-tab-email" data-source="email" aria-controls="source-panel-email">Email</button>
+        <button type="button" class="source-tab" role="tab" aria-selected="false" id="source-tab-texts" data-source="texts" aria-controls="source-panel-texts">Texts</button>
+        <button type="button" class="source-tab" role="tab" aria-selected="false" id="source-tab-slack" data-source="slack" aria-controls="source-panel-slack">Slack</button>
+        <button type="button" class="source-tab" role="tab" aria-selected="false" id="source-tab-linkedin" data-source="linkedin" aria-controls="source-panel-linkedin">LinkedIn</button>
+        <button type="button" class="source-tab" role="tab" aria-selected="false" id="source-tab-meet" data-source="meet" aria-controls="source-panel-meet">Meet notes</button>
+      </div>
+
+      <div class="source-tab-panel is-active" role="tabpanel" id="source-panel-email" aria-labelledby="source-tab-email" data-source="email">
+        <div class="setup-grid">
+          <header class="setup-header">
+            <h2><span class="source-pill source-pill--email">Email</span> Inbox capture</h2>
+            <p class="setup-lead">Choose how mail enters Fivelanes. Tracked threads appear on the dashboard and Threads page.</p>
+            <section class="setup-card">
+              <h3>Capture mode</h3>
+              <p class="setup-hint">Forwards send copies to Fivelanes; labels apply rules in Gmail.</p>
+              <span class="control-label">Mode</span>
+              <div class="segmented" role="group" aria-label="Email capture mode">
+                <button type="button" class="active" data-segment="email-capture" data-value="forwards">Forwards</button>
+                <button type="button" data-segment="email-capture" data-value="labels">Labels</button>
+              </div>
+            </section>
+          </header>
+          <section class="setup-card">
+            <h3>Forwarding address</h3>
+            <p class="setup-hint">Add this address as a Gmail forwarding recipient, or create a filter that applies your Fivelanes label.</p>
+            <p class="setup-hint"><code>inbox+a7f3@fivelanes.app</code></p>
+            <div class="setup-actions">
+              <button type="button" class="btn btn--primary">Copy address</button>
+            </div>
+            <p class="status-note ok">Connected · last message 12 min ago</p>
+          </section>
+        </div>
+      </div>
+
+      <div class="source-tab-panel" role="tabpanel" id="source-panel-texts" aria-labelledby="source-tab-texts" data-source="texts" hidden>
+        <div class="setup-grid">
+          <header class="setup-header">
+            <h2><span class="source-pill source-pill--text">Text</span> Text threads</h2>
+            <p class="setup-lead">Conversations load from your data directory's <code>conversations/</code> folder. Select which threads to track.</p>
+            <section class="setup-card">
+              <h3>Import settings</h3>
+              <p class="setup-hint">New JSON exports are picked up on the next pipeline run.</p>
+              <label class="setup-hint"><input type="checkbox" checked /> Import new conversations automatically</label>
+            </section>
+          </header>
+          <section class="setup-card">
+            <h3>Choose threads to track</h3>
+            <p class="setup-hint">8 conversations in <code>conversations/</code></p>
+            <div class="setup-toolbar" data-checklist-toolbar="texts">
+              <button type="button" class="btn btn--ghost" data-checklist-action="all">Select all</button>
+              <button type="button" class="btn btn--ghost" data-checklist-action="none">Select none</button>
+              <span class="setup-toolbar-meta" data-checklist-count="texts">3 selected for tracking</span>
+            </div>
+            <div class="checklist" data-checklist="texts">
+              <label><input type="checkbox" class="checklist-item" checked /> Dr. Kim's office (12 messages · Jul 4)</label>
+              <label><input type="checkbox" class="checklist-item" checked /> Gym membership (4 messages · Jul 2)</label>
+              <label><input type="checkbox" class="checklist-item" checked /> Alex Chen (28 messages · Jul 3)</label>
+              <label><input type="checkbox" class="checklist-item" /> Plumber quote (6 messages · Jun 30)</label>
+              <label><input type="checkbox" class="checklist-item" /> HOA notice (2 messages · Jun 28)</label>
+              <label><input type="checkbox" class="checklist-item" /> School pickup (9 messages · Jul 1)</label>
+              <label><input type="checkbox" class="checklist-item" /> Dentist reminder (3 messages · May 15)</label>
+              <label><input type="checkbox" class="checklist-item" /> Car service (5 messages · Apr 20)</label>
+            </div>
+            <div class="setup-actions">
+              <button type="button" class="btn btn--primary">Save tracking</button>
+              <button type="button" class="btn btn--ghost">Generate summaries</button>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="source-tab-panel" role="tabpanel" id="source-panel-slack" aria-labelledby="source-tab-slack" data-source="slack" hidden>
+        <div class="setup-grid">
+          <header class="setup-header">
+            <h2><span class="source-pill source-pill--slack">Slack</span> Slack DMs</h2>
+            <p class="setup-lead">Pull your 1:1 Slack DMs, then choose which conversations to track.</p>
+            <section class="setup-card">
+              <h3>Pull from Slack</h3>
+              <p class="setup-hint">Uses <code>SLACK_USER_TOKEN</code> from your data <code>.env</code>.</p>
+              <div class="setup-actions">
+                <button type="button" class="btn btn--primary">Pull DMs from Slack</button>
+              </div>
+            </section>
+          </header>
+          <section class="setup-card">
+            <h3>Choose DMs to track</h3>
+            <p class="setup-hint">12 conversations in your data directory.</p>
+            <div class="setup-toolbar" data-checklist-toolbar="slack">
+              <button type="button" class="btn btn--ghost" data-checklist-action="all">Select all</button>
+              <button type="button" class="btn btn--ghost" data-checklist-action="none">Select none</button>
+              <span class="setup-toolbar-meta" data-checklist-count="slack">2 selected for tracking</span>
+            </div>
+            <div class="checklist" data-checklist="slack">
+              <label><input type="checkbox" class="checklist-item" checked /> Priya Sharma · 42 messages · Slack</label>
+              <label><input type="checkbox" class="checklist-item" checked /> Dana Okonkwo · 18 messages · Slack</label>
+              <label><input type="checkbox" class="checklist-item" /> Design review · 6 messages · Slack</label>
+              <label><input type="checkbox" class="checklist-item" /> Eng standup · 31 messages · Slack</label>
+              <label><input type="checkbox" class="checklist-item" /> Investor intro · 4 messages · Slack</label>
+              <label><input type="checkbox" class="checklist-item" /> Recruiting · 15 messages · Slack</label>
+            </div>
+            <div class="setup-actions">
+              <button type="button" class="btn btn--primary">Save tracking</button>
+              <button type="button" class="btn btn--ghost">Generate summaries</button>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="source-tab-panel" role="tabpanel" id="source-panel-linkedin" aria-labelledby="source-tab-linkedin" data-source="linkedin" hidden>
+        <div class="setup-grid">
+          <header class="setup-header">
+            <h2><span class="source-pill source-pill--linkedin">LinkedIn</span> LinkedIn threads</h2>
+            <p class="setup-lead">Pull fresh messages for selected conversations via the browser scraper, then choose which threads to track.</p>
+            <section class="setup-card">
+              <h3>Pull from LinkedIn</h3>
+              <p class="setup-hint">Runs Playwright for <strong>tracked</strong> conversations only and merges into <code>linkedin-messages/messages.csv</code>.</p>
+              <div class="setup-actions">
+                <button type="button" class="btn btn--primary">Pull tracked conversations</button>
+              </div>
+            </section>
+          </header>
+          <section class="setup-card">
+            <h3>Choose threads to track</h3>
+            <p class="setup-hint">5 conversations in catalog.</p>
+            <div class="setup-toolbar" data-checklist-toolbar="linkedin">
+              <button type="button" class="btn btn--ghost" data-checklist-action="all">Select all</button>
+              <button type="button" class="btn btn--ghost" data-checklist-action="none">Select none</button>
+              <span class="setup-toolbar-meta" data-checklist-count="linkedin">1 selected for tracking</span>
+            </div>
+            <div class="checklist" data-checklist="linkedin">
+              <label><input type="checkbox" class="checklist-item" checked /> Jordan Lee · InMail · 6 messages</label>
+              <label><input type="checkbox" class="checklist-item" /> Recruiter outreach · 2 messages</label>
+              <label><input type="checkbox" class="checklist-item" /> Former colleague · 4 messages</label>
+              <label><input type="checkbox" class="checklist-item" /> Conference follow-up · 1 message</label>
+              <label><input type="checkbox" class="checklist-item" /> Advisor intro · 3 messages</label>
+            </div>
+            <div class="setup-actions">
+              <button type="button" class="btn btn--primary">Save tracking</button>
+              <button type="button" class="btn btn--ghost">Generate summaries</button>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="source-tab-panel" role="tabpanel" id="source-panel-meet" aria-labelledby="source-tab-meet" data-source="meet" hidden>
+        <div class="setup-grid">
+          <header class="setup-header">
+            <h2><span class="source-pill source-pill--meet">Meet notes</span> Meet recordings</h2>
+            <p class="setup-lead">Pull Google Docs for Meet / Gemini notes, then choose which to import. Only the conversation-summary tab is imported.</p>
+            <section class="setup-card">
+              <h3>Pull from Google Drive</h3>
+              <p class="setup-hint">Uses connected Google OAuth. Enable Drive and Docs APIs, then re-authorize if needed.</p>
+              <div class="setup-actions">
+                <button type="button" class="btn btn--primary">Pull doc names</button>
+              </div>
+            </section>
+          </header>
+          <section class="setup-card">
+            <h3>Choose recordings to import</h3>
+            <p class="setup-hint">6 docs found in the last 30 days.</p>
+            <div class="setup-toolbar" data-checklist-toolbar="meet">
+              <button type="button" class="btn btn--ghost" data-checklist-action="all">Select all</button>
+              <button type="button" class="btn btn--ghost" data-checklist-action="none">Select none</button>
+              <span class="setup-toolbar-meta" data-checklist-count="meet">2 selected for tracking</span>
+            </div>
+            <div class="checklist" data-checklist="meet">
+              <label><input type="checkbox" class="checklist-item" checked /> Q3 roadmap sync · Jul 9</label>
+              <label><input type="checkbox" class="checklist-item" checked /> Acme kickoff · Jul 10</label>
+              <label><input type="checkbox" class="checklist-item" /> Design review · Jul 10</label>
+              <label><input type="checkbox" class="checklist-item" /> Mediation prep · Jul 11</label>
+              <label><input type="checkbox" class="checklist-item" /> Hiring debrief · Jul 8</label>
+              <label><input type="checkbox" class="checklist-item" /> Fundraising update · Jul 5</label>
+            </div>
+            <div class="setup-actions">
+              <button type="button" class="btn btn--primary">Save tracking</button>
+              <button type="button" class="btn btn--ghost">Generate summaries</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SOURCE_TAB_KEY = "dashboard-vision-source-tab";
+    const VALID_SOURCES = ["email", "texts", "slack", "linkedin", "meet"];
+
+    function setActiveSourceTab(sourceId) {
+      if (!VALID_SOURCES.includes(sourceId)) sourceId = "email";
+      document.querySelectorAll(".source-tab").forEach((tab) => {
+        const active = tab.dataset.source === sourceId;
+        tab.classList.toggle("is-active", active);
+        tab.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      document.querySelectorAll(".source-tab-panel").forEach((panel) => {
+        const active = panel.dataset.source === sourceId;
+        panel.classList.toggle("is-active", active);
+        panel.toggleAttribute("hidden", !active);
+      });
+      try {
+        localStorage.setItem(SOURCE_TAB_KEY, sourceId);
+      } catch {
+        /* ignore */
+      }
+      if (location.hash !== `#${sourceId}`) {
+        history.replaceState(null, "", `#${sourceId}`);
+      }
+    }
+
+    function initFromLocation() {
+      const hash = location.hash.replace(/^#/, "");
+      let sourceId = VALID_SOURCES.includes(hash) ? hash : "email";
+      try {
+        const saved = localStorage.getItem(SOURCE_TAB_KEY);
+        if (!hash && saved && VALID_SOURCES.includes(saved)) sourceId = saved;
+      } catch {
+        /* ignore */
+      }
+      setActiveSourceTab(sourceId);
+    }
+
+    function updateChecklistCount(id) {
+      const list = document.querySelector(`[data-checklist="${id}"]`);
+      const countEl = document.querySelector(`[data-checklist-count="${id}"]`);
+      if (!list || !countEl) return;
+      const items = list.querySelectorAll(".checklist-item");
+      const selected = list.querySelectorAll(".checklist-item:checked").length;
+      countEl.textContent =
+        selected === 0 ? "None selected" : `${selected} selected for tracking`;
+    }
+
+    document.querySelectorAll(".source-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const sourceId = tab.dataset.source;
+        if (sourceId) setActiveSourceTab(sourceId);
+      });
+    });
+
+    document.querySelectorAll("[data-checklist-toolbar]").forEach((toolbar) => {
+      const id = toolbar.dataset.checklistToolbar;
+      toolbar.querySelectorAll("[data-checklist-action]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const list = document.querySelector(`[data-checklist="${id}"]`);
+          if (!list) return;
+          const checked = btn.dataset.checklistAction === "all";
+          list.querySelectorAll(".checklist-item").forEach((input) => {
+            input.checked = checked;
+          });
+          updateChecklistCount(id);
+        });
+      });
+    });
+
+    document.querySelectorAll("[data-checklist]").forEach((list) => {
+      const id = list.dataset.checklist;
+      list.querySelectorAll(".checklist-item").forEach((input) => {
+        input.addEventListener("change", () => updateChecklistCount(id));
+      });
+      updateChecklistCount(id);
+    });
+
+    document.querySelectorAll(".segmented").forEach((group) => {
+      group.querySelectorAll("button[data-value]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          group.querySelectorAll("button[data-value]").forEach((sibling) => {
+            sibling.classList.toggle("active", sibling === btn);
+          });
+        });
+      });
+    });
+
+    window.addEventListener("hashchange", initFromLocation);
+    initFromLocation();
+  </script>
+</body>
+</html>
