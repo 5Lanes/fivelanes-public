@@ -13,10 +13,13 @@ from services.meet_recordings.catalog import catalog_entry_by_id
 from services.meet_recordings.config import MEET_RECORDINGS_DIR
 from services.meet_recordings.docs import fetch_meet_recording_summary
 from services.meet_recordings.pull import get_docs_service, meeting_title_from_doc_name
+from services.thread_snooze import ACTIVE, is_removed, normalize_state
 
 log = logging.getLogger(__name__)
 
 MEET_THREAD_PREFIX = "meet:"
+MEET_KIND = "meet_recording"
+MEET_PAUSED_KIND = "meet_recording_paused"
 
 
 def _utc_now_iso() -> str:
@@ -72,13 +75,48 @@ def save_imported_note(note: Dict[str, Any], *, root: Path | None = None) -> Pat
     return path
 
 
-def fetch_tracked_document_keys(db_path: str) -> List[str]:
-    from services.thread_snooze import is_removed
+def _meet_delivery_kind(row: Dict[str, Any]) -> str:
+    return str(row.get("inbox_delivery_kind") or "").strip()
+
+
+def _is_meet_tracking_row(row: Dict[str, Any]) -> bool:
+    tid = str(row.get("inbox_thread_id") or "").strip()
+    kind = _meet_delivery_kind(row)
+    return tid.startswith(MEET_THREAD_PREFIX) or kind in (MEET_KIND, MEET_PAUSED_KIND)
+
+
+def _is_sync_meet_row(row: Dict[str, Any]) -> bool:
+    if is_removed(row.get("snoozed")):
+        return False
+    if not _is_meet_tracking_row(row):
+        return False
+    kind = _meet_delivery_kind(row)
+    return kind in ("", MEET_KIND)
+
+
+def fetch_visible_document_keys(db_path: str) -> List[str]:
+    """All Meet recordings still shown on the dashboard (syncing or paused)."""
     from utils.database import fetch_thread_tracking_rows
 
     out: List[str] = []
     for row in fetch_thread_tracking_rows(db_path):
         if is_removed(row.get("snoozed")):
+            continue
+        if not _is_meet_tracking_row(row):
+            continue
+        key = parse_meet_inbox_thread_id(str(row.get("inbox_thread_id") or ""))
+        if key:
+            out.append(key)
+    return sorted(set(out))
+
+
+def fetch_tracked_document_keys(db_path: str) -> List[str]:
+    """Meet recordings selected for import, summarize, and sync updates."""
+    from utils.database import fetch_thread_tracking_rows
+
+    out: List[str] = []
+    for row in fetch_thread_tracking_rows(db_path):
+        if not _is_sync_meet_row(row):
             continue
         key = parse_meet_inbox_thread_id(str(row.get("inbox_thread_id") or ""))
         if key:
@@ -174,6 +212,7 @@ def _tracking_row_for_note(
     *,
     existing: Optional[Dict[str, Any]],
     now_iso: str,
+    delivery_kind: str = MEET_KIND,
 ) -> Dict[str, Any]:
     key = str(note.get("id") or "").strip()
     source_email = (
@@ -184,12 +223,27 @@ def _tracking_row_for_note(
         "inbox_thread_id": meet_inbox_thread_id(key),
         "gmail_inbox_thread_id": "",
         "source_email": source_email,
-        "snoozed": 0,
+        "snoozed": ACTIVE,
         "inner_rfc_message_id": "",
         "resolved_oauth_account_id": note.get("account_id") or SOURCE_OAUTH_ACCOUNT_ID or "",
         "resolution_error": "",
-        "inbox_delivery_kind": "meet_recording",
+        "inbox_delivery_kind": delivery_kind,
         "created_at": str((existing or {}).get("created_at") or now_iso),
+        "updated_at": now_iso,
+    }
+
+
+def _paused_tracking_row(row: Dict[str, Any], *, now_iso: str) -> Dict[str, Any]:
+    return {
+        "inbox_thread_id": str(row.get("inbox_thread_id") or "").strip(),
+        "gmail_inbox_thread_id": str(row.get("gmail_inbox_thread_id") or ""),
+        "source_email": str(row.get("source_email") or "").strip(),
+        "snoozed": normalize_state(row.get("snoozed")),
+        "inner_rfc_message_id": str(row.get("inner_rfc_message_id") or ""),
+        "resolved_oauth_account_id": str(row.get("resolved_oauth_account_id") or ""),
+        "resolution_error": str(row.get("resolution_error") or ""),
+        "inbox_delivery_kind": MEET_PAUSED_KIND,
+        "created_at": str(row.get("created_at") or now_iso),
         "updated_at": now_iso,
     }
 
@@ -198,11 +252,11 @@ def set_tracked_document_keys(
     db_path: str, document_keys: Iterable[str]
 ) -> Dict[str, Any]:
     """
-    Track selected Meet recording Docs: import summary tab, upsert timeline + tracking.
+    Enable sync for selected Meet recording Docs: import summary tab when needed.
 
-    Unselected previously-tracked docs are removed from Threads.
+    Other known Meet rows are paused (still visible on the dashboard, but not
+    re-imported or re-summarized until checked again).
     """
-    from services.thread_snooze import ACTIVE, is_removed, remove_thread_tracking
     from utils.database import upsert_thread_tracking, upsert_timeline_entries
 
     desired: Set[str] = {str(k).strip() for k in document_keys if str(k).strip()}
@@ -237,18 +291,19 @@ def set_tracked_document_keys(
             _tracking_row_for_note(note, existing=existing.get(key), now_iso=now)
         )
 
-    applied = upsert_thread_tracking(db_path, tracking_rows) if tracking_rows else 0
-    n_time = upsert_timeline_entries(db_path, timeline_rows) if timeline_rows else 0
-
-    untracked = 0
+    paused = 0
     for key, row in existing.items():
         if key in desired:
             continue
         if is_removed(row.get("snoozed")):
             continue
-        tid = meet_inbox_thread_id(key)
-        if remove_thread_tracking(db_path, tid):
-            untracked += 1
+        if _meet_delivery_kind(row) == MEET_PAUSED_KIND:
+            continue
+        tracking_rows.append(_paused_tracking_row(row, now_iso=now))
+        paused += 1
+
+    applied = upsert_thread_tracking(db_path, tracking_rows) if tracking_rows else 0
+    n_time = upsert_timeline_entries(db_path, timeline_rows) if timeline_rows else 0
 
     tracked = sorted(desired - {e["document_key"] for e in import_errors})
     return {
@@ -258,6 +313,7 @@ def set_tracked_document_keys(
         "upserted": applied,
         "timeline_rows": n_time,
         "imported": imported,
-        "untracked": untracked,
+        "paused": paused,
+        "untracked": 0,
         "errors": import_errors,
     }

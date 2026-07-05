@@ -33,6 +33,13 @@ def _write(payload: Dict[str, Any]) -> None:
 
 def record_pipeline_run_start(*, trigger: str, backend: str) -> str:
     started_at = _utc_now_iso()
+    last_completed_at: Optional[str] = None
+    prev = load_last_pipeline_run()
+    if prev:
+        if str(prev.get("status") or "") == "finished" and prev.get("ok") is True:
+            last_completed_at = prev.get("finished_at")
+        elif prev.get("last_completed_at"):
+            last_completed_at = prev.get("last_completed_at")
     with _lock:
         _write(
             {
@@ -43,6 +50,7 @@ def record_pipeline_run_start(*, trigger: str, backend: str) -> str:
                 "error": None,
                 "trigger": trigger,
                 "backend": backend,
+                "last_completed_at": last_completed_at,
             }
         )
     return started_at
@@ -56,16 +64,22 @@ def record_pipeline_run_finish(
     ok: bool,
     error: Optional[str] = None,
 ) -> None:
+    finished_at = _utc_now_iso()
+    prev = load_last_pipeline_run()
+    last_completed_at: Optional[str] = finished_at if ok else None
+    if not ok and prev:
+        last_completed_at = prev.get("last_completed_at")
     with _lock:
         _write(
             {
                 "status": "finished",
                 "started_at": started_at,
-                "finished_at": _utc_now_iso(),
+                "finished_at": finished_at,
                 "ok": ok,
                 "error": error,
                 "trigger": trigger,
                 "backend": backend,
+                "last_completed_at": last_completed_at,
             }
         )
 

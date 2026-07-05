@@ -1,5 +1,6 @@
 """Google Meet recording notes (Google Docs) — catalog, select, import summary tab."""
 
+from services.meet_recordings.bundle import append_unsynced_meet_threads_to_bundle
 from services.meet_recordings.catalog import list_document_catalog
 from services.meet_recordings.config import MEET_RECORDINGS_DIR
 from services.meet_recordings.pull import pull_meet_recording_catalog
@@ -10,6 +11,7 @@ from services.meet_recordings.summarize import (
 from services.meet_recordings.tracking import (
     MEET_THREAD_PREFIX,
     fetch_tracked_document_keys,
+    fetch_visible_document_keys,
     meet_inbox_thread_id,
     parse_meet_inbox_thread_id,
     set_tracked_document_keys,
@@ -18,7 +20,9 @@ from services.meet_recordings.tracking import (
 __all__ = [
     "MEET_RECORDINGS_DIR",
     "MEET_THREAD_PREFIX",
+    "append_unsynced_meet_threads_to_bundle",
     "fetch_tracked_document_keys",
+    "fetch_visible_document_keys",
     "list_document_catalog",
     "meet_inbox_thread_id",
     "parse_meet_inbox_thread_id",

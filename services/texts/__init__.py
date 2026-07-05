@@ -13,6 +13,7 @@ from services.texts.format import load_conversation_messages
 from services.texts.tracking import (
     TEXT_THREAD_PREFIX,
     fetch_tracked_conversation_keys,
+    fetch_visible_conversation_keys,
     parse_text_inbox_thread_id,
     set_tracked_conversation_keys,
     text_inbox_thread_id,
@@ -26,6 +27,7 @@ __all__ = [
     "summarize_tracked_text_threads",
     "conversation_file_path",
     "fetch_tracked_conversation_keys",
+    "fetch_visible_conversation_keys",
     "list_conversation_catalog",
     "load_conversation_messages",
     "parse_text_inbox_thread_id",

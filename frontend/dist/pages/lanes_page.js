@@ -1,7 +1,7 @@
 import { listSection, partitionThreadsBySnooze, threadEmailSubject, } from "../shared/thread_domain.js";
 import { applyLaneArchived, applyLaneAreaAssigned, applyLaneCreated, applyLaneRemoved, applyLaneSummary, applyLaneThreadMembership, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, getLaneAreas, getLaneSummary, getLaneThreadIds, getLanes, getBundleMutationGeneration, loadLatestBundle, normalizeBundle, setBundle, setBundleFromNetwork, } from "../shared/summaries_store.js";
 import { laneAreaColorVar, sourcePillHtml, threadChannelForThread } from "../shared/source_ui.js";
-import { escapeHtml, str, threadPageHref } from "../shared/utils.js";
+import { escapeHtml, formatRelativeShort, formatSummaryUpdated, str, threadPageHref, } from "../shared/utils.js";
 const LANES_SORT_KEY = "fivelanes_lanes_sort_v2";
 const PAGE_HTML = `
 <div class="view-lanes">
@@ -29,7 +29,7 @@ let assignLaneId = null;
 let activeLaneTabId = null;
 let activeAreaTabId = null;
 let showArchivedLanes = false;
-const collapsedTracks = new Set();
+const expandedTracks = new Set();
 const laneSummaryErrors = new Map();
 const laneSummaryPending = new Set();
 const laneSummaryWatching = new Set();
@@ -156,8 +156,26 @@ function trackingThreads() {
     const { active, snoozed } = partitionThreadsBySnooze(getCurrentThreads());
     return [...active, ...snoozed];
 }
+function lanePickerThreads(selectedIds) {
+    const tracked = trackingThreads();
+    const trackedIds = new Set(tracked.map((t) => t.id));
+    const orphans = [...selectedIds].filter((id) => !trackedIds.has(id));
+    if (!orphans.length)
+        return tracked;
+    const allThreads = getCurrentThreads();
+    const extra = orphans.map((id) => {
+        const found = allThreads.find((t) => t.id === id);
+        if (found)
+            return found;
+        return {
+            id,
+            messages: [{ cleaned: { subject: id }, summary: null }],
+        };
+    });
+    return [...tracked, ...extra];
+}
 function threadPickerHtml(laneId, selectedIds) {
-    const threads = trackingThreads();
+    const threads = lanePickerThreads(selectedIds);
     if (!threads.length) {
         return `<p class="lane-thread-picker-empty">No active or snoozed threads to add.</p>`;
     }
@@ -198,7 +216,7 @@ function highlightsSectionHtml(highlights, threadIds) {
         .join("");
     return `<div class="section"><h4>Highlights</h4><ul class="source-highlight-list">${items}</ul></div>`;
 }
-function laneSummaryHtml(summary, laneId, threadIds = [], useSourceHighlights = false) {
+function laneSummaryHtml(summary, laneId, threadIds = [], trackMode = false) {
     const err = laneSummaryErrors.get(laneId);
     if (err) {
         return `<p class="lane-summary-error">${escapeHtml(err)}</p>`;
@@ -215,7 +233,7 @@ function laneSummaryHtml(summary, laneId, threadIds = [], useSourceHighlights = 
     if (tone)
         metaParts.push(escapeHtml(tone));
     if (updated)
-        metaParts.push(`Updated ${escapeHtml(updated.slice(0, 10))}`);
+        metaParts.push(`Updated ${escapeHtml(formatSummaryUpdated(updated))}`);
     const meta = metaParts.length
         ? `<p class="lane-summary-meta">${metaParts.join(" · ")}</p>`
         : "";
@@ -225,7 +243,7 @@ function laneSummaryHtml(summary, laneId, threadIds = [], useSourceHighlights = 
     return `<div class="lane-summary">
     ${meta}
     ${body}
-    ${useSourceHighlights ? highlightsSectionHtml(summary.highlights, threadIds) : listSection("Highlights", summary.highlights)}
+    ${trackMode ? listSection("Highlights", summary.highlights) : highlightsSectionHtml(summary.highlights, threadIds)}
     ${listSection("Current priorities", summary.current_priorities)}
     ${listSection("Waiting on others", summary.waiting_on_others)}
   </div>`;
@@ -235,11 +253,30 @@ function laneCardHtml(lane, threadIds, summary, expanded, opts = {}) {
     const threadLabels = threadIds
         .map((tid) => {
         const thread = getCurrentThreads().find((t) => t.id === tid);
-        if (!thread)
-            return "";
-        const label = escapeHtml(threadEmailSubject(thread));
-        const pill = sourcePillHtml(threadChannelForThread(thread));
-        if (opts.linkThreads) {
+        const label = escapeHtml(thread ? threadEmailSubject(thread) : tid);
+        const pill = thread ? sourcePillHtml(threadChannelForThread(thread)) : "";
+        // #region agent log
+        if (tid.startsWith("linkedin:")) {
+            fetch("http://localhost:7268/ingest/d851e417-32b1-446f-b903-fefbca196cd9", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "5d5b20" },
+                body: JSON.stringify({
+                    sessionId: "5d5b20",
+                    location: "lanes_page.ts:laneCardHtml",
+                    message: "linkedin lane thread label",
+                    data: {
+                        threadId: tid,
+                        foundInBundle: Boolean(thread),
+                        label: thread ? threadEmailSubject(thread) : tid,
+                        hasPill: Boolean(pill),
+                    },
+                    timestamp: Date.now(),
+                    hypothesisId: "H2",
+                }),
+            }).catch(() => { });
+        }
+        // #endregion
+        if (opts.linkThreads && thread) {
             return `<li><a class="lane-thread-link" href="${escapeHtml(threadPageHref(tid))}">${pill}${label}</a></li>`;
         }
         return `<li>${pill}${label}</li>`;
@@ -255,7 +292,49 @@ function laneCardHtml(lane, threadIds, summary, expanded, opts = {}) {
         : "No summary yet.";
     const data = getCurrentData();
     const areaSelect = opts.trackMode && data ? trackAreaSelectHtml(lane, data) : "";
-    const actions = `<div class="user-lane-actions item-actions">
+    const actions = `<div class="item-actions user-lane-actions" role="toolbar" aria-label="Track actions">
+      <div class="item-actions-group">
+      ${areaSelect}
+      <button type="button" class="btn btn--primary lane-refresh-summary-btn" data-lane-id="${lane.id}"${threadIds.length && !laneSummaryPending.has(lane.id) ? "" : " disabled"}>
+        ${laneSummaryPending.has(lane.id) ? "Refreshing…" : "Refresh summary"}
+      </button>
+      <button type="button" class="btn btn--default lane-edit-threads-btn" data-lane-id="${lane.id}">
+        ${expanded ? "Done" : threadIds.length ? "Edit threads" : "Add threads"}
+      </button>
+      </div>
+      <div class="item-actions-group">
+      <button type="button" class="btn btn--ghost lane-archive-btn" data-lane-id="${lane.id}" data-lane-name="${escapeHtml(lane.name)}" data-archived="${opts.archivedView ? "true" : "false"}" title="${opts.archivedView ? "Restore to dashboard" : "Hide from dashboard"}">
+        ${opts.archivedView ? "Unarchive" : "Archive"}
+      </button>
+      <button type="button" class="btn btn--danger lane-delete-btn" data-lane-id="${lane.id}" data-lane-name="${escapeHtml(lane.name)}" title="Delete this lane">
+        Delete lane
+      </button>
+      </div>
+    </div>`;
+    if (opts.trackMode) {
+        const isExpanded = opts.expanded === true;
+        const threadCountLabel = `${threadIds.length} thread${threadIds.length === 1 ? "" : "s"}`;
+        const latestAt = laneLatestThreadMessageAt(getCurrentData() || {}, lane.id);
+        const relativeUpdated = formatRelativeShort(latestAt || summary?.updated_at || lane.updated_at || lane.created_at);
+        return `<li class="track-section${isExpanded ? "" : " is-collapsed"}" data-lane-id="${lane.id}">
+      <header class="lane-section-head track-head" data-track-toggle="${lane.id}">
+        <span class="lane-collapse-icon" aria-hidden="true"></span>
+        <div class="lane-name-wrap">
+          <h4 class="track-name">${escapeHtml(lane.name)}</h4>
+          <span class="track-summary-preview">${summaryPreview}</span>
+        </div>
+        <span class="lane-track-count">${threadCountLabel}</span>
+        ${relativeUpdated ? `<span class="track-meta-head">${escapeHtml(relativeUpdated)}</span>` : ""}
+      </header>
+      <div class="track-body">
+        ${laneSummaryHtml(summary, lane.id, threadIds, true)}
+        ${threadsBlock}
+        ${picker}
+        ${actions}
+      </div>
+    </li>`;
+    }
+    const legacyActions = `<div class="user-lane-actions item-actions">
       ${areaSelect}
       <button type="button" class="lane-refresh-summary-btn" data-lane-id="${lane.id}"${threadIds.length && !laneSummaryPending.has(lane.id) ? "" : " disabled"}>
         ${laneSummaryPending.has(lane.id) ? "Refreshing…" : "Refresh summary"}
@@ -270,23 +349,6 @@ function laneCardHtml(lane, threadIds, summary, expanded, opts = {}) {
         Delete lane
       </button>
     </div>`;
-    if (opts.trackMode) {
-        const collapsed = opts.collapsed !== false;
-        return `<li class="track-section${collapsed ? " is-collapsed" : ""}" data-lane-id="${lane.id}">
-      <header class="lane-section-head track-head" data-track-toggle="${lane.id}">
-        <div class="lane-name-wrap">
-          <h4 class="track-name">${escapeHtml(lane.name)}</h4>
-          <span class="track-summary-preview">${summaryPreview}</span>
-        </div>
-      </header>
-      <div class="track-body">
-        ${laneSummaryHtml(summary, lane.id, threadIds, true)}
-        ${threadsBlock}
-        ${picker}
-        ${actions}
-      </div>
-    </li>`;
-    }
     const header = opts.tabbed
         ? ""
         : `<header class="user-lane-header">
@@ -300,7 +362,7 @@ function laneCardHtml(lane, threadIds, summary, expanded, opts = {}) {
     ${laneSummaryHtml(summary, lane.id)}
     ${threadsBlock}
     ${picker}
-    ${actions}
+    ${legacyActions}
   </${tag}>`;
 }
 function areaTabTracks(data, areaId) {
@@ -368,12 +430,12 @@ function renderDashboardLaneAreaTabs(listEl, data) {
             const threadIds = getLaneThreadIds(data, lane.id);
             const summary = getLaneSummary(data, lane.id);
             const expanded = assignLaneId === lane.id;
-            const collapsed = collapsedTracks.has(lane.id);
+            const trackExpanded = expandedTracks.has(lane.id) || expanded;
             return laneCardHtml(lane, threadIds, summary, expanded, {
                 trackMode: true,
                 archivedView: showArchivedLanes,
                 linkThreads: true,
-                collapsed,
+                expanded: trackExpanded,
             });
         })
             .join("");
@@ -773,9 +835,7 @@ export function bindLanesInteractions() {
             const data = getCurrentData();
             if (!data)
                 return;
-            for (const lane of areaTabTracks(data, activeAreaTabId ?? 0)) {
-                collapsedTracks.add(lane.id);
-            }
+            expandedTracks.clear();
             renderLanesList();
             return;
         }
@@ -784,7 +844,7 @@ export function bindLanesInteractions() {
             if (!data)
                 return;
             for (const lane of areaTabTracks(data, activeAreaTabId ?? 0)) {
-                collapsedTracks.delete(lane.id);
+                expandedTracks.add(lane.id);
             }
             renderLanesList();
             return;
@@ -794,10 +854,10 @@ export function bindLanesInteractions() {
             const laneId = Number(trackHead.dataset.trackToggle) || 0;
             if (!laneId)
                 return;
-            if (collapsedTracks.has(laneId))
-                collapsedTracks.delete(laneId);
+            if (expandedTracks.has(laneId))
+                expandedTracks.delete(laneId);
             else
-                collapsedTracks.add(laneId);
+                expandedTracks.add(laneId);
             renderLanesList();
             return;
         }
@@ -1018,14 +1078,15 @@ export function bindLanesInteractions() {
         void (async () => {
             const inLane = checkbox.checked;
             applyLaneThreadMembership(laneId, threadId, inLane);
+            renderLanesList();
             try {
                 await persistLaneThread(laneId, threadId, inLane);
-                clearSummariesBundleCache();
-                reloadFromStore();
+                await reloadLanesFromServer();
             }
             catch (err) {
                 applyLaneThreadMembership(laneId, threadId, !inLane);
                 checkbox.checked = !inLane;
+                renderLanesList();
                 console.error(err);
             }
         })();

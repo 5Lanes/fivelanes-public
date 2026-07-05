@@ -19,7 +19,7 @@ type LooseObj = Record<string, unknown>;
 
 type Layer = "parenting" | "child_home" | "busy" | "open" | "commit";
 
-interface AgendaItem {
+export interface AgendaItem {
   layer: Layer;
   start: Date;
   end: Date;
@@ -134,7 +134,11 @@ function getTimeZone(data: LooseObj): string {
   return str(meta.timezone).trim() || "America/New_York";
 }
 
-function buildDayAgenda(dateKey: string, data: LooseObj): AgendaItem[] {
+export function getAvailabilityTimeZone(data: LooseObj): string {
+  return getTimeZone(data);
+}
+
+export function buildDayAgenda(dateKey: string, data: LooseObj): AgendaItem[] {
   const tz = getTimeZone(data);
   const items: AgendaItem[] = [];
 

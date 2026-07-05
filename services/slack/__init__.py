@@ -14,6 +14,7 @@ from services.slack.summarize import summarize_one_slack_thread, summarize_track
 from services.slack.tracking import (
     SLACK_THREAD_PREFIX,
     fetch_tracked_conversation_keys,
+    fetch_visible_conversation_keys,
     parse_slack_inbox_thread_id,
     set_tracked_conversation_keys,
     slack_inbox_thread_id,
@@ -25,6 +26,7 @@ __all__ = [
     "append_unsynced_slack_threads_to_bundle",
     "conversation_file_path",
     "fetch_tracked_conversation_keys",
+    "fetch_visible_conversation_keys",
     "list_conversation_catalog",
     "load_messages_for_key",
     "parse_slack_inbox_thread_id",

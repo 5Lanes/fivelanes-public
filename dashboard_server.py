@@ -1235,6 +1235,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.NOT_FOUND, {"ok": False, "error": "lane_not_found"}
             )
             return
+        _invalidate_summaries_bundle_cache()
         self._json_response(
             HTTPStatus.OK,
             {"ok": True, "lane_id": lane_id, "inbox_thread_id": thread_id},
@@ -1264,6 +1265,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.NOT_FOUND, {"ok": False, "error": "lane_not_found"}
             )
             return
+        _invalidate_summaries_bundle_cache()
         self._json_response(
             HTTPStatus.OK,
             {"ok": True, "lane_id": lane_id, "inbox_thread_id": thread_id},

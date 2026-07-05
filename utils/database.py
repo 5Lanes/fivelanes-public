@@ -2852,6 +2852,24 @@ def pending_message_counts_by_thread(
     except Exception:
         pass
 
+    try:
+        from services.meet_recordings.tracking import (
+            fetch_tracked_document_keys,
+            load_imported_note,
+            meet_inbox_thread_id,
+        )
+
+        for key in fetch_tracked_document_keys(db_path):
+            note = load_imported_note(key)
+            if not note or not str(note.get("body") or "").strip():
+                continue
+            thread_id = meet_inbox_thread_id(key)
+            sid = f"docs:{key}"
+            if (thread_id, sid) not in successful:
+                counts[thread_id] = counts.get(thread_id, 0) + 1
+    except Exception:
+        pass
+
     return {tid: n for tid, n in counts.items() if n > 0}
 
 
@@ -2862,16 +2880,25 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
     from services.linkedin.tracking import (
         LINKEDIN_THREAD_PREFIX,
         fetch_tracked_conversation_keys as fetch_tracked_linkedin_keys,
+        fetch_visible_conversation_keys as fetch_visible_linkedin_keys,
         linkedin_inbox_thread_id as _linkedin_inbox_thread_id,
+    )
+    from services.meet_recordings.tracking import (
+        MEET_THREAD_PREFIX,
+        fetch_tracked_document_keys as fetch_tracked_meet_keys,
+        fetch_visible_document_keys as fetch_visible_meet_keys,
+        meet_inbox_thread_id as _meet_inbox_thread_id,
     )
     from services.slack.tracking import (
         SLACK_THREAD_PREFIX,
         fetch_tracked_conversation_keys as fetch_tracked_slack_keys,
+        fetch_visible_conversation_keys as fetch_visible_slack_keys,
         slack_inbox_thread_id as _slack_inbox_thread_id,
     )
     from services.texts.tracking import (
         TEXT_THREAD_PREFIX,
         fetch_tracked_conversation_keys,
+        fetch_visible_conversation_keys as fetch_visible_text_keys,
         text_inbox_thread_id as _text_inbox_thread_id,
     )
     from services.thread_snooze import (
@@ -2887,14 +2914,52 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
     from utils.thread_summary_normalize import finalize_thread_summary
 
     tracked_text_thread_ids = {
-        _text_inbox_thread_id(k) for k in fetch_tracked_conversation_keys(db_path)
+        _text_inbox_thread_id(k) for k in fetch_visible_text_keys(db_path)
     }
     tracked_slack_thread_ids = {
-        _slack_inbox_thread_id(k) for k in fetch_tracked_slack_keys(db_path)
+        _slack_inbox_thread_id(k) for k in fetch_visible_slack_keys(db_path)
     }
     tracked_linkedin_thread_ids = {
-        _linkedin_inbox_thread_id(k) for k in fetch_tracked_linkedin_keys(db_path)
+        _linkedin_inbox_thread_id(k) for k in fetch_visible_linkedin_keys(db_path)
     }
+    tracked_meet_thread_ids = {
+        _meet_inbox_thread_id(k) for k in fetch_visible_meet_keys(db_path)
+    }
+    # #region agent log
+    try:
+        import json as _json
+        from datetime import datetime as _dt, timezone as _tz
+
+        with open(
+            "/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-5d5b20.log",
+            "a",
+            encoding="utf-8",
+        ) as _dbg:
+            _dbg.write(
+                _json.dumps(
+                    {
+                        "sessionId": "5d5b20",
+                        "location": "database.py:build_summaries_bundle",
+                        "message": "on-disk source bundle visibility",
+                        "data": {
+                            "textSync": len(fetch_tracked_conversation_keys(db_path)),
+                            "textVisible": len(tracked_text_thread_ids),
+                            "slackSync": len(fetch_tracked_slack_keys(db_path)),
+                            "slackVisible": len(tracked_slack_thread_ids),
+                            "linkedinSync": len(fetch_tracked_linkedin_keys(db_path)),
+                            "linkedinVisible": len(tracked_linkedin_thread_ids),
+                            "meetSync": len(fetch_tracked_meet_keys(db_path)),
+                            "meetVisible": len(tracked_meet_thread_ids),
+                        },
+                        "timestamp": int(_dt.now(_tz.utc).timestamp() * 1000),
+                        "hypothesisId": "H1",
+                    }
+                )
+                + "\n"
+            )
+    except OSError:
+        pass
+    # #endregion
     thread_summary_cache = load_all_thread_summaries_map(db_path)
     cleaned_by_thread = load_all_processed_cleaned_by_thread(db_path)
     finalized_by_thread: Dict[str, Dict[str, Any]] = {}
@@ -2920,6 +2985,8 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
         if tid.startswith(SLACK_THREAD_PREFIX) and tid not in tracked_slack_thread_ids:
             continue
         if tid.startswith(LINKEDIN_THREAD_PREFIX) and tid not in tracked_linkedin_thread_ids:
+            continue
+        if tid.startswith(MEET_THREAD_PREFIX) and tid not in tracked_meet_thread_ids:
             continue
         fallback_summary = _parse_thread_summary_json(raw.get("thread_summary_json"))
         thread_summary = finalized_for_thread(tid, fallback_summary) if tid else fallback_summary
@@ -2991,6 +3058,7 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
     }
     from services.email.bundle import append_unsynced_email_threads_to_bundle
     from services.linkedin.bundle import append_unsynced_linkedin_threads_to_bundle
+    from services.meet_recordings.bundle import append_unsynced_meet_threads_to_bundle
     from services.slack.bundle import append_unsynced_slack_threads_to_bundle
     from services.texts.bundle import append_unsynced_text_threads_to_bundle
     from services.email.config import inbox_lookback_days_from_env
@@ -3000,6 +3068,7 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
     append_unsynced_text_threads_to_bundle(db_path, bundle)
     append_unsynced_slack_threads_to_bundle(db_path, bundle)
     append_unsynced_linkedin_threads_to_bundle(db_path, bundle)
+    append_unsynced_meet_threads_to_bundle(db_path, bundle)
     append_unsynced_email_threads_to_bundle(db_path, bundle, lookback_days=lookback_days)
     bundle["pending_message_counts"] = pending_message_counts_by_thread(
         db_path,

@@ -131,6 +131,56 @@ export function formatDate(iso) {
         return escapeHtml(iso);
     return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
+/** Pipeline run_stamp (UTC ``YYYYMMDD_HHMMSS``) or ISO ``generated_at`` for UI labels. */
+export function formatPipelineRefreshTime(raw) {
+    if (!raw)
+        return "";
+    const stampMatch = /^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$/.exec(raw.trim());
+    if (stampMatch) {
+        const [, y, mo, d, h, mi, s] = stampMatch;
+        const dt = new Date(Date.UTC(+y, +mo - 1, +d, +h, +mi, +s));
+        if (!Number.isNaN(dt.getTime())) {
+            return dt.toLocaleString(undefined, { timeStyle: "short" });
+        }
+    }
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toLocaleString(undefined, { timeStyle: "short" });
+    }
+    return raw;
+}
+/** Short relative label for track/thread headers (e.g. "Today", "1d ago"). */
+export function formatRelativeShort(iso) {
+    if (!iso)
+        return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime()))
+        return "";
+    const diffMs = Date.now() - d.getTime();
+    if (diffMs < 0)
+        return "Today";
+    const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+    if (diffDays === 0)
+        return "Today";
+    if (diffDays === 1)
+        return "1d ago";
+    if (diffDays < 7)
+        return `${diffDays}d ago`;
+    if (diffDays < 14)
+        return "1w ago";
+    if (diffDays < 30)
+        return `${Math.floor(diffDays / 7)}w ago`;
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+/** Summary meta date (e.g. "Jul 3"). */
+export function formatSummaryUpdated(iso) {
+    if (!iso)
+        return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime()))
+        return iso.slice(0, 10);
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 export function toneClass(tone) {
     const t = tone.toLowerCase();
     if (t === "informational")

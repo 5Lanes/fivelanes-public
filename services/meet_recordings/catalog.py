@@ -45,6 +45,45 @@ def catalog_entry_by_id(
     return None
 
 
+def _drop_transcript_when_notes_exists(
+    rows: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Hide Transcript-only docs when a Notes-by-Gemini doc exists for the same meeting.
+
+    Each Meet instance produces two Drive files (notes + transcript). Only the notes
+    doc has a conversation-summary tab we can import.
+    """
+    notes_keys: set[tuple[str, str]] = set()
+    for row in rows:
+        name = str(row.get("name") or "").lower()
+        if "notes by gemini" not in name:
+            continue
+        notes_keys.add(
+            (
+                str(row.get("label") or "").strip(),
+                str(row.get("doc_date") or row.get("created_time") or row.get("modified_time") or "").strip(),
+            )
+        )
+    if not notes_keys:
+        return rows
+
+    kept: List[Dict[str, Any]] = []
+    for row in rows:
+        name = str(row.get("name") or "").lower()
+        is_transcript_only = "transcript" in name and "notes by gemini" not in name
+        if not is_transcript_only:
+            kept.append(row)
+            continue
+        key = (
+            str(row.get("label") or "").strip(),
+            str(row.get("doc_date") or row.get("created_time") or row.get("modified_time") or "").strip(),
+        )
+        if key not in notes_keys:
+            kept.append(row)
+    return kept
+
+
 def list_document_catalog(
     meet_recordings_dir: Path | None = None,
 ) -> List[Dict[str, Any]]:
@@ -76,4 +115,4 @@ def list_document_catalog(
         key=lambda row: (row.get("doc_date") or "", row.get("label") or ""),
         reverse=True,
     )
-    return catalog
+    return _drop_transcript_when_notes_exists(catalog)

@@ -199,9 +199,13 @@ export function applyLaneThreadMembership(laneId, threadId, inLane) {
     }
     else {
         memberships[key] = existing.filter((id) => id !== threadId);
+        bumpBundleMutation();
+        syncSummariesBundleCache();
         return;
     }
     memberships[key] = existing;
+    bumpBundleMutation();
+    syncSummariesBundleCache();
 }
 export function getLaneSummary(data, laneId) {
     if (!data || !data.lane_summaries || typeof data.lane_summaries !== "object")

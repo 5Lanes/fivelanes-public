@@ -43,7 +43,7 @@ export async function renderDashboardPage(): Promise<void> {
   const trackingThreads = [...active, ...snoozed];
   const meetingPreps = (data.meeting_preps || {}) as LooseObj;
 
-  refreshDashboardStatusBanner();
+  await refreshDashboardStatusBanner();
   await refreshDashboardScheduleRail(trackingThreads, {
     threadLabel,
     meetingPreps,

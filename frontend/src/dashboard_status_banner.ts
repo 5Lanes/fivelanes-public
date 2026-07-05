@@ -12,9 +12,11 @@ import {
   threadLabel,
 } from "./shared/thread_domain.js";
 import { sourcePillHtml, threadChannelForThread } from "./shared/source_ui.js";
+import { fetchPipelineStatus, lastPipelineRefreshTime } from "./pipeline_run_meta.js";
 import { escapeHtml } from "./shared/utils.js";
 
 const DISMISS_KEY = "fivelanes_dashboard_status_banner_dismiss";
+const BANNER_SEP = `<span class="dashboard-status-banner-sep" aria-hidden="true">·</span>`;
 
 function pendingSinceRefreshCount(): number {
   const data = getCurrentData();
@@ -26,16 +28,28 @@ function pendingSinceRefreshCount(): number {
   return total;
 }
 
-function newMessagesHtml(): string {
+function newMessagesHtml(refreshAt: string | null, pipelineRunning: boolean): string {
   const count = pendingSinceRefreshCount();
   if (!count) return "";
-  const runStamp = String(getCurrentData()?.run_stamp || getCurrentData()?.generated_at || "last refresh");
-  return `<span class="dashboard-status-banner-messages"><strong>${count} new message${count === 1 ? "" : "s"}</strong> since ${escapeHtml(runStamp.slice(0, 16))}</span>`;
+  const sincePart = refreshAt
+    ? `since last refresh at ${escapeHtml(refreshAt)}`
+    : pipelineRunning
+      ? "awaiting pipeline"
+      : "since last refresh";
+  return `<span class="dashboard-status-banner-messages"><strong>${count} new message${count === 1 ? "" : "s"}</strong> ${sincePart}</span>`;
 }
 
-export function refreshDashboardStatusBanner(): void {
+function joinBannerSummaryParts(parts: string[]): string {
+  return parts.map((part) => `<span>${part}</span>`).join(BANNER_SEP);
+}
+
+export async function refreshDashboardStatusBanner(): Promise<void> {
   const wrap = document.getElementById("dashboard-status-banner-wrap");
   if (!wrap) return;
+
+  const pipelineStatus = await fetchPipelineStatus();
+  const refreshAt = pipelineStatus ? lastPipelineRefreshTime(pipelineStatus) : null;
+  const pipelineRunning = Boolean(pipelineStatus?.running);
 
   const plans = getThreadPlans(getCurrentData());
   const { overdue, dueToday } = partitionPlansByDueStatus(plans);
@@ -61,8 +75,9 @@ export function refreshDashboardStatusBanner(): void {
   const summaryParts: string[] = [];
   if (dueToday.length) summaryParts.push(`<strong>${dueToday.length} plan${dueToday.length === 1 ? "" : "s"} due today</strong>`);
   if (overdue.length) summaryParts.push(`<strong>${overdue.length} overdue</strong>`);
-  const msgHtml = newMessagesHtml();
-  const sep = summaryParts.length && msgHtml ? `<span class="dashboard-status-banner-sep" aria-hidden="true">·</span>` : "";
+  const summaryHtml = joinBannerSummaryParts(summaryParts);
+  const msgHtml = newMessagesHtml(refreshAt, pipelineRunning);
+  const sep = summaryHtml && msgHtml ? BANNER_SEP : "";
 
   const dueItems = [...overdue, ...dueToday]
     .slice(0, 8)
@@ -85,7 +100,7 @@ export function refreshDashboardStatusBanner(): void {
   wrap.hidden = false;
   wrap.innerHTML = `<aside class="dashboard-status-banner dashboard-status-banner--due-today" role="status" aria-live="polite">
     <div class="dashboard-status-banner-head">
-      <p class="dashboard-status-banner-summary">${summaryParts.join("")}${sep}${msgHtml}</p>
+      <p class="dashboard-status-banner-summary">${summaryHtml}${sep}${msgHtml}</p>
       <div class="dashboard-status-banner-actions">
         <button type="button" class="dashboard-status-banner-btn" id="status-banner-plans-btn">View plans</button>
         <button type="button" class="dashboard-status-banner-btn" id="status-banner-threads-btn">View threads</button>

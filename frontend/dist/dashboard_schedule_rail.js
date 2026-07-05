@@ -1,13 +1,12 @@
 /**
  * Dashboard schedule rail: Calendar (availability + meetings + prep) and Plans tabs.
  */
-import { DASHBOARD_MEETINGS_LOOKAHEAD_DAYS, refreshDashboard, } from "./dashboard_panel.js";
+import { bindDashboardCalendarInteractions, calendarViewShellHtml, refreshDashboardCalendarView, } from "./dashboard_calendar_view.js";
 import { formatPlanByWhen, planDueBadgeHtml, planDueStatus, planDueStatusClass, planEditFormHtml, persistPlanCreate, persistPlanDelete, sortPlansByDueDate, } from "./shared/plan_helpers.js";
 import { applyPlanCreated, applyPlanDeleted, getCurrentData, getCurrentThreads, getThreadPlans, threadTrackPath, } from "./shared/summaries_store.js";
 import { partitionThreadsBySnooze, threadLabel } from "./shared/thread_domain.js";
-import { isFeatureEnabled } from "./shared/features.js";
-import { ensureAvailabilityDocLoaded } from "./shared/availability_windows.js";
 import { escapeHtml } from "./shared/utils.js";
+export { DASHBOARD_MEETINGS_LOOKAHEAD_DAYS } from "./dashboard_panel.js";
 let scheduleView = "calendar";
 let scheduleBound = false;
 function trackingThreads() {
@@ -22,11 +21,7 @@ function ensureRailShell(rail) {
       <button type="button" class="active" data-schedule-view="calendar" role="tab">Calendar</button>
       <button type="button" data-schedule-view="plans" role="tab">Plans</button>
     </div>
-    <div class="schedule-view" id="schedule-calendar-view" data-schedule-view="calendar">
-      <p class="dashboard-meetings-meta" id="schedule-meta">Loading…</p>
-      <div id="schedule-availability-agenda" class="availability-agenda"></div>
-      <div id="schedule-meetings-agenda" class="meetings-agenda"></div>
-    </div>
+    <div class="schedule-view" id="schedule-calendar-view" data-schedule-view="calendar">${calendarViewShellHtml()}</div>
     <div class="schedule-view" id="schedule-plans-view" data-schedule-view="plans" hidden>
       <div class="plans-rail-toolbar">
         <button type="button" class="btn btn--primary" id="schedule-add-plan-btn">Add plan</button>
@@ -50,6 +45,7 @@ function ensureRailShell(rail) {
     </div>`;
     rail.dataset.mounted = "1";
     bindScheduleRailInteractions(rail);
+    bindDashboardCalendarInteractions();
 }
 function setScheduleView(view) {
     scheduleView = view;
@@ -64,29 +60,6 @@ function setScheduleView(view) {
 export function showScheduleTab(view) {
     setScheduleView(view);
     void rerenderScheduleRail();
-}
-async function loadAvailabilitySnippet(container) {
-    if (!isFeatureEnabled("availability")) {
-        container.innerHTML = "";
-        return;
-    }
-    await ensureAvailabilityDocLoaded();
-    try {
-        const res = await fetch(`/out/availability_calendar_latest.json?cb=${Date.now()}`, {
-            credentials: "same-origin",
-            cache: "no-store",
-        });
-        if (!res.ok) {
-            container.innerHTML = "";
-            return;
-        }
-        const data = (await res.json());
-        const { refreshAvailabilityInto } = await import("./availability_panel.js");
-        await refreshAvailabilityInto(container, data);
-    }
-    catch {
-        container.innerHTML = "";
-    }
 }
 function planRailCardHtml(plan, data) {
     const dueStatus = planDueStatus(plan.by_when);
@@ -215,27 +188,7 @@ async function rerenderScheduleRail() {
         renderPlansRail();
         return;
     }
-    const meta = document.getElementById("schedule-meta");
-    const avail = document.getElementById("schedule-availability-agenda");
-    const meetings = document.getElementById("schedule-meetings-agenda");
-    if (!meta || !meetings)
-        return;
-    if (avail)
-        await loadAvailabilitySnippet(avail);
-    const threads = trackingThreads();
-    await refreshDashboard(threads, {
-        meetingsMetaEl: meta,
-        meetingsAgendaEl: meetings,
-        threadLabel,
-        meetingPreps: (data.meeting_preps || {}),
-        onMeetingPrepSaved: (cacheKey, prep) => {
-            const current = getCurrentData();
-            if (!current)
-                return;
-            const bucket = (current.meeting_preps || (current.meeting_preps = {}));
-            bucket[cacheKey] = prep;
-        },
-    });
+    await refreshDashboardCalendarView();
 }
 export async function refreshDashboardScheduleRail(threads, opts) {
     const rail = document.getElementById("dashboard-schedule-rail");
@@ -246,4 +199,3 @@ export async function refreshDashboardScheduleRail(threads, opts) {
     void opts;
     await rerenderScheduleRail();
 }
-export { DASHBOARD_MEETINGS_LOOKAHEAD_DAYS };

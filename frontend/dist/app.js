@@ -91,6 +91,8 @@ function setActiveNav(route) {
     document.querySelectorAll(".app-nav-link[data-route]").forEach((link) => {
         link.classList.toggle("active", link.dataset.route === route);
     });
+    document.getElementById("sources-nav-btn")?.toggleAttribute("hidden", route === "sources");
+    document.getElementById("dashboard-return-btn")?.toggleAttribute("hidden", route !== "sources");
 }
 function showBootstrapError(message) {
     pageRoot.innerHTML = `<div class="view-empty"><p class="empty-state">${escapeHtml(message)}</p></div>`;

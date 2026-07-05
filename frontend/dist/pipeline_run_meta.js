@@ -1,4 +1,30 @@
 import { formatDate, str } from "./shared/utils.js";
+export async function fetchPipelineStatus() {
+    try {
+        const res = await fetch("/api/pipeline/status", { credentials: "same-origin" });
+        if (!res.ok)
+            return null;
+        return (await res.json());
+    }
+    catch {
+        return null;
+    }
+}
+/** Last completed pipeline refresh time for UI labels (not in-progress partial writes). */
+export function lastPipelineRefreshTime(status) {
+    const last = (status.last_run ?? {});
+    const running = Boolean(status.running);
+    if (running) {
+        const prev = str(last.last_completed_at);
+        return prev ? formatDate(prev) : null;
+    }
+    if (last.ok === false) {
+        const prev = str(last.last_completed_at);
+        return prev ? formatDate(prev) : null;
+    }
+    const finished = str(last.finished_at);
+    return finished ? formatDate(finished) : null;
+}
 function triggerLabel(trigger) {
     if (trigger === "manual")
         return "manual";

@@ -24,6 +24,7 @@ from services.linkedin.selections import write_selections_for_conversation_keys
 from services.linkedin.tracking import (
     LINKEDIN_THREAD_PREFIX,
     fetch_tracked_conversation_keys,
+    fetch_visible_conversation_keys,
     linkedin_inbox_thread_id,
     parse_linkedin_inbox_thread_id,
     set_tracked_conversation_keys,
@@ -39,6 +40,7 @@ __all__ = [
     "summarize_one_linkedin_thread",
     "summarize_tracked_linkedin_threads",
     "fetch_tracked_conversation_keys",
+    "fetch_visible_conversation_keys",
     "list_conversation_catalog",
     "linkedin_inbox_thread_id",
     "messages_csv_path",

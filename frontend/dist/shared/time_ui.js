@@ -41,7 +41,22 @@ export function todayYmdInTz(timeZone) {
         day: "2-digit",
     }).format(new Date());
 }
-function addDaysToYmd(ymd, deltaDays) {
+export function formatTime12InTz(iso, timeZone) {
+    return new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+    }).format(new Date(iso));
+}
+export function formatTimeRange12InTz(startIso, endIso, timeZone) {
+    const start = formatTime12InTz(startIso, timeZone);
+    if (!endIso)
+        return start;
+    const end = formatTime12InTz(endIso, timeZone);
+    return `${start} – ${end}`;
+}
+export function addDaysToYmd(ymd, deltaDays) {
     const [Y, M, D] = ymd.split("-").map(Number);
     if (!Y || !M || !D)
         return null;

@@ -3,10 +3,10 @@
  */
 
 import {
-  DASHBOARD_MEETINGS_LOOKAHEAD_DAYS,
-  type ThreadView,
-  refreshDashboard,
-} from "./dashboard_panel.js";
+  bindDashboardCalendarInteractions,
+  calendarViewShellHtml,
+  refreshDashboardCalendarView,
+} from "./dashboard_calendar_view.js";
 import {
   formatPlanByWhen,
   planDueBadgeHtml,
@@ -30,10 +30,10 @@ import {
   threadTrackPath,
 } from "./shared/summaries_store.js";
 import { partitionThreadsBySnooze, threadLabel } from "./shared/thread_domain.js";
-import { isFeatureEnabled } from "./shared/features.js";
-import { ensureAvailabilityDocLoaded } from "./shared/availability_windows.js";
-import type { LooseObj, PlanView } from "./shared/types.js";
+import type { LooseObj, PlanView, ThreadView } from "./shared/types.js";
 import { escapeHtml, str } from "./shared/utils.js";
+
+export { DASHBOARD_MEETINGS_LOOKAHEAD_DAYS } from "./dashboard_panel.js";
 
 type LooseThread = ThreadView;
 
@@ -52,11 +52,7 @@ function ensureRailShell(rail: HTMLElement): void {
       <button type="button" class="active" data-schedule-view="calendar" role="tab">Calendar</button>
       <button type="button" data-schedule-view="plans" role="tab">Plans</button>
     </div>
-    <div class="schedule-view" id="schedule-calendar-view" data-schedule-view="calendar">
-      <p class="dashboard-meetings-meta" id="schedule-meta">Loading…</p>
-      <div id="schedule-availability-agenda" class="availability-agenda"></div>
-      <div id="schedule-meetings-agenda" class="meetings-agenda"></div>
-    </div>
+    <div class="schedule-view" id="schedule-calendar-view" data-schedule-view="calendar">${calendarViewShellHtml()}</div>
     <div class="schedule-view" id="schedule-plans-view" data-schedule-view="plans" hidden>
       <div class="plans-rail-toolbar">
         <button type="button" class="btn btn--primary" id="schedule-add-plan-btn">Add plan</button>
@@ -80,6 +76,7 @@ function ensureRailShell(rail: HTMLElement): void {
     </div>`;
   rail.dataset.mounted = "1";
   bindScheduleRailInteractions(rail);
+  bindDashboardCalendarInteractions();
 }
 
 function setScheduleView(view: "calendar" | "plans"): void {
@@ -96,29 +93,6 @@ function setScheduleView(view: "calendar" | "plans"): void {
 export function showScheduleTab(view: "calendar" | "plans"): void {
   setScheduleView(view);
   void rerenderScheduleRail();
-}
-
-async function loadAvailabilitySnippet(container: HTMLElement): Promise<void> {
-  if (!isFeatureEnabled("availability")) {
-    container.innerHTML = "";
-    return;
-  }
-  await ensureAvailabilityDocLoaded();
-  try {
-    const res = await fetch(`/out/availability_calendar_latest.json?cb=${Date.now()}`, {
-      credentials: "same-origin",
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      container.innerHTML = "";
-      return;
-    }
-    const data = (await res.json()) as LooseObj;
-    const { refreshAvailabilityInto } = await import("./availability_panel.js");
-    await refreshAvailabilityInto(container, data);
-  } catch {
-    container.innerHTML = "";
-  }
 }
 
 function planRailCardHtml(plan: PlanView, data: LooseObj): string {
@@ -253,24 +227,7 @@ async function rerenderScheduleRail(): Promise<void> {
     renderPlansRail();
     return;
   }
-  const meta = document.getElementById("schedule-meta");
-  const avail = document.getElementById("schedule-availability-agenda");
-  const meetings = document.getElementById("schedule-meetings-agenda");
-  if (!meta || !meetings) return;
-  if (avail) await loadAvailabilitySnippet(avail);
-  const threads = trackingThreads();
-  await refreshDashboard(threads, {
-    meetingsMetaEl: meta,
-    meetingsAgendaEl: meetings,
-    threadLabel,
-    meetingPreps: (data.meeting_preps || {}) as LooseObj,
-    onMeetingPrepSaved: (cacheKey, prep) => {
-      const current = getCurrentData();
-      if (!current) return;
-      const bucket = (current.meeting_preps ||= {}) as LooseObj;
-      bucket[cacheKey] = prep;
-    },
-  });
+  await refreshDashboardCalendarView();
 }
 
 export async function refreshDashboardScheduleRail(
@@ -288,5 +245,3 @@ export async function refreshDashboardScheduleRail(
   void opts;
   await rerenderScheduleRail();
 }
-
-export { DASHBOARD_MEETINGS_LOOKAHEAD_DAYS };

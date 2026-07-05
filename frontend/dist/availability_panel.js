@@ -92,7 +92,10 @@ function getTimeZone(data) {
     const meta = (data.meta || {});
     return str(meta.timezone).trim() || "America/New_York";
 }
-function buildDayAgenda(dateKey, data) {
+export function getAvailabilityTimeZone(data) {
+    return getTimeZone(data);
+}
+export function buildDayAgenda(dateKey, data) {
     const tz = getTimeZone(data);
     const items = [];
     const parentingByDate = new Map();

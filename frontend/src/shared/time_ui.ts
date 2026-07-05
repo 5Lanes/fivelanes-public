@@ -47,7 +47,23 @@ export function todayYmdInTz(timeZone: string): string {
   }).format(new Date());
 }
 
-function addDaysToYmd(ymd: string, deltaDays: number): string | null {
+export function formatTime12InTz(iso: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(new Date(iso));
+}
+
+export function formatTimeRange12InTz(startIso: string, endIso: string, timeZone: string): string {
+  const start = formatTime12InTz(startIso, timeZone);
+  if (!endIso) return start;
+  const end = formatTime12InTz(endIso, timeZone);
+  return `${start} – ${end}`;
+}
+
+export function addDaysToYmd(ymd: string, deltaDays: number): string | null {
   const [Y, M, D] = ymd.split("-").map(Number);
   if (!Y || !M || !D) return null;
   const u = Date.UTC(Y, M - 1, D + deltaDays, 12, 0, 0);
