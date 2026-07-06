@@ -8,7 +8,8 @@ import { renderMentionAwareText } from "./shared/thread_domain.js";
 import { dayHeadingLabelLong, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdLocal, } from "./shared/time_ui.js";
 import { ensureAvailabilityDocLoaded } from "./shared/availability_windows.js";
 import { isFeatureEnabled } from "./shared/features.js";
-import { escapeHtml, threadPageHref } from "./shared/utils.js";
+import { escapeHtml } from "./shared/utils.js";
+import { bindMeetingPrepInteractions, clearMeetingPrepContexts, configureMeetingPrep, meetingPrepLinkHtml, } from "./meeting_prep_ui.js";
 export const DASHBOARD_MEETINGS_LOOKAHEAD_DAYS = 7;
 export function renderDashboardPlans(plansEl, plans, labelForThreadId) {
     plansEl.hidden = false;
@@ -52,94 +53,14 @@ export function matchMeetingsToThreads(meetings, contexts) {
     out.sort((a, b) => a.meeting.start_iso.localeCompare(b.meeting.start_iso));
     return out;
 }
-function strField(v) {
-    return typeof v === "string" ? v : "";
-}
-function threadMessagesForPrep(thread) {
-    return thread.messages.map((row) => {
-        const c = (row.cleaned || {});
-        const s = (row.summary || {});
-        const content = strField(c.cleaned_content) || strField(c.raw_text) || "";
-        return {
-            datetime: strField(c.datetime || s.datetime),
-            sender: strField(c.sender || c.forwarded_from),
-            recipients: strField(c.recipients),
-            content,
-        };
-    });
-}
-export function meetingPrepCacheKey(meeting, threadId) {
-    return `${meetingDedupeKey(meeting)}|${threadId}`;
-}
-function prepFieldsFromPayload(payload) {
-    return {
-        prep_summary: payload.prep_summary,
-        talking_points: payload.talking_points,
-        open_loops: payload.open_loops,
-        suggested_opener: payload.suggested_opener,
-        open_questions: payload.open_questions,
-    };
-}
-function formatPrepPayloadHtml(payload) {
-    const summary = strField(payload.prep_summary).trim();
-    const opener = strField(payload.suggested_opener).trim();
-    const points = Array.isArray(payload.talking_points)
-        ? payload.talking_points.map((x) => strField(x).trim()).filter(Boolean)
-        : [];
-    const loops = Array.isArray(payload.open_loops)
-        ? payload.open_loops.map((x) => strField(x).trim()).filter(Boolean)
-        : [];
-    const questions = Array.isArray(payload.open_questions)
-        ? payload.open_questions.map((x) => strField(x).trim()).filter(Boolean)
-        : [];
-    const chunks = [];
-    if (summary)
-        chunks.push(`<p class="meeting-prep-summary">${escapeHtml(summary)}</p>`);
-    if (opener) {
-        chunks.push(`<p class="meeting-prep-opener"><strong>Suggested opener:</strong> ${escapeHtml(opener)}</p>`);
-    }
-    if (points.length) {
-        chunks.push(`<h4 class="meeting-prep-subhead">Talking points</h4><ul>${points.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>`);
-    }
-    if (loops.length) {
-        chunks.push(`<h4 class="meeting-prep-subhead">Open loops</h4><ul>${loops.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>`);
-    }
-    if (questions.length) {
-        chunks.push(`<h4 class="meeting-prep-subhead">Check before the meeting</h4><ul>${questions.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>`);
-    }
-    return chunks.length
-        ? chunks.join("")
-        : `<p class="meeting-prep-error">No prep content returned.</p>`;
-}
-async function requestMeetingPrep(thread, meeting, threadLabelText) {
-    const res = await fetch("/api/meeting-prep", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            thread_id: thread.id,
-            thread_label: threadLabelText,
-            meeting_title: meeting.summary,
-            meeting_start: meeting.start_iso,
-            meeting_end: meeting.end_iso,
-            meeting_location: meeting.location,
-            meeting_attendees: meeting.attendees.join(", "),
-            messages: threadMessagesForPrep(thread),
-        }),
-    });
-    const data = (await res.json());
-    if (!res.ok || data.ok === false) {
-        throw new Error(strField(data.error) || `Request failed (${res.status})`);
-    }
-    return data;
-}
-function renderDashboardMeetingRow(meeting, thread, tz, prepIndex) {
+function renderDashboardMeetingRow(meeting, thread, tz) {
     const timeLine = formatTimeRangeInTz(meeting.start_iso, meeting.end_iso, tz);
     const titleHtml = meeting.html_link
         ? `<a href="${escapeHtml(meeting.html_link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(meeting.summary)}</a>`
         : escapeHtml(meeting.summary);
     const detailParts = [];
     if (thread) {
-        detailParts.push(`<a class="dashboard-meeting-thread-link" href="${escapeHtml(threadPageHref(thread.threadId))}">↔ ${escapeHtml(thread.label)}</a>`);
+        detailParts.push(meetingPrepLinkHtml(`↔ ${thread.label}`, meeting, thread, "dashboard-meeting-thread-link"));
     }
     if (meeting.location)
         detailParts.push(escapeHtml(meeting.location));
@@ -147,24 +68,15 @@ function renderDashboardMeetingRow(meeting, thread, tz, prepIndex) {
         detailParts.push(`${meeting.attendees.length} attendee${meeting.attendees.length === 1 ? "" : "s"}`);
     }
     const detail = detailParts.join(" · ");
-    const prepClass = prepIndex !== null ? " meeting-prep-row" : "";
-    const prepData = prepIndex !== null ? ` data-prep-row="${prepIndex}"` : "";
-    const prepActions = prepIndex !== null
-        ? `<div class="meeting-prep-actions">
-        <button type="button" class="meeting-prep-btn" data-prep-btn="${prepIndex}">Prepare</button>
-      </div>
-      <div class="meeting-prep-panel" id="meeting-prep-panel-${prepIndex}" hidden></div>`
-        : "";
-    return `<li class="dash-avail-row dash-avail-row--commit${prepClass}"${prepData}>
+    return `<li class="dash-avail-row dash-avail-row--commit">
     <div class="dash-avail-time">${escapeHtml(timeLine)}</div>
     <div class="dash-avail-body">
       <div class="dash-avail-title">${titleHtml}</div>
       ${detail ? `<div class="dash-avail-detail">${detail}</div>` : ""}
-      ${prepActions}
     </div>
   </li>`;
 }
-function renderDashboardAgendaHtml(meetings, matchByKey, matchedForPrep, tz, days) {
+function renderDashboardAgendaHtml(meetings, matchByKey, tz, days) {
     const byDate = new Map();
     for (const meeting of meetings) {
         if (!meeting.start_iso)
@@ -177,8 +89,6 @@ function renderDashboardAgendaHtml(meetings, matchByKey, matchedForPrep, tz, day
     for (const rows of byDate.values()) {
         rows.sort((a, b) => a.start_iso.localeCompare(b.start_iso));
     }
-    const prepIndexByKey = new Map();
-    matchedForPrep.forEach((m, i) => prepIndexByKey.set(meetingDedupeKey(m.meeting), i));
     const start = todayYmdLocal();
     const dayKeys = nextNDaysFromYmd(start, days);
     const sections = [];
@@ -190,8 +100,7 @@ function renderDashboardAgendaHtml(meetings, matchByKey, matchedForPrep, tz, day
             .map((meeting) => {
             const key = meetingDedupeKey(meeting);
             const thread = matchByKey.get(key) ?? null;
-            const prepIndex = prepIndexByKey.has(key) ? prepIndexByKey.get(key) : null;
-            return renderDashboardMeetingRow(meeting, thread, tz, prepIndex);
+            return renderDashboardMeetingRow(meeting, thread, tz);
         })
             .join("");
         sections.push(`<section class="dash-avail-day" data-date="${escapeHtml(dateKey)}">
@@ -206,49 +115,6 @@ function renderDashboardAgendaHtml(meetings, matchByKey, matchedForPrep, tz, day
         return `<p class="dash-avail-error">No meetings in the next ${days} days.</p>`;
     }
     return `<div class="dash-avail-agenda">${sections.join("")}</div>`;
-}
-function bindMeetingPrepHandlers(agendaEl, matched, threadsById, meetingPreps, onPrepSaved) {
-    for (const btn of Array.from(agendaEl.querySelectorAll("[data-prep-btn]"))) {
-        const idx = Number(btn.dataset.prepBtn);
-        if (!Number.isFinite(idx) || idx < 0 || idx >= matched.length)
-            continue;
-        const entry = matched[idx];
-        const panel = agendaEl.querySelector(`#meeting-prep-panel-${idx}`);
-        if (!panel)
-            continue;
-        const cacheKey = meetingPrepCacheKey(entry.meeting, entry.thread.threadId);
-        const cached = meetingPreps[cacheKey];
-        if (cached && typeof cached === "object") {
-            panel.hidden = false;
-            panel.innerHTML = formatPrepPayloadHtml(cached);
-            btn.textContent = "Refresh prep";
-        }
-        btn.addEventListener("click", async () => {
-            const thread = threadsById.get(entry.thread.threadId);
-            if (!thread) {
-                panel.hidden = false;
-                panel.innerHTML = `<p class="meeting-prep-error">Thread not found in loaded bundle.</p>`;
-                return;
-            }
-            btn.disabled = true;
-            panel.hidden = false;
-            panel.innerHTML = `<p class="meeting-prep-loading">Preparing from email thread…</p>`;
-            try {
-                const payload = await requestMeetingPrep(thread, entry.meeting, entry.thread.label);
-                const prep = prepFieldsFromPayload(payload);
-                panel.innerHTML = formatPrepPayloadHtml(prep);
-                meetingPreps[cacheKey] = prep;
-                onPrepSaved?.(cacheKey, prep);
-                btn.textContent = "Refresh prep";
-            }
-            catch (e) {
-                panel.innerHTML = `<p class="meeting-prep-error">${escapeHtml(e instanceof Error ? e.message : String(e))}</p>`;
-            }
-            finally {
-                btn.disabled = false;
-            }
-        });
-    }
 }
 export async function refreshDashboard(threads, opts) {
     if (isFeatureEnabled("availability")) {
@@ -292,10 +158,16 @@ export async function refreshDashboard(threads, opts) {
             : linkedCount === 0
                 ? `${upcoming.length} meeting${upcoming.length === 1 ? "" : "s"} in the next ${days} days (${tz}).`
                 : `${upcoming.length} meeting${upcoming.length === 1 ? "" : "s"} in the next ${days} days (${tz}); ${linkedCount} linked to threads.`;
-    opts.meetingsAgendaEl.innerHTML = renderDashboardAgendaHtml(upcoming, matchByKey, matchedForPrep, tz, days);
     const threadsById = new Map(tracking.map((t) => [t.id, t]));
-    const meetingPreps = opts.meetingPreps && typeof opts.meetingPreps === "object" ? opts.meetingPreps : {};
-    bindMeetingPrepHandlers(opts.meetingsAgendaEl, matchedForPrep, threadsById, meetingPreps, opts.onMeetingPrepSaved);
+    bindMeetingPrepInteractions();
+    configureMeetingPrep({
+        meetingPreps: opts.meetingPreps,
+        onMeetingPrepSaved: opts.onMeetingPrepSaved,
+        getThreadsById: () => threadsById,
+        timezone: tz,
+    });
+    clearMeetingPrepContexts();
+    opts.meetingsAgendaEl.innerHTML = renderDashboardAgendaHtml(upcoming, matchByKey, tz, days);
     return {
         meetingCount: upcoming.length,
         linkedMeetingCount: linkedCount,

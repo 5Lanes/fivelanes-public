@@ -111,6 +111,9 @@ export function normalizeBundle(data) {
     if (!data.pending_message_counts || typeof data.pending_message_counts !== "object") {
         data.pending_message_counts = {};
     }
+    if (!data.new_since_refresh_counts || typeof data.new_since_refresh_counts !== "object") {
+        data.new_since_refresh_counts = {};
+    }
     if (typeof data.source_account !== "string")
         data.source_account = "";
     return data;
@@ -271,6 +274,15 @@ export function applyLaneAreaAssigned(laneId, areaId) {
             row.area_id = areaId;
             return;
         }
+    }
+}
+export function applyLaneAreaCreated(area) {
+    if (!currentData)
+        return;
+    const areas = Array.isArray(currentData.lane_areas) ? currentData.lane_areas : [];
+    if (!areas.some((row) => Number(row.id) === area.id)) {
+        areas.push({ ...area });
+        currentData.lane_areas = areas;
     }
 }
 export function applyLaneRemoved(laneId) {

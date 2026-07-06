@@ -96,9 +96,9 @@ def _is_sync_meet_row(row: Dict[str, Any]) -> bool:
 
 def fetch_visible_document_keys(db_path: str) -> List[str]:
     """All Meet recordings still shown on the dashboard (syncing or paused)."""
-    from utils.database import fetch_thread_tracking_rows
+    from utils.database import fetch_thread_tracking_rows, load_lane_thread_memberships
 
-    out: List[str] = []
+    out: Set[str] = set()
     for row in fetch_thread_tracking_rows(db_path):
         if is_removed(row.get("snoozed")):
             continue
@@ -106,8 +106,13 @@ def fetch_visible_document_keys(db_path: str) -> List[str]:
             continue
         key = parse_meet_inbox_thread_id(str(row.get("inbox_thread_id") or ""))
         if key:
-            out.append(key)
-    return sorted(set(out))
+            out.add(key)
+    for thread_ids in load_lane_thread_memberships(db_path).values():
+        for tid in thread_ids:
+            key = parse_meet_inbox_thread_id(tid)
+            if key:
+                out.add(key)
+    return sorted(out)
 
 
 def fetch_tracked_document_keys(db_path: str) -> List[str]:
@@ -302,7 +307,7 @@ def set_tracked_document_keys(
         tracking_rows.append(_paused_tracking_row(row, now_iso=now))
         paused += 1
 
-    applied = upsert_thread_tracking(db_path, tracking_rows) if tracking_rows else 0
+    applied = upsert_thread_tracking(db_path, tracking_rows, apply_snooze=True) if tracking_rows else 0
     n_time = upsert_timeline_entries(db_path, timeline_rows) if timeline_rows else 0
 
     tracked = sorted(desired - {e["document_key"] for e in import_errors})

@@ -1,6 +1,6 @@
 import { partitionPlansByDueStatus, } from "./shared/plan_helpers.js";
 import { getCurrentData, getCurrentThreads, getThreadPlans, threadTrackPath, } from "./shared/summaries_store.js";
-import { pendingMessageCountForThread, threadLabel, } from "./shared/thread_domain.js";
+import { newSinceRefreshCountForThread, threadLabel, } from "./shared/thread_domain.js";
 import { sourcePillHtml, threadChannelForThread } from "./shared/source_ui.js";
 import { fetchPipelineStatus, lastPipelineRefreshTime } from "./pipeline_run_meta.js";
 import { escapeHtml } from "./shared/utils.js";
@@ -12,7 +12,7 @@ function pendingSinceRefreshCount() {
         return 0;
     let total = 0;
     for (const thread of getCurrentThreads()) {
-        total += pendingMessageCountForThread(thread, data);
+        total += newSinceRefreshCountForThread(thread, data);
     }
     return total;
 }
@@ -72,7 +72,7 @@ export async function refreshDashboardStatusBanner() {
     })
         .join("");
     const newThreads = getCurrentThreads()
-        .filter((t) => pendingMessageCountForThread(t, data) > 0)
+        .filter((t) => newSinceRefreshCountForThread(t, data) > 0)
         .slice(0, 6)
         .map((t) => {
         const ch = threadChannelForThread(t);

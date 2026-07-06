@@ -1,7 +1,7 @@
 import { bindPipelineControls } from "./pipeline_controls.js";
 import { bindSettingsPanel, mountSettingsDialog } from "./settings_panel.js";
 import { MEETINGS_LOOKAHEAD_DAYS, prefetchMeetings } from "./meetings_panel.js";
-import { bindDashboardInteractions, mountDashboardPage, renderDashboardPage, } from "./pages/dashboard_page.js";
+import { applyDashboardLocationHash, bindDashboardInteractions, mountDashboardPage, renderDashboardPage, } from "./pages/dashboard_page.js";
 import { bindLanesInteractions, mountLanesPage, renderLanesPage } from "./pages/lanes_page.js";
 import { mountMeetingsPage, renderMeetingsPage } from "./pages/meetings_page.js";
 import { bindPlansInteractions, mountPlansPage, renderPlansPage } from "./pages/plans_page.js";
@@ -227,6 +227,11 @@ async function bootstrap() {
         }
         refreshPlanNotifications();
         void refreshPipelineRunMeta(runMetaEl);
+        window.addEventListener("hashchange", () => {
+            if (routeFromPathname(location.pathname) === "dashboard") {
+                void applyDashboardLocationHash();
+            }
+        });
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

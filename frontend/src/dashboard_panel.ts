@@ -32,7 +32,13 @@ import {
 } from "./shared/time_ui.js";
 import { ensureAvailabilityDocLoaded } from "./shared/availability_windows.js";
 import { isFeatureEnabled } from "./shared/features.js";
-import { escapeHtml, threadPageHref } from "./shared/utils.js";
+import { escapeHtml } from "./shared/utils.js";
+import {
+  bindMeetingPrepInteractions,
+  clearMeetingPrepContexts,
+  configureMeetingPrep,
+  meetingPrepLinkHtml,
+} from "./meeting_prep_ui.js";
 
 type LooseObj = Record<string, unknown>;
 
@@ -102,110 +108,10 @@ export function matchMeetingsToThreads(
   return out;
 }
 
-function strField(v: unknown): string {
-  return typeof v === "string" ? v : "";
-}
-
-function threadMessagesForPrep(
-  thread: ThreadView,
-): Array<{ datetime: string; sender: string; recipients: string; content: string }> {
-  return thread.messages.map((row) => {
-    const c = (row.cleaned || {}) as LooseObj;
-    const s = (row.summary || {}) as LooseObj;
-    const content = strField(c.cleaned_content) || strField(c.raw_text) || "";
-    return {
-      datetime: strField(c.datetime || s.datetime),
-      sender: strField(c.sender || c.forwarded_from),
-      recipients: strField(c.recipients),
-      content,
-    };
-  });
-}
-
-export function meetingPrepCacheKey(meeting: MeetingRow, threadId: string): string {
-  return `${meetingDedupeKey(meeting)}|${threadId}`;
-}
-
-function prepFieldsFromPayload(payload: LooseObj): LooseObj {
-  return {
-    prep_summary: payload.prep_summary,
-    talking_points: payload.talking_points,
-    open_loops: payload.open_loops,
-    suggested_opener: payload.suggested_opener,
-    open_questions: payload.open_questions,
-  };
-}
-
-function formatPrepPayloadHtml(payload: LooseObj): string {
-  const summary = strField(payload.prep_summary).trim();
-  const opener = strField(payload.suggested_opener).trim();
-  const points = Array.isArray(payload.talking_points)
-    ? payload.talking_points.map((x) => strField(x).trim()).filter(Boolean)
-    : [];
-  const loops = Array.isArray(payload.open_loops)
-    ? payload.open_loops.map((x) => strField(x).trim()).filter(Boolean)
-    : [];
-  const questions = Array.isArray(payload.open_questions)
-    ? payload.open_questions.map((x) => strField(x).trim()).filter(Boolean)
-    : [];
-  const chunks: string[] = [];
-  if (summary) chunks.push(`<p class="meeting-prep-summary">${escapeHtml(summary)}</p>`);
-  if (opener) {
-    chunks.push(
-      `<p class="meeting-prep-opener"><strong>Suggested opener:</strong> ${escapeHtml(opener)}</p>`,
-    );
-  }
-  if (points.length) {
-    chunks.push(
-      `<h4 class="meeting-prep-subhead">Talking points</h4><ul>${points.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>`,
-    );
-  }
-  if (loops.length) {
-    chunks.push(
-      `<h4 class="meeting-prep-subhead">Open loops</h4><ul>${loops.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>`,
-    );
-  }
-  if (questions.length) {
-    chunks.push(
-      `<h4 class="meeting-prep-subhead">Check before the meeting</h4><ul>${questions.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>`,
-    );
-  }
-  return chunks.length
-    ? chunks.join("")
-    : `<p class="meeting-prep-error">No prep content returned.</p>`;
-}
-
-async function requestMeetingPrep(
-  thread: ThreadView,
-  meeting: MeetingRow,
-  threadLabelText: string,
-): Promise<LooseObj> {
-  const res = await fetch("/api/meeting-prep", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      thread_id: thread.id,
-      thread_label: threadLabelText,
-      meeting_title: meeting.summary,
-      meeting_start: meeting.start_iso,
-      meeting_end: meeting.end_iso,
-      meeting_location: meeting.location,
-      meeting_attendees: meeting.attendees.join(", "),
-      messages: threadMessagesForPrep(thread),
-    }),
-  });
-  const data = (await res.json()) as LooseObj;
-  if (!res.ok || data.ok === false) {
-    throw new Error(strField(data.error) || `Request failed (${res.status})`);
-  }
-  return data;
-}
-
 function renderDashboardMeetingRow(
   meeting: MeetingRow,
   thread: ThreadMatchContext | null,
   tz: string,
-  prepIndex: number | null,
 ): string {
   const timeLine = formatTimeRangeInTz(meeting.start_iso, meeting.end_iso, tz);
   const titleHtml = meeting.html_link
@@ -214,7 +120,7 @@ function renderDashboardMeetingRow(
   const detailParts: string[] = [];
   if (thread) {
     detailParts.push(
-      `<a class="dashboard-meeting-thread-link" href="${escapeHtml(threadPageHref(thread.threadId))}">↔ ${escapeHtml(thread.label)}</a>`,
+      meetingPrepLinkHtml(`↔ ${thread.label}`, meeting, thread, "dashboard-meeting-thread-link"),
     );
   }
   if (meeting.location) detailParts.push(escapeHtml(meeting.location));
@@ -224,21 +130,11 @@ function renderDashboardMeetingRow(
     );
   }
   const detail = detailParts.join(" · ");
-  const prepClass = prepIndex !== null ? " meeting-prep-row" : "";
-  const prepData = prepIndex !== null ? ` data-prep-row="${prepIndex}"` : "";
-  const prepActions =
-    prepIndex !== null
-      ? `<div class="meeting-prep-actions">
-        <button type="button" class="meeting-prep-btn" data-prep-btn="${prepIndex}">Prepare</button>
-      </div>
-      <div class="meeting-prep-panel" id="meeting-prep-panel-${prepIndex}" hidden></div>`
-      : "";
-  return `<li class="dash-avail-row dash-avail-row--commit${prepClass}"${prepData}>
+  return `<li class="dash-avail-row dash-avail-row--commit">
     <div class="dash-avail-time">${escapeHtml(timeLine)}</div>
     <div class="dash-avail-body">
       <div class="dash-avail-title">${titleHtml}</div>
       ${detail ? `<div class="dash-avail-detail">${detail}</div>` : ""}
-      ${prepActions}
     </div>
   </li>`;
 }
@@ -246,7 +142,6 @@ function renderDashboardMeetingRow(
 function renderDashboardAgendaHtml(
   meetings: MeetingRow[],
   matchByKey: Map<string, ThreadMatchContext>,
-  matchedForPrep: MatchedMeeting[],
   tz: string,
   days: number,
 ): string {
@@ -261,9 +156,6 @@ function renderDashboardAgendaHtml(
     rows.sort((a, b) => a.start_iso.localeCompare(b.start_iso));
   }
 
-  const prepIndexByKey = new Map<string, number>();
-  matchedForPrep.forEach((m, i) => prepIndexByKey.set(meetingDedupeKey(m.meeting), i));
-
   const start = todayYmdLocal();
   const dayKeys = nextNDaysFromYmd(start, days);
   const sections: string[] = [];
@@ -274,8 +166,7 @@ function renderDashboardAgendaHtml(
       .map((meeting) => {
         const key = meetingDedupeKey(meeting);
         const thread = matchByKey.get(key) ?? null;
-        const prepIndex = prepIndexByKey.has(key) ? prepIndexByKey.get(key)! : null;
-        return renderDashboardMeetingRow(meeting, thread, tz, prepIndex);
+        return renderDashboardMeetingRow(meeting, thread, tz);
       })
       .join("");
     sections.push(`<section class="dash-avail-day" data-date="${escapeHtml(dateKey)}">
@@ -290,54 +181,6 @@ function renderDashboardAgendaHtml(
     return `<p class="dash-avail-error">No meetings in the next ${days} days.</p>`;
   }
   return `<div class="dash-avail-agenda">${sections.join("")}</div>`;
-}
-
-function bindMeetingPrepHandlers(
-  agendaEl: HTMLElement,
-  matched: MatchedMeeting[],
-  threadsById: Map<string, ThreadView>,
-  meetingPreps: LooseObj,
-  onPrepSaved?: (cacheKey: string, prep: LooseObj) => void,
-): void {
-  for (const btn of Array.from(agendaEl.querySelectorAll<HTMLButtonElement>("[data-prep-btn]"))) {
-    const idx = Number(btn.dataset.prepBtn);
-    if (!Number.isFinite(idx) || idx < 0 || idx >= matched.length) continue;
-    const entry = matched[idx];
-    const panel = agendaEl.querySelector(`#meeting-prep-panel-${idx}`) as HTMLElement | null;
-    if (!panel) continue;
-
-    const cacheKey = meetingPrepCacheKey(entry.meeting, entry.thread.threadId);
-    const cached = meetingPreps[cacheKey] as LooseObj | undefined;
-    if (cached && typeof cached === "object") {
-      panel.hidden = false;
-      panel.innerHTML = formatPrepPayloadHtml(cached);
-      btn.textContent = "Refresh prep";
-    }
-
-    btn.addEventListener("click", async () => {
-      const thread = threadsById.get(entry.thread.threadId);
-      if (!thread) {
-        panel.hidden = false;
-        panel.innerHTML = `<p class="meeting-prep-error">Thread not found in loaded bundle.</p>`;
-        return;
-      }
-      btn.disabled = true;
-      panel.hidden = false;
-      panel.innerHTML = `<p class="meeting-prep-loading">Preparing from email thread…</p>`;
-      try {
-        const payload = await requestMeetingPrep(thread, entry.meeting, entry.thread.label);
-        const prep = prepFieldsFromPayload(payload);
-        panel.innerHTML = formatPrepPayloadHtml(prep);
-        meetingPreps[cacheKey] = prep;
-        onPrepSaved?.(cacheKey, prep);
-        btn.textContent = "Refresh prep";
-      } catch (e) {
-        panel.innerHTML = `<p class="meeting-prep-error">${escapeHtml(e instanceof Error ? e.message : String(e))}</p>`;
-      } finally {
-        btn.disabled = false;
-      }
-    });
-  }
 }
 
 export async function refreshDashboard(
@@ -395,21 +238,20 @@ export async function refreshDashboard(
         ? `${upcoming.length} meeting${upcoming.length === 1 ? "" : "s"} in the next ${days} days (${tz}).`
         : `${upcoming.length} meeting${upcoming.length === 1 ? "" : "s"} in the next ${days} days (${tz}); ${linkedCount} linked to threads.`;
 
+  const threadsById = new Map(tracking.map((t) => [t.id, t]));
+  bindMeetingPrepInteractions();
+  configureMeetingPrep({
+    meetingPreps: opts.meetingPreps,
+    onMeetingPrepSaved: opts.onMeetingPrepSaved,
+    getThreadsById: () => threadsById,
+    timezone: tz,
+  });
+  clearMeetingPrepContexts();
   opts.meetingsAgendaEl.innerHTML = renderDashboardAgendaHtml(
     upcoming,
     matchByKey,
-    matchedForPrep,
     tz,
     days,
-  );
-  const threadsById = new Map(tracking.map((t) => [t.id, t]));
-  const meetingPreps = opts.meetingPreps && typeof opts.meetingPreps === "object" ? opts.meetingPreps : {};
-  bindMeetingPrepHandlers(
-    opts.meetingsAgendaEl,
-    matchedForPrep,
-    threadsById,
-    meetingPreps,
-    opts.onMeetingPrepSaved,
   );
 
   return {

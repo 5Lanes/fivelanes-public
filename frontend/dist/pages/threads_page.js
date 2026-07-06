@@ -268,7 +268,8 @@ function buildThreadCard(thread) {
     art.innerHTML =
         `<div class="card-top"><time datetime="${escapeHtml(dt)}">${formatDate(dt)}</time>${tone ? `<span class="tone ${toneClass(tone)}">${escapeHtml(tone)}</span>` : ""}<span class="count-pill">${nMsg} msg${nMsg > 1 ? " (thread)" : ""}</span>${pendingMessagePillHtml(pendingCount)}${channelPill}` +
             `<div class="card-actions">` +
-            `<a href="/dashboard?thread=${encodeURIComponent(thread.id)}#schedule-plans" class="create-plan-link">Create a plan</a>` +
+            `<button type="button" class="create-plan-btn" data-add-plan-thread-id="${escapeHtml(thread.id)}">Create a plan</button>` +
+            `<button type="button" class="add-to-lane-btn" data-add-to-lane-thread-id="${escapeHtml(thread.id)}">Add to Lane</button>` +
             `<button type="button" class="thread-refresh-summary-btn" data-refresh-thread-id="${escapeHtml(thread.id)}">Refresh summary</button>` +
             `<button type="button" class="draft-reply-toggle" data-draft-thread-id="${escapeHtml(thread.id)}">Draft reply</button>` +
             `<button type="button" class="snooze-btn" data-snooze-thread-id="${escapeHtml(thread.id)}">${Number(s.snoozed || 0) === 1 ? "Unsnooze" : "Snooze"}</button>` +
@@ -783,6 +784,41 @@ export function bindThreadsInteractions() {
             return;
         if (!document.getElementById("page-root")?.contains(target))
             return;
+        const addPlanBtn = target.closest("button.create-plan-btn");
+        if (addPlanBtn) {
+            const threadId = str(addPlanBtn.dataset.addPlanThreadId);
+            if (!threadId)
+                return;
+            void (async () => {
+                const { openDashboardAddPlanForThread } = await import("./dashboard_page.js");
+                await openDashboardAddPlanForThread(threadId);
+                const url = new URL(location.href);
+                url.pathname = "/dashboard";
+                url.searchParams.set("thread", threadId);
+                url.hash = "schedule-plans";
+                history.pushState(null, "", `${url.pathname}${url.search}${url.hash}`);
+                const el = document.getElementById(`thread-${threadId}`);
+                el?.scrollIntoView({ behavior: "smooth", block: "start" });
+                el?.classList.add("is-focused");
+                if (el)
+                    setTimeout(() => el.classList.remove("is-focused"), 2000);
+            })();
+            return;
+        }
+        const addLaneBtn = target.closest("button.add-to-lane-btn");
+        if (addLaneBtn) {
+            const threadId = str(addLaneBtn.dataset.addToLaneThreadId);
+            if (!threadId)
+                return;
+            const thread = getCurrentThreads().find((t) => t.id === threadId);
+            if (!thread)
+                return;
+            void (async () => {
+                const { openAddToLaneModal } = await import("../add_to_lane_ui.js");
+                openAddToLaneModal(thread);
+            })();
+            return;
+        }
         const draftToggle = target.closest("button.draft-reply-toggle");
         if (draftToggle) {
             const card = draftToggle.closest("article.card");

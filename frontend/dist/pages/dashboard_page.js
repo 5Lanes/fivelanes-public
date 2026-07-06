@@ -20,9 +20,7 @@ export async function applyDashboardLocationHash() {
         return;
     }
     if (hash === "schedule-plans") {
-        const { showScheduleTab } = await import("../dashboard_schedule_rail.js");
-        showScheduleTab("plans");
-        document.getElementById("dashboard-schedule-rail")?.scrollIntoView({ behavior: "smooth" });
+        await openDashboardAddPlanForThread(new URLSearchParams(location.search).get("thread")?.trim() ?? "");
         return;
     }
     if (hash === "lanes") {
@@ -54,6 +52,13 @@ export async function renderDashboardPage() {
     refreshPlanNotifications();
     focusDashboardThreadFromQuery();
     await applyDashboardLocationHash();
+}
+export async function openDashboardAddPlanForThread(threadId = "") {
+    const { showScheduleTab, showScheduleAddPlanForm } = await import("../dashboard_schedule_rail.js");
+    showScheduleTab("plans");
+    if (threadId)
+        showScheduleAddPlanForm(threadId);
+    document.getElementById("dashboard-schedule-rail")?.scrollIntoView({ behavior: "smooth" });
 }
 export function focusDashboardThreadFromQuery() {
     const params = new URLSearchParams(location.search);

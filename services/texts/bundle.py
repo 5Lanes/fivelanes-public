@@ -10,7 +10,11 @@ from services.texts.format import (
     load_messages_for_key,
     rows_for_thread,
 )
-from services.texts.tracking import fetch_tracked_conversation_keys, text_inbox_thread_id
+from services.texts.tracking import (
+    fetch_tracked_conversation_keys,
+    fetch_visible_conversation_keys,
+    text_inbox_thread_id,
+)
 from services.thread_snooze import snooze_map
 
 
@@ -46,10 +50,11 @@ def append_unsynced_text_threads_to_bundle(db_path: str, bundle: Dict[str, Any])
     When a rolling on-disk export gains messages, only the new rows are appended;
     older persisted history is never dropped for tracked threads.
     """
-    keys = fetch_tracked_conversation_keys(db_path)
+    keys = fetch_visible_conversation_keys(db_path)
     if not keys:
         return
 
+    sync_keys = set(fetch_tracked_conversation_keys(db_path))
     snooze_by_thread = snooze_map(db_path)
 
     cleaned: List[Dict[str, Any]] = list(bundle.get("cleaned") or [])
@@ -65,6 +70,8 @@ def append_unsynced_text_threads_to_bundle(db_path: str, bundle: Dict[str, Any])
         file_fp = _file_fingerprint(messages)
         new_in_file = file_fp - bundle_fp
         if not new_in_file:
+            continue
+        if key not in sync_keys and bundle_fp:
             continue
 
         snoozed = snooze_by_thread.get(thread_id, 0)

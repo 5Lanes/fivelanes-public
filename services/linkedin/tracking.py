@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Set
@@ -16,33 +15,9 @@ LINKEDIN_THREAD_PREFIX = "linkedin:"
 LINKEDIN_KIND = "linkedin"
 LINKEDIN_PAUSED_KIND = "linkedin_paused"
 
-_DEBUG_LOG_PATH = "/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-5d5b20.log"
-
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-
-
-def _debug_log(location: str, message: str, data: Dict[str, Any], hypothesis_id: str) -> None:
-    # #region agent log
-    try:
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as handle:
-            handle.write(
-                json.dumps(
-                    {
-                        "sessionId": "5d5b20",
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
-                        "hypothesisId": hypothesis_id,
-                    }
-                )
-                + "\n"
-            )
-    except OSError:
-        pass
-    # #endregion
 
 
 def linkedin_inbox_thread_id(conversation_key: str) -> str:
@@ -83,9 +58,9 @@ def _is_sync_linkedin_row(row: Dict[str, Any]) -> bool:
 
 def fetch_visible_conversation_keys(db_path: str) -> List[str]:
     """All LinkedIn threads still shown on the dashboard (syncing or paused)."""
-    from utils.database import fetch_thread_tracking_rows
+    from utils.database import fetch_thread_tracking_rows, load_lane_thread_memberships
 
-    out: List[str] = []
+    out: Set[str] = set()
     for row in fetch_thread_tracking_rows(db_path):
         if is_removed(row.get("snoozed")):
             continue
@@ -93,8 +68,13 @@ def fetch_visible_conversation_keys(db_path: str) -> List[str]:
             continue
         key = parse_linkedin_inbox_thread_id(str(row.get("inbox_thread_id") or ""))
         if key:
-            out.append(key)
-    return sorted(set(out))
+            out.add(key)
+    for thread_ids in load_lane_thread_memberships(db_path).values():
+        for tid in thread_ids:
+            key = parse_linkedin_inbox_thread_id(tid)
+            if key:
+                out.add(key)
+    return sorted(out)
 
 
 def fetch_tracked_conversation_keys(db_path: str) -> List[str]:
@@ -177,21 +157,7 @@ def set_tracked_conversation_keys(
         )
         paused += 1
 
-    applied = upsert_thread_tracking(db_path, upsert_rows) if upsert_rows else 0
-
-    # #region agent log
-    _debug_log(
-        "tracking.py:set_tracked_conversation_keys",
-        "linkedin tracking saved",
-        {
-            "desiredCount": len(desired),
-            "pausedCount": paused,
-            "syncKeys": sorted(desired),
-            "visibleKeys": fetch_visible_conversation_keys(db_path),
-        },
-        "H1",
-    )
-    # #endregion
+    applied = upsert_thread_tracking(db_path, upsert_rows, apply_snooze=True) if upsert_rows else 0
 
     return {
         "ok": True,

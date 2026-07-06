@@ -16,6 +16,14 @@ export function pendingMessageCountForThread(thread, data) {
     const n = Number(counts[thread.id] || 0);
     return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
+export function newSinceRefreshCountForThread(thread, data) {
+    if (!data || !data.new_since_refresh_counts || typeof data.new_since_refresh_counts !== "object") {
+        return 0;
+    }
+    const counts = data.new_since_refresh_counts;
+    const n = Number(counts[thread.id] || 0);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
 export function pendingMessagePillHtml(count) {
     if (count <= 0)
         return "";

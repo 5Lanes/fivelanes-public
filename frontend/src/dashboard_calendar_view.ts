@@ -28,7 +28,13 @@ import {
 } from "./shared/time_ui.js";
 import { getCurrentData, getCurrentThreads, threadTrackPath } from "./shared/summaries_store.js";
 import type { LooseObj, ThreadView } from "./shared/types.js";
-import { escapeHtml, threadPageHref } from "./shared/utils.js";
+import {
+  bindMeetingPrepInteractions,
+  clearMeetingPrepContexts,
+  configureMeetingPrep,
+  meetingPrepLinkHtml,
+} from "./meeting_prep_ui.js";
+import { escapeHtml } from "./shared/utils.js";
 
 export type CalendarDisplayMode = "all" | "open" | "meetings";
 
@@ -124,9 +130,9 @@ function meetingRowHtml(
   const trackPath = thread ? threadTrackPath(data, thread.threadId) : null;
   let trackHtml = "";
   if (trackPath && thread) {
-    trackHtml = `<a class="meet-track-link" href="${escapeHtml(threadPageHref(thread.threadId))}">${escapeHtml(trackPath)}</a>`;
+    trackHtml = meetingPrepLinkHtml(trackPath, meeting, thread);
   } else if (thread) {
-    trackHtml = `<a class="meet-track-link" href="${escapeHtml(threadPageHref(thread.threadId))}">${escapeHtml(thread.label)}</a>`;
+    trackHtml = meetingPrepLinkHtml(thread.label, meeting, thread);
   } else if (meeting.location) {
     trackHtml = `<span class="meet-track-link meet-track-link--muted">${escapeHtml(meeting.location)}</span>`;
   }
@@ -301,6 +307,7 @@ export function bindDashboardCalendarInteractions(): void {
   if (calendarBound) return;
   calendarBound = true;
   displayMode = loadDisplayMode();
+  bindMeetingPrepInteractions();
 
   document.addEventListener("click", (ev) => {
     const target = ev.target as HTMLElement;
@@ -346,7 +353,10 @@ export function bindDashboardCalendarInteractions(): void {
   });
 }
 
-export async function refreshDashboardCalendarView(): Promise<void> {
+export async function refreshDashboardCalendarView(opts?: {
+  meetingPreps?: LooseObj;
+  onMeetingPrepSaved?: (cacheKey: string, prep: LooseObj) => void;
+}): Promise<void> {
   const agendaEl = document.getElementById("calendar-agenda");
   if (!agendaEl) return;
 
@@ -376,12 +386,21 @@ export async function refreshDashboardCalendarView(): Promise<void> {
   lastCalendarTz = tz;
   ensureWeekStart(tz);
 
+  const threadsById = new Map(threads.map((t) => [t.id, t]));
+  configureMeetingPrep({
+    meetingPreps: opts?.meetingPreps,
+    onMeetingPrepSaved: opts?.onMeetingPrepSaved,
+    getThreadsById: () => threadsById,
+    timezone: tz,
+  });
+
   const matchByKey = new Map<string, ThreadMatchContext>();
   for (const meeting of meetings) {
     const thread = findMatchingThread(meeting.attendees, contexts);
     if (thread) matchByKey.set(meetingDedupeKey(meeting), thread);
   }
 
+  clearMeetingPrepContexts();
   agendaEl.innerHTML = renderAgendaHtml(tz, availability, meetings, matchByKey);
   renderWeekStrip(tz);
   applyCalendarFilters();

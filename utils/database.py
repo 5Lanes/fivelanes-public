@@ -1827,9 +1827,17 @@ def prune_timeline_entries_for_thread(
         return int(cur.rowcount or 0)
 
 
-def upsert_thread_tracking(db_path: str, rows: List[Dict[str, Any]]) -> int:
+def upsert_thread_tracking(
+    db_path: str, rows: List[Dict[str, Any]], *, apply_snooze: bool = False
+) -> int:
     """
     Insert or update rows in ``thread_tracking`` by ``inbox_thread_id``.
+
+    When ``apply_snooze`` is True (setup-page tracking APIs), ``snoozed`` and
+    ``inbox_delivery_kind`` from ``rows`` replace persisted values, including
+    re-activating rows previously removed (``snoozed`` = 2).
+
+    When False (email inbox refresh), persisted snooze/removal state is kept.
 
     Returns the number of rows applied (inserts + updates).
     """
@@ -1839,14 +1847,30 @@ def upsert_thread_tracking(db_path: str, rows: List[Dict[str, Any]]) -> int:
     with connect_sqlite(db_file) as conn:
         _ensure_thread_tracking_schema(conn)
         if deduped_rows:
-            conn.executemany(
+            conflict_sql = (
                 """
-                INSERT INTO thread_tracking (
-                    inbox_thread_id, gmail_inbox_thread_id, source_email, snoozed,
-                    inner_rfc_message_id, resolved_oauth_account_id, resolution_error,
-                    inbox_delivery_kind, created_at, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(inbox_thread_id) DO UPDATE SET
+                    gmail_inbox_thread_id = COALESCE(
+                        NULLIF(excluded.gmail_inbox_thread_id, ''),
+                        thread_tracking.gmail_inbox_thread_id
+                    ),
+                    source_email = excluded.source_email,
+                    snoozed = excluded.snoozed,
+                    has_plan = COALESCE(thread_tracking.has_plan, 0),
+                    inner_rfc_message_id = COALESCE(
+                        NULLIF(excluded.inner_rfc_message_id, ''),
+                        thread_tracking.inner_rfc_message_id
+                    ),
+                    resolved_oauth_account_id = COALESCE(
+                        NULLIF(excluded.resolved_oauth_account_id, ''),
+                        thread_tracking.resolved_oauth_account_id
+                    ),
+                    resolution_error = excluded.resolution_error,
+                    inbox_delivery_kind = excluded.inbox_delivery_kind,
+                    updated_at = excluded.updated_at
+                """
+                if apply_snooze
+                else """
                 ON CONFLICT(inbox_thread_id) DO UPDATE SET
                     gmail_inbox_thread_id = COALESCE(
                         NULLIF(excluded.gmail_inbox_thread_id, ''),
@@ -1872,6 +1896,17 @@ def upsert_thread_tracking(db_path: str, rows: List[Dict[str, Any]]) -> int:
                     ),
                     updated_at = excluded.updated_at
                 WHERE thread_tracking.snoozed != 2
+                """
+            )
+            conn.executemany(
+                f"""
+                INSERT INTO thread_tracking (
+                    inbox_thread_id, gmail_inbox_thread_id, source_email, snoozed,
+                    inner_rfc_message_id, resolved_oauth_account_id, resolution_error,
+                    inbox_delivery_kind, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                {conflict_sql}
                 """,
                 [
                     (
@@ -2773,22 +2808,43 @@ def load_all_thread_draft_replies(db_path: str) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def _pipeline_last_completed_iso() -> str:
+    """ISO timestamp of the last successful pipeline refresh (empty when unknown)."""
+    from utils.pipeline_run_log import load_last_pipeline_run
+
+    last = load_last_pipeline_run()
+    if not last:
+        return ""
+    since = last.get("last_completed_at")
+    if since:
+        return _normalize_field(since)
+    if last.get("ok") is True:
+        return _normalize_field(last.get("finished_at"))
+    return ""
+
+
 def pending_message_counts_by_thread(
     db_path: str,
     *,
     lookback_days: int | None = None,
+    since_iso: str | None = None,
 ) -> Dict[str, int]:
     """
     Per ``thread_id``, count messages not yet in successful ``claude_message_outputs``.
 
     Email: ``timeline_entries`` rows within lookback missing a successful output row.
     Text: on-disk conversation messages missing a successful output row.
+    Meet: imported recordings missing a successful output row.
+
+    When ``since_iso`` is set, only messages strictly after that timestamp are counted
+    (used for dashboard "new since refresh").
     """
     from utils.lookback_config import get_lookback_days
 
     days = get_lookback_days() if lookback_days is None else lookback_days
     cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, days))
     cutoff_iso = cutoff.isoformat()
+    refresh_since = _normalize_field(since_iso or "")
     successful: set[tuple[str, str]] = set()
     try:
         with connect_sqlite(db_path) as conn:
@@ -2810,8 +2866,7 @@ def pending_message_counts_by_thread(
     counts: Dict[str, int] = {}
     try:
         with connect_sqlite(db_path) as conn:
-            for tid, sid in conn.execute(
-                """
+            timeline_sql = """
                 SELECT COALESCE(thread_id, ''), source_id
                 FROM timeline_entries
                 WHERE (
@@ -2820,9 +2875,12 @@ def pending_message_counts_by_thread(
                 )
                   AND datetime >= ?
                   AND COALESCE(TRIM(source_id), '') != ''
-                """,
-                (cutoff_iso,),
-            ).fetchall():
+            """
+            timeline_params: List[Any] = [cutoff_iso]
+            if refresh_since:
+                timeline_sql += " AND datetime > ?"
+                timeline_params.append(refresh_since)
+            for tid, sid in conn.execute(timeline_sql, timeline_params).fetchall():
                 thread_id = _normalize_field(tid)
                 source_id = _normalize_field(sid)
                 if not thread_id or not source_id:
@@ -2845,6 +2903,10 @@ def pending_message_counts_by_thread(
                 sid = message_source_id(msg)
                 if not sid:
                     continue
+                if refresh_since:
+                    msg_dt = _normalize_field(msg.get("date") or msg.get("datetime"))
+                    if not msg_dt or msg_dt <= refresh_since:
+                        continue
                 if (thread_id, sid) not in successful:
                     pending += 1
             if pending:
@@ -2863,6 +2925,12 @@ def pending_message_counts_by_thread(
             note = load_imported_note(key)
             if not note or not str(note.get("body") or "").strip():
                 continue
+            if refresh_since:
+                note_ts = _normalize_field(
+                    note.get("imported_at") or note.get("datetime") or ""
+                )
+                if not note_ts or note_ts <= refresh_since:
+                    continue
             thread_id = meet_inbox_thread_id(key)
             sid = f"docs:{key}"
             if (thread_id, sid) not in successful:
@@ -2871,6 +2939,22 @@ def pending_message_counts_by_thread(
         pass
 
     return {tid: n for tid, n in counts.items() if n > 0}
+
+
+def new_since_refresh_counts_by_thread(
+    db_path: str,
+    *,
+    lookback_days: int | None = None,
+) -> Dict[str, int]:
+    """Unprocessed messages that arrived after the last successful pipeline refresh."""
+    since = _pipeline_last_completed_iso()
+    if not since:
+        return {}
+    return pending_message_counts_by_thread(
+        db_path,
+        lookback_days=lookback_days,
+        since_iso=since,
+    )
 
 
 def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
@@ -2925,41 +3009,6 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
     tracked_meet_thread_ids = {
         _meet_inbox_thread_id(k) for k in fetch_visible_meet_keys(db_path)
     }
-    # #region agent log
-    try:
-        import json as _json
-        from datetime import datetime as _dt, timezone as _tz
-
-        with open(
-            "/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-5d5b20.log",
-            "a",
-            encoding="utf-8",
-        ) as _dbg:
-            _dbg.write(
-                _json.dumps(
-                    {
-                        "sessionId": "5d5b20",
-                        "location": "database.py:build_summaries_bundle",
-                        "message": "on-disk source bundle visibility",
-                        "data": {
-                            "textSync": len(fetch_tracked_conversation_keys(db_path)),
-                            "textVisible": len(tracked_text_thread_ids),
-                            "slackSync": len(fetch_tracked_slack_keys(db_path)),
-                            "slackVisible": len(tracked_slack_thread_ids),
-                            "linkedinSync": len(fetch_tracked_linkedin_keys(db_path)),
-                            "linkedinVisible": len(tracked_linkedin_thread_ids),
-                            "meetSync": len(fetch_tracked_meet_keys(db_path)),
-                            "meetVisible": len(tracked_meet_thread_ids),
-                        },
-                        "timestamp": int(_dt.now(_tz.utc).timestamp() * 1000),
-                        "hypothesisId": "H1",
-                    }
-                )
-                + "\n"
-            )
-    except OSError:
-        pass
-    # #endregion
     thread_summary_cache = load_all_thread_summaries_map(db_path)
     cleaned_by_thread = load_all_processed_cleaned_by_thread(db_path)
     finalized_by_thread: Dict[str, Dict[str, Any]] = {}
@@ -3071,6 +3120,10 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
     append_unsynced_meet_threads_to_bundle(db_path, bundle)
     append_unsynced_email_threads_to_bundle(db_path, bundle, lookback_days=lookback_days)
     bundle["pending_message_counts"] = pending_message_counts_by_thread(
+        db_path,
+        lookback_days=lookback_days,
+    )
+    bundle["new_since_refresh_counts"] = new_since_refresh_counts_by_thread(
         db_path,
         lookback_days=lookback_days,
     )

@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Set, Tuple
 from services.meet_recordings.config import MEET_RECORDINGS_DIR
 from services.meet_recordings.tracking import (
     fetch_tracked_document_keys,
+    fetch_visible_document_keys,
     load_imported_note,
     meet_inbox_thread_id,
 )
@@ -73,10 +74,11 @@ def append_unsynced_meet_threads_to_bundle(db_path: str, bundle: Dict[str, Any])
     Tracked threads missing from ``claude_message_outputs`` are added from on-disk
     imported notes so every selected recording appears before LLM summarization finishes.
     """
-    keys = fetch_tracked_document_keys(db_path)
+    keys = fetch_visible_document_keys(db_path)
     if not keys:
         return
 
+    sync_keys = set(fetch_tracked_document_keys(db_path))
     snooze_by_thread = snooze_map(db_path)
     cleaned: List[Dict[str, Any]] = list(bundle.get("cleaned") or [])
     summary: List[Dict[str, Any]] = list(bundle.get("summary") or [])
@@ -91,6 +93,8 @@ def append_unsynced_meet_threads_to_bundle(db_path: str, bundle: Dict[str, Any])
         note_fp = _note_fingerprint(note)
         new_in_note = note_fp - bundle_fp
         if not new_in_note:
+            continue
+        if key not in sync_keys and bundle_fp:
             continue
 
         snoozed = snooze_by_thread.get(thread_id, 0)

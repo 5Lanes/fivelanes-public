@@ -58,9 +58,9 @@ def _is_sync_text_row(row: Dict[str, Any]) -> bool:
 
 def fetch_visible_conversation_keys(db_path: str) -> List[str]:
     """All text threads still shown on the dashboard (syncing or paused)."""
-    from utils.database import fetch_thread_tracking_rows
+    from utils.database import fetch_thread_tracking_rows, load_lane_thread_memberships
 
-    out: List[str] = []
+    out: Set[str] = set()
     for row in fetch_thread_tracking_rows(db_path):
         if is_removed(row.get("snoozed")):
             continue
@@ -68,8 +68,13 @@ def fetch_visible_conversation_keys(db_path: str) -> List[str]:
             continue
         key = parse_text_inbox_thread_id(str(row.get("inbox_thread_id") or ""))
         if key:
-            out.append(key)
-    return sorted(set(out))
+            out.add(key)
+    for thread_ids in load_lane_thread_memberships(db_path).values():
+        for tid in thread_ids:
+            key = parse_text_inbox_thread_id(tid)
+            if key:
+                out.add(key)
+    return sorted(out)
 
 
 def fetch_tracked_conversation_keys(db_path: str) -> List[str]:
@@ -152,7 +157,7 @@ def set_tracked_conversation_keys(
         )
         paused += 1
 
-    applied = upsert_thread_tracking(db_path, upsert_rows) if upsert_rows else 0
+    applied = upsert_thread_tracking(db_path, upsert_rows, apply_snooze=True) if upsert_rows else 0
 
     return {
         "ok": True,

@@ -2,6 +2,7 @@ import { bindPipelineControls } from "./pipeline_controls.js";
 import { bindSettingsPanel, mountSettingsDialog } from "./settings_panel.js";
 import { MEETINGS_LOOKAHEAD_DAYS, prefetchMeetings } from "./meetings_panel.js";
 import {
+  applyDashboardLocationHash,
   bindDashboardInteractions,
   mountDashboardPage,
   renderDashboardPage,
@@ -271,6 +272,12 @@ async function bootstrap(): Promise<void> {
 
     refreshPlanNotifications();
     void refreshPipelineRunMeta(runMetaEl);
+
+    window.addEventListener("hashchange", () => {
+      if (routeFromPathname(location.pathname) === "dashboard") {
+        void applyDashboardLocationHash();
+      }
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("Data load failed:", err);

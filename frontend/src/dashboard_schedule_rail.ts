@@ -39,6 +39,8 @@ type LooseThread = ThreadView;
 
 let scheduleView: "calendar" | "plans" = "calendar";
 let scheduleBound = false;
+let scheduleMeetingPreps: LooseObj = {};
+let scheduleOnMeetingPrepSaved: ((cacheKey: string, prep: LooseObj) => void) | undefined;
 
 function trackingThreads(): LooseThread[] {
   const { active, snoozed } = partitionThreadsBySnooze(getCurrentThreads());
@@ -130,13 +132,28 @@ function renderPlansRail(): void {
   list.innerHTML = plans.map((p) => planRailCardHtml(p, data)).join("");
 }
 
-function populateSchedulePlanThreadSelect(): void {
+function populateSchedulePlanThreadSelect(selectedId = ""): void {
   const select = document.getElementById("schedule-plan-thread-select") as HTMLSelectElement | null;
   if (!select) return;
-  const threads = trackingThreads();
+  let threads = trackingThreads();
+  if (selectedId && !threads.some((t) => t.id === selectedId)) {
+    const extra = getCurrentThreads().find((t) => t.id === selectedId);
+    if (extra) threads = [extra, ...threads];
+  }
   select.innerHTML = threads.length
-    ? threads.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(threadLabel(t))}</option>`).join("")
+    ? threads
+        .map(
+          (t) =>
+            `<option value="${escapeHtml(t.id)}"${t.id === selectedId ? " selected" : ""}>${escapeHtml(threadLabel(t))}</option>`,
+        )
+        .join("")
     : `<option value="">No threads</option>`;
+}
+
+export function showScheduleAddPlanForm(selectedThreadId = ""): void {
+  document.getElementById("schedule-add-plan-form")?.removeAttribute("hidden");
+  populateSchedulePlanThreadSelect(selectedThreadId);
+  document.getElementById("schedule-plan-action-input")?.focus();
 }
 
 function bindScheduleRailInteractions(rail: HTMLElement): void {
@@ -155,8 +172,7 @@ function bindScheduleRailInteractions(rail: HTMLElement): void {
       return;
     }
     if (target.closest("#schedule-add-plan-btn")) {
-      document.getElementById("schedule-add-plan-form")?.removeAttribute("hidden");
-      populateSchedulePlanThreadSelect();
+      showScheduleAddPlanForm();
       return;
     }
     if (target.closest("#schedule-add-plan-cancel")) {
@@ -227,7 +243,10 @@ async function rerenderScheduleRail(): Promise<void> {
     renderPlansRail();
     return;
   }
-  await refreshDashboardCalendarView();
+  await refreshDashboardCalendarView({
+    meetingPreps: scheduleMeetingPreps,
+    onMeetingPrepSaved: scheduleOnMeetingPrepSaved,
+  });
 }
 
 export async function refreshDashboardScheduleRail(
@@ -241,7 +260,8 @@ export async function refreshDashboardScheduleRail(
   const rail = document.getElementById("dashboard-schedule-rail");
   if (!rail) return;
   ensureRailShell(rail);
+  scheduleMeetingPreps = opts.meetingPreps && typeof opts.meetingPreps === "object" ? opts.meetingPreps : {};
+  scheduleOnMeetingPrepSaved = opts.onMeetingPrepSaved;
   void threads;
-  void opts;
   await rerenderScheduleRail();
 }

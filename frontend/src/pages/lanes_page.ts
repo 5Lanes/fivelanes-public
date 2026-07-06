@@ -318,27 +318,6 @@ function laneCardHtml(
       const thread = getCurrentThreads().find((t) => t.id === tid);
       const label = escapeHtml(thread ? threadEmailSubject(thread) : tid);
       const pill = thread ? sourcePillHtml(threadChannelForThread(thread)) : "";
-      // #region agent log
-      if (tid.startsWith("linkedin:")) {
-        fetch("http://localhost:7268/ingest/d851e417-32b1-446f-b903-fefbca196cd9", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "5d5b20" },
-          body: JSON.stringify({
-            sessionId: "5d5b20",
-            location: "lanes_page.ts:laneCardHtml",
-            message: "linkedin lane thread label",
-            data: {
-              threadId: tid,
-              foundInBundle: Boolean(thread),
-              label: thread ? threadEmailSubject(thread) : tid,
-              hasPill: Boolean(pill),
-            },
-            timestamp: Date.now(),
-            hypothesisId: "H2",
-          }),
-        }).catch(() => {});
-      }
-      // #endregion
       if (opts.linkThreads && thread) {
         return `<li><a class="lane-thread-link" href="${escapeHtml(threadPageHref(tid))}">${pill}${label}</a></li>`;
       }

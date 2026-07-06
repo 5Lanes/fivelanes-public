@@ -12,6 +12,7 @@ from services.linkedin.format import (
 )
 from services.linkedin.tracking import (
     fetch_tracked_conversation_keys,
+    fetch_visible_conversation_keys,
     linkedin_inbox_thread_id,
 )
 from services.thread_snooze import snooze_map
@@ -46,10 +47,11 @@ def append_unsynced_linkedin_threads_to_bundle(db_path: str, bundle: Dict[str, A
     Tracked threads missing from ``claude_message_outputs`` are added wholesale.
     When the CSV export gains messages, only the new rows are appended.
     """
-    keys = fetch_tracked_conversation_keys(db_path)
+    keys = fetch_visible_conversation_keys(db_path)
     if not keys:
         return
 
+    sync_keys = set(fetch_tracked_conversation_keys(db_path))
     snooze_by_thread = snooze_map(db_path)
 
     cleaned: List[Dict[str, Any]] = list(bundle.get("cleaned") or [])
@@ -65,6 +67,8 @@ def append_unsynced_linkedin_threads_to_bundle(db_path: str, bundle: Dict[str, A
         file_fp = _file_fingerprint(messages)
         new_in_file = file_fp - bundle_fp
         if not new_in_file:
+            continue
+        if key not in sync_keys and bundle_fp:
             continue
 
         snoozed = snooze_by_thread.get(thread_id, 0)

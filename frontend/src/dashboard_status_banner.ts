@@ -8,7 +8,7 @@ import {
   threadTrackPath,
 } from "./shared/summaries_store.js";
 import {
-  pendingMessageCountForThread,
+  newSinceRefreshCountForThread,
   threadLabel,
 } from "./shared/thread_domain.js";
 import { sourcePillHtml, threadChannelForThread } from "./shared/source_ui.js";
@@ -23,7 +23,7 @@ function pendingSinceRefreshCount(): number {
   if (!data) return 0;
   let total = 0;
   for (const thread of getCurrentThreads()) {
-    total += pendingMessageCountForThread(thread, data);
+    total += newSinceRefreshCountForThread(thread, data);
   }
   return total;
 }
@@ -89,7 +89,7 @@ export async function refreshDashboardStatusBanner(): Promise<void> {
     .join("");
 
   const newThreads = getCurrentThreads()
-    .filter((t) => pendingMessageCountForThread(t, data) > 0)
+    .filter((t) => newSinceRefreshCountForThread(t, data) > 0)
     .slice(0, 6)
     .map((t) => {
       const ch = threadChannelForThread(t);

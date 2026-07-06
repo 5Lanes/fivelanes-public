@@ -112,6 +112,9 @@ export function normalizeBundle(data: LooseObj): LooseObj {
   if (!data.pending_message_counts || typeof data.pending_message_counts !== "object") {
     data.pending_message_counts = {};
   }
+  if (!data.new_since_refresh_counts || typeof data.new_since_refresh_counts !== "object") {
+    data.new_since_refresh_counts = {};
+  }
   if (typeof data.source_account !== "string") data.source_account = "";
   return data;
 }
@@ -265,6 +268,15 @@ export function applyLaneAreaAssigned(laneId: number, areaId: number | null): vo
       row.area_id = areaId;
       return;
     }
+  }
+}
+
+export function applyLaneAreaCreated(area: LaneAreaView): void {
+  if (!currentData) return;
+  const areas = Array.isArray(currentData.lane_areas) ? (currentData.lane_areas as LooseObj[]) : [];
+  if (!areas.some((row) => Number(row.id) === area.id)) {
+    areas.push({ ...area });
+    currentData.lane_areas = areas;
   }
 }
 
