@@ -22,13 +22,7 @@ const PAGE_HTML = `
     </p>
   </header>
 
-  <section class="texts-setup-card" aria-labelledby="meet-pull-heading">
-    <h3 id="meet-pull-heading">Pull from Google Drive</h3>
-    <p class="texts-setup-hint">
-      Uses connected Google OAuth accounts. Enable
-      <strong>Google Drive API</strong> and <strong>Google Docs API</strong> in the same
-      Cloud project as <code>credentials.json</code>, then re-authorize if needed.
-    </p>
+  <section class="texts-setup-card">
     <div class="texts-setup-actions">
       <button type="button" class="texts-save-tracked-btn" id="meet-pull-btn">Pull doc names</button>
     </div>
@@ -37,7 +31,6 @@ const PAGE_HTML = `
 
   <section class="texts-setup-card" aria-labelledby="meet-select-heading">
     <h3 id="meet-select-heading">Choose recordings to import</h3>
-    <p class="texts-setup-hint" id="meet-dir-hint"></p>
     <div class="texts-conversation-toolbar">
       <button type="button" class="texts-select-all-btn" id="meet-select-all-btn">Select all</button>
       <button type="button" class="texts-select-none-btn" id="meet-select-none-btn">Select none</button>
@@ -149,10 +142,6 @@ async function fetchCatalog(): Promise<void> {
   };
   if (!res.ok) {
     throw new Error(data.error || `HTTP ${res.status}`);
-  }
-  const hint = document.getElementById("meet-dir-hint");
-  if (hint && data.meet_recordings_dir) {
-    hint.textContent = `Catalog in ${data.meet_recordings_dir}`;
   }
   catalogRows = Array.isArray(data.catalog) ? data.catalog : [];
   trackedKeys = new Set(Array.isArray(data.tracked) ? data.tracked : []);

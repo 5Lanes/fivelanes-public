@@ -10,11 +10,8 @@ const PAGE_HTML = `
     </p>
   </header>
 
-  <section class="texts-setup-card" aria-labelledby="linkedin-pull-heading">
-    <h3 id="linkedin-pull-heading">Pull from LinkedIn</h3>
+  <section class="texts-setup-card">
     <p class="texts-setup-hint">
-      Runs the Playwright scraper for your <strong>tracked</strong> conversations only
-      (saved below), then merges new messages into <code>linkedin-messages/messages.csv</code>.
       Pull is manual — the scheduled pipeline only summarizes existing messages.
     </p>
     <div class="texts-setup-actions">
@@ -25,7 +22,6 @@ const PAGE_HTML = `
 
   <section class="texts-setup-card" aria-labelledby="linkedin-select-heading">
     <h3 id="linkedin-select-heading">Choose threads to track</h3>
-    <p class="texts-setup-hint" id="linkedin-dir-hint"></p>
     <div class="texts-conversation-toolbar">
       <button type="button" class="texts-select-all-btn" id="linkedin-select-all-btn">Select all</button>
       <button type="button" class="texts-select-none-btn" id="linkedin-select-none-btn">Select none</button>
@@ -109,10 +105,6 @@ async function fetchCatalog() {
     const data = (await res.json());
     if (!res.ok) {
         throw new Error(data.error || `HTTP ${res.status}`);
-    }
-    const hint = document.getElementById("linkedin-dir-hint");
-    if (hint && data.linkedin_messages_dir) {
-        hint.textContent = `Reading from ${data.linkedin_messages_dir}`;
     }
     catalogRows = Array.isArray(data.catalog) ? data.catalog : [];
     trackedKeys = new Set(Array.isArray(data.tracked) ? data.tracked : []);

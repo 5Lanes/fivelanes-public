@@ -111,6 +111,7 @@ def main(
     except Exception:
         pass
     # #endregion
+    meet_result: Dict[str, Any] = {}
     try:
         from utils.features import is_enabled
 
@@ -141,8 +142,59 @@ def main(
                 linkedin_result.get("summarized", 0),
                 linkedin_result.get("skipped", 0),
             )
+        if is_enabled("meet_recordings"):
+            from services.meet_recordings.summarize import summarize_tracked_meet_recordings
+
+            meet_result = summarize_tracked_meet_recordings(DATABASE_NAME)
+            log.info(
+                "Meet recording summaries: %d updated, %d skipped",
+                meet_result.get("summarized", 0),
+                meet_result.get("skipped", 0),
+            )
     except Exception as exc:
-        log.warning("Text/Slack/LinkedIn thread summarization skipped: %s", exc)
+        log.warning("Channel thread summarization skipped: %s", exc)
+    # #region agent log
+    try:
+        import json as _json
+        import time as _time
+
+        from utils.database import pending_message_counts_by_thread
+        from utils.features import is_enabled as _is_enabled
+
+        _pending = pending_message_counts_by_thread(DATABASE_NAME)
+        _meet_enabled = _is_enabled("meet_recordings")
+        _meet_ran = bool(meet_result)
+        with open(
+            "/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-0ddb00.log",
+            "a",
+            encoding="utf-8",
+        ) as _df:
+            _df.write(
+                _json.dumps(
+                    {
+                        "sessionId": "0ddb00",
+                        "runId": "post-fix",
+                        "hypothesisId": "A",
+                        "location": "fivelanes.py:main",
+                        "message": "post_channel_summarize",
+                        "data": {
+                            "meet_recordings_in_pipeline": _meet_ran,
+                            "meet_recordings_feature_enabled": _meet_enabled,
+                            "meet_summarized": meet_result.get("summarized", 0)
+                            if _meet_ran
+                            else 0,
+                            "meet_skipped": meet_result.get("skipped", 0) if _meet_ran else 0,
+                            "pending_thread_count": len(_pending),
+                            "pending_threads": dict(list(_pending.items())[:8]),
+                        },
+                        "timestamp": int(_time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
     if (os.getenv("FIVELANES_RETRY_FAILED") or "1").strip().lower() not in (
         "0",
         "false",

@@ -20,9 +20,7 @@ const PAGE_HTML = `
     </p>
   </header>
 
-  <section class="texts-setup-card" aria-labelledby="slack-pull-heading">
-    <h3 id="slack-pull-heading">Pull from Slack</h3>
-    <p class="texts-setup-hint">Uses <code>SLACK_USER_TOKEN</code> from your data <code>.env</code>.</p>
+  <section class="texts-setup-card">
     <div class="texts-setup-actions">
       <button type="button" class="texts-save-tracked-btn" id="slack-pull-btn">Pull DMs from Slack</button>
     </div>
@@ -31,7 +29,6 @@ const PAGE_HTML = `
 
   <section class="texts-setup-card" aria-labelledby="slack-select-heading">
     <h3 id="slack-select-heading">Choose DMs to track</h3>
-    <p class="texts-setup-hint" id="slack-dir-hint"></p>
     <div class="texts-conversation-toolbar">
       <button type="button" class="texts-select-all-btn" id="slack-select-all-btn">Select all</button>
       <button type="button" class="texts-select-none-btn" id="slack-select-none-btn">Select none</button>
@@ -136,10 +133,6 @@ async function fetchCatalog(): Promise<void> {
   };
   if (!res.ok) {
     throw new Error(data.error || `HTTP ${res.status}`);
-  }
-  const hint = document.getElementById("slack-dir-hint");
-  if (hint && data.slack_dms_dir) {
-    hint.textContent = `Reading from ${data.slack_dms_dir}`;
   }
   catalogRows = Array.isArray(data.catalog) ? data.catalog : [];
   trackedKeys = new Set(Array.isArray(data.tracked) ? data.tracked : []);
