@@ -168,6 +168,20 @@ export function threadTrackPath(data: LooseObj | null, threadId: string): string
   return null;
 }
 
+export function threadLaneIds(data: LooseObj | null, threadId: string): number[] {
+  if (!data || !data.lane_threads || typeof data.lane_threads !== "object") return [];
+  const tid = threadId.trim();
+  if (!tid) return [];
+  const memberships = data.lane_threads as LooseObj;
+  const out: number[] = [];
+  for (const [laneKey, ids] of Object.entries(memberships)) {
+    if (!Array.isArray(ids) || !ids.map((id) => str(id)).includes(tid)) continue;
+    const laneId = Number(laneKey) || 0;
+    if (laneId > 0 && !out.includes(laneId)) out.push(laneId);
+  }
+  return out.sort((a, b) => a - b);
+}
+
 export function getLaneThreadIds(data: LooseObj | null, laneId: number): string[] {
   if (!data || !data.lane_threads || typeof data.lane_threads !== "object") return [];
   const bucket = (data.lane_threads as LooseObj)[String(laneId)];

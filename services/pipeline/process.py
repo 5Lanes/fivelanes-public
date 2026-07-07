@@ -40,6 +40,7 @@ from utils.database import (
     load_prior_cleaned_content_by_pair,
     load_processed_cleaned_for_thread,
     load_processed_thread_source_pairs,
+    notify_lane_summaries_for_thread,
     save_claude_run_outputs,
     save_thread_summary_cache,
 )
@@ -401,6 +402,7 @@ def persist_thread_summary(
         generated_at=generated_at,
     )
     if not apply_to_outputs:
+        notify_lane_summaries_for_thread(db_path, thread_id)
         return 0
     return apply_thread_resummary_to_db(
         db_path,

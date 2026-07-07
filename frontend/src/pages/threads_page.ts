@@ -6,8 +6,10 @@ import {
   getCurrentSourceLabel,
   getCurrentThreads,
   setBundle,
+  threadLaneIds,
   threadTrackPath,
 } from "../shared/summaries_store.js";
+import { syncLaneSummaryJobsFromServer } from "./lanes_page.js";
 import {
   counterpartyAvailabilityForSummary,
   counterpartyAvailabilitySectionHtml,
@@ -979,6 +981,9 @@ export function bindThreadsInteractions(): void {
           }
           clearSummariesBundleCache();
           reloadFromStore();
+          if (threadLaneIds(getCurrentData(), threadId).length) {
+            void syncLaneSummaryJobsFromServer();
+          }
         } catch (err) {
           console.error(err);
           refreshBtn.disabled = false;

@@ -820,6 +820,44 @@ def assign_lane_to_area(db_path: str, *, lane_id: int, area_id: Optional[int]) -
     return True
 
 
+def lane_ids_for_thread(db_path: str, inbox_thread_id: str) -> List[int]:
+    """Return lane ids that include ``inbox_thread_id``."""
+    tid = _normalize_field(inbox_thread_id)
+    if not tid:
+        return []
+    db_file = Path(db_path)
+    with connect_sqlite(db_file) as conn:
+        _ensure_lanes_schema(conn)
+        rows = conn.execute(
+            """
+            SELECT DISTINCT lane_id
+            FROM lane_threads
+            WHERE inbox_thread_id = ?
+            ORDER BY lane_id
+            """,
+            (tid,),
+        ).fetchall()
+    out: List[int] = []
+    for row in rows:
+        try:
+            lane_id = int(row[0])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if lane_id > 0:
+            out.append(lane_id)
+    return out
+
+
+def notify_lane_summaries_for_thread(db_path: str, thread_id: str) -> None:
+    """Refresh parent track roll-ups after a child thread summary changes."""
+    try:
+        from utils.lane_summary_jobs import schedule_lane_summaries_for_thread
+
+        schedule_lane_summaries_for_thread(db_path, thread_id, force=True)
+    except Exception:
+        pass
+
+
 def load_lane_thread_memberships(db_path: str) -> Dict[str, List[str]]:
     """Return ``lane_id`` → ordered inbox thread ids."""
     db_file = Path(db_path)
@@ -2742,7 +2780,10 @@ def apply_thread_resummary_to_db(
             (summary_json, generated_at, tid),
         )
         conn.commit()
-        return int(cur.rowcount or 0)
+        updated = int(cur.rowcount or 0)
+    if updated > 0:
+        notify_lane_summaries_for_thread(db_path, tid)
+    return updated
 
 
 def load_latest_claude_output_snapshot_rows(db_path: str) -> List[Dict[str, Any]]:

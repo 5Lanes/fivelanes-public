@@ -168,6 +168,23 @@ export function threadTrackPath(data, threadId) {
     }
     return null;
 }
+export function threadLaneIds(data, threadId) {
+    if (!data || !data.lane_threads || typeof data.lane_threads !== "object")
+        return [];
+    const tid = threadId.trim();
+    if (!tid)
+        return [];
+    const memberships = data.lane_threads;
+    const out = [];
+    for (const [laneKey, ids] of Object.entries(memberships)) {
+        if (!Array.isArray(ids) || !ids.map((id) => str(id)).includes(tid))
+            continue;
+        const laneId = Number(laneKey) || 0;
+        if (laneId > 0 && !out.includes(laneId))
+            out.push(laneId);
+    }
+    return out.sort((a, b) => a - b);
+}
 export function getLaneThreadIds(data, laneId) {
     if (!data || !data.lane_threads || typeof data.lane_threads !== "object")
         return [];

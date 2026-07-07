@@ -1,4 +1,5 @@
-import { applySavedThreadDraft, applyThreadSummary, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, setBundle, threadTrackPath, } from "../shared/summaries_store.js";
+import { applySavedThreadDraft, applyThreadSummary, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, setBundle, threadLaneIds, threadTrackPath, } from "../shared/summaries_store.js";
+import { syncLaneSummaryJobsFromServer } from "./lanes_page.js";
 import { counterpartyAvailabilityForSummary, counterpartyAvailabilitySectionHtml, formatDraftReplyMarkdown, formatChatSenderLabel, latestUpdatesForThread, listSection, ownerNextStepsForThread, messageSourceDetailsHtml, nextStepsSectionHtml, partitionThreadsBySnooze, pendingMessageCountForThread, pendingMessagePillHtml, shouldShowThreadMessageBlocks, threadIsEmail, threadIsLinkedin, threadIsMeetRecording, threadIsSlack, threadIsText, threadLabel, threadMessagesForDisplay, threadMessagesForReply, threadSummaryErrorHtml, threadSummaryForDisplay, } from "../shared/thread_domain.js";
 import { escapeHtml, formatDate, formatRecipients, str, toneClass } from "../shared/utils.js";
 import { applyNavFeatureVisibility, isFeatureEnabled } from "../shared/features.js";
@@ -889,6 +890,9 @@ export function bindThreadsInteractions() {
                     }
                     clearSummariesBundleCache();
                     reloadFromStore();
+                    if (threadLaneIds(getCurrentData(), threadId).length) {
+                        void syncLaneSummaryJobsFromServer();
+                    }
                 }
                 catch (err) {
                     console.error(err);
