@@ -127,6 +127,8 @@ def summarize_one_meet_recording(
 
     stamp = run_stamp or _run_stamp_utc()
     generated_at = _utc_now_iso()
+    summary_err = str(tsumm.get("api_error") or "").strip()
+    cleaned_row = {**cleaned, "api_error": summary_err} if summary_err else cleaned
     per_message = [
         {
             "thread_id": thread_id,
@@ -135,7 +137,7 @@ def summarize_one_meet_recording(
             "cleaned_content": cleaned["cleaned_content"],
             "quoted_reply": "",
             "signature": "",
-            "api_error": "",
+            "api_error": summary_err,
             "sender": cleaned["sender"],
             "datetime": cleaned["datetime"],
             "subject": cleaned["subject"],
@@ -145,8 +147,9 @@ def summarize_one_meet_recording(
         db_path,
         run_stamp=stamp,
         generated_at=generated_at,
-        cleaned=[cleaned],
+        cleaned=[cleaned_row],
         per_message=per_message,
+        replace_run_stamp=False,
     )
     apply_thread_resummary_to_db(
         db_path,
@@ -178,33 +181,6 @@ def summarize_tracked_meet_recordings(
     if not keys:
         return {"ok": True, "summarized": 0, "skipped": 0, "errors": []}
 
-    # #region agent log
-    try:
-        import json as _json
-        import time as _time
-
-        with open(
-            "/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-0ddb00.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                _json.dumps(
-                    {
-                        "sessionId": "0ddb00",
-                        "hypothesisId": "A",
-                        "location": "meet_recordings/summarize.py:summarize_tracked",
-                        "message": "meet_summarize_batch_start",
-                        "data": {"key_count": len(keys), "force": force},
-                        "timestamp": int(_time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
-
     run_stamp = _run_stamp_utc()
     summarized = 0
     skipped = 0
@@ -231,37 +207,6 @@ def summarize_tracked_meet_recordings(
             skipped += 1
         else:
             summarized += 1
-        # #region agent log
-        try:
-            import json as _json
-            import time as _time
-
-            with open(
-                "/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-0ddb00.log",
-                "a",
-                encoding="utf-8",
-            ) as _df:
-                _df.write(
-                    _json.dumps(
-                        {
-                            "sessionId": "0ddb00",
-                            "hypothesisId": "A",
-                            "location": "meet_recordings/summarize.py:summarize_tracked",
-                            "message": "meet_summarize_one_done",
-                            "data": {
-                                "document_key": key[:40],
-                                "skipped": bool(result.get("skipped")),
-                                "ok": bool(result.get("ok")),
-                                "error": str(result.get("error") or result.get("summary_error") or ""),
-                            },
-                            "timestamp": int(_time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
 
     return {
         "ok": True,

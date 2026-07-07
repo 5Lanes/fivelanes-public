@@ -173,6 +173,7 @@ def summarize_one_text_thread(
             generated_at=generated_at,
             cleaned=new_cleaned,
             per_message=per_message,
+            replace_run_stamp=False,
         )
     apply_thread_resummary_to_db(
         db_path,
@@ -203,40 +204,6 @@ def summarize_tracked_text_threads(
         if conversation_keys is not None
         else fetch_tracked_conversation_keys(db_path)
     )
-    # #region agent log
-    try:
-        import json as _json
-        import time as _time
-
-        from services.texts.tracking import fetch_visible_conversation_keys
-
-        _visible = set(fetch_visible_conversation_keys(db_path))
-        _untracked_visible = sorted(_visible - set(keys))
-        with open(
-            "/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-0ddb00.log",
-            "a",
-            encoding="utf-8",
-        ) as _df:
-            _df.write(
-                _json.dumps(
-                    {
-                        "sessionId": "0ddb00",
-                        "hypothesisId": "D",
-                        "location": "texts/summarize.py:summarize_tracked",
-                        "message": "text_summarize_batch_start",
-                        "data": {
-                            "tracked_count": len(keys),
-                            "untracked_visible_count": len(_untracked_visible),
-                            "untracked_visible_sample": _untracked_visible[:5],
-                        },
-                        "timestamp": int(_time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
     if not keys:
         return {"ok": True, "summarized": 0, "skipped": 0, "errors": []}
 

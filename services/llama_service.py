@@ -333,27 +333,10 @@ def _ollama_generate_text(
         method="POST",
     )
     timeout_sec = _ollama_timeout_sec(env_path)
-    # #region agent log
-    _ollama_t0 = __import__("time").time()
-    try:
-        import json as _json
-        with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
-            _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "C", "location": "llama_service.py:_ollama_generate_text", "message": "ollama_request_start", "data": {"model": model_name, "timeout_sec": timeout_sec, "prompt_chars": len(prompt)}, "timestamp": int(_ollama_t0 * 1000)}) + "\n")
-    except Exception:
-        pass
-    # #endregion
     try:
         with urllib.request.urlopen(request, timeout=timeout_sec) as response:
             raw = response.read().decode("utf-8", errors="replace")
     except TimeoutError as exc:
-        # #region agent log
-        try:
-            import json as _json
-            with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
-                _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "C", "location": "llama_service.py:_ollama_generate_text", "message": "ollama_request_timeout", "data": {"model": model_name, "timeout_sec": timeout_sec, "elapsed_ms": int((__import__("time").time() - _ollama_t0) * 1000)}, "timestamp": int(__import__("time").time() * 1000)}) + "\n")
-        except Exception:
-            pass
-        # #endregion
         raise RuntimeError(
             f"Ollama timed out after {timeout_sec}s ({base}, model={model_name})"
         ) from exc
@@ -362,14 +345,6 @@ def _ollama_generate_text(
         raise RuntimeError(f"Ollama API error ({exc.code}) for {model_name}: {err_body}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Ollama request failed ({base}): {exc}") from exc
-    # #region agent log
-    try:
-        import json as _json
-        with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
-            _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "C", "location": "llama_service.py:_ollama_generate_text", "message": "ollama_request_done", "data": {"model": model_name, "elapsed_ms": int((__import__("time").time() - _ollama_t0) * 1000), "response_chars": len(raw)}, "timestamp": int(__import__("time").time() * 1000)}) + "\n")
-    except Exception:
-        pass
-    # #endregion
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:

@@ -500,20 +500,7 @@ def run_threads_llm_pipeline(
         ),
     )
 
-    # #region agent log
-    try:
-        import json as _json, time as _time
-        with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
-            _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "B", "location": "process.py:run_threads_llm_pipeline", "message": "thread_loop_start", "data": {"thread_count": len(thread_keys), "lookback_days": days, "run_stamp": run_stamp}, "timestamp": int(_time.time() * 1000)}) + "\n")
-    except Exception:
-        pass
-    # #endregion
-
     for thread_id in thread_keys:
-        # #region agent log
-        _thread_t0 = datetime.now(timezone.utc)
-        _timeline_count = len(grouped.get(thread_id) or [])
-        # #endregion
         cleaned_thread, thread_per_message = process_thread_llm(
             db,
             thread_id,
@@ -525,54 +512,7 @@ def run_threads_llm_pipeline(
             generated_at=generated_at,
         )
         if cleaned_thread:
-            # #region agent log
-            try:
-                import json as _json, time as _time
-                _elapsed_ms = int((datetime.now(timezone.utc) - _thread_t0).total_seconds() * 1000)
-                with open("/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-2e4b92.log", "a", encoding="utf-8") as _df:
-                    _df.write(_json.dumps({"sessionId": "2e4b92", "hypothesisId": "B", "location": "process.py:run_threads_llm_pipeline", "message": "thread_processed", "data": {"thread_id": thread_id[:80], "new_messages": len(cleaned_thread), "elapsed_ms": _elapsed_ms}, "timestamp": int(_time.time() * 1000)}) + "\n")
-            except Exception:
-                pass
-            # #endregion
             cleaned_all.extend(cleaned_thread)
-        else:
-            # #region agent log
-            try:
-                import json as _json
-                import time as _time
-
-                _unprocessed = sum(
-                    1
-                    for row in (grouped.get(thread_id) or [])
-                    if (thread_id, str(row.get("source_id") or "").strip()) not in processed_pairs
-                )
-                if _unprocessed:
-                    with open(
-                        "/home/luisaherrmann/Code/fivelanes-public/.cursor/debug-0ddb00.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as _df:
-                        _df.write(
-                            _json.dumps(
-                                {
-                                    "sessionId": "0ddb00",
-                                    "hypothesisId": "B",
-                                    "location": "process.py:run_threads_llm_pipeline",
-                                    "message": "thread_skipped_no_output",
-                                    "data": {
-                                        "thread_id": thread_id[:80],
-                                        "timeline_rows": _timeline_count,
-                                        "unprocessed_pairs": _unprocessed,
-                                    },
-                                    "timestamp": int(_time.time() * 1000),
-                                }
-                            )
-                            + "\n"
-                        )
-            except Exception:
-                pass
-            # #endregion
-        if cleaned_thread:
             per_message.extend(thread_per_message)
             save_claude_run_outputs(
                 db,

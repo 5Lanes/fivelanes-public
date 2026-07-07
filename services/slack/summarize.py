@@ -172,6 +172,7 @@ def summarize_one_slack_thread(
             generated_at=generated_at,
             cleaned=new_cleaned,
             per_message=per_message,
+            replace_run_stamp=False,
         )
     apply_thread_resummary_to_db(
         db_path,
