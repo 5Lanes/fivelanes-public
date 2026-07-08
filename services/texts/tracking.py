@@ -8,10 +8,11 @@ from typing import Any, Dict, Iterable, List, Optional, Set
 
 from services.texts.format import load_messages_for_key, primary_source_email
 from services.thread_snooze import ACTIVE, is_removed, normalize_state
+from utils.conversation_sources import SOURCE_PREFIXES, make_source_key, parse_source_key
 
 log = logging.getLogger(__name__)
 
-TEXT_THREAD_PREFIX = "text:"
+TEXT_THREAD_PREFIX = SOURCE_PREFIXES["text"]
 TEXT_KIND = "imessage"
 TEXT_PAUSED_KIND = "imessage_paused"
 
@@ -21,20 +22,11 @@ def _utc_now_iso() -> str:
 
 
 def text_inbox_thread_id(conversation_key: str) -> str:
-    key = (conversation_key or "").strip()
-    if not key:
-        return ""
-    if key.startswith(TEXT_THREAD_PREFIX):
-        return key
-    return f"{TEXT_THREAD_PREFIX}{key}"
+    return make_source_key("text", conversation_key)
 
 
 def parse_text_inbox_thread_id(inbox_thread_id: str) -> Optional[str]:
-    tid = (inbox_thread_id or "").strip()
-    if not tid.startswith(TEXT_THREAD_PREFIX):
-        return None
-    key = tid[len(TEXT_THREAD_PREFIX) :].strip()
-    return key or None
+    return parse_source_key("text", inbox_thread_id)
 
 
 def _text_delivery_kind(row: Dict[str, Any]) -> str:

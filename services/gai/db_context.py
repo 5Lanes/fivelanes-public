@@ -71,7 +71,7 @@ _DATETIME_TABLE_NOTES = {
         "local midnight converted to UTC (see message_activity.since_local_midnight_utc). "
         "Use columns: datetime, type, sender, summary, thread_id."
     ),
-    "claude_message_outputs": (
+    "message_outputs": (
         "Processed/cleaned messages from all channels (email, Slack, SMS, LinkedIn, etc.). "
         "datetime is ISO 8601 or 'YYYY-MM-DD HH:MM:SS UTC'. "
         "Slack DMs use thread_id like 'slack:...' and subject often holds the channel name. "
@@ -317,7 +317,7 @@ def load_person_response_context(db_path: str | Path, person_name: str) -> Dict[
         for dt, sender, subject, thread_id, content in conn.execute(
             """
             SELECT datetime, sender, subject, thread_id, cleaned_content
-            FROM claude_message_outputs
+            FROM message_outputs
             WHERE subject = ? COLLATE NOCASE
                OR sender LIKE ? ESCAPE '\\' COLLATE NOCASE
             ORDER BY datetime DESC
@@ -652,7 +652,7 @@ def structured_snapshot(db_path: str | Path) -> Dict[str, Any]:
             for row in conn.execute(
                 "SELECT 'thread_tracking', COUNT(*) FROM thread_tracking "
                 "UNION ALL SELECT 'timeline_entries', COUNT(*) FROM timeline_entries "
-                "UNION ALL SELECT 'claude_message_outputs', COUNT(*) FROM claude_message_outputs "
+                "UNION ALL SELECT 'message_outputs', COUNT(*) FROM message_outputs "
                 "UNION ALL SELECT 'lanes', COUNT(*) FROM lanes "
                 "UNION ALL SELECT 'lane_areas', COUNT(*) FROM lane_areas "
                 "UNION ALL SELECT 'lane_threads', COUNT(*) FROM lane_threads "

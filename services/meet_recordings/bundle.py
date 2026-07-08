@@ -71,7 +71,7 @@ def append_unsynced_meet_threads_to_bundle(db_path: str, bundle: Dict[str, Any])
     """
     Show imported Meet recording notes in the dashboard bundle.
 
-    Tracked threads missing from ``claude_message_outputs`` are added from on-disk
+    Tracked threads missing from ``message_outputs`` are added from on-disk
     imported notes so every selected recording appears before LLM summarization finishes.
     """
     keys = fetch_visible_document_keys(db_path)

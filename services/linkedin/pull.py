@@ -384,7 +384,7 @@ def _repair_db_owner_senders(db_path: str) -> int:
     with connect_sqlite(db_path) as conn:
         cur = conn.execute(
             """
-            UPDATE claude_message_outputs
+            UPDATE message_outputs
             SET sender = 'me'
             WHERE thread_id LIKE 'linkedin:%'
               AND COALESCE(TRIM(sender), '') = 'Owner'

@@ -198,10 +198,10 @@ def _pipeline_status_payload() -> Dict[str, Any]:
 
 
 def _db_cache_etag(db_path: str) -> Tuple[str, str]:
-    from utils.database import claude_outputs_revision
+    from utils.database import message_outputs_revision
 
     st = Path(db_path).stat()
-    content_rev = claude_outputs_revision(db_path)
+    content_rev = message_outputs_revision(db_path)
     etag = f'"{int(st.st_mtime_ns)}-{st.st_size}-{content_rev}-{_summaries_bundle_epoch}"'
     last_modified = email.utils.formatdate(st.st_mtime, usegmt=True)
     return etag, last_modified

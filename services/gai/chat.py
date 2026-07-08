@@ -66,7 +66,7 @@ Date and message-source rules:
 - "Arrived today" means timeline_entries since message_activity.since_local_midnight_utc, plus
   message_activity.new_since_refresh_total for chat channels.
 - timeline_entries.datetime uses ISO 8601 UTC (e.g. 2026-07-06T17:53:32+00:00).
-- claude_message_outputs holds processed messages from email, Slack, SMS, LinkedIn, etc.
+- message_outputs holds processed messages from email, Slack, SMS, LinkedIn, etc.
   Slack threads use thread_id like 'slack:...'. For chat questions, search this table.
 - For "did X respond?" / "has X replied?": find recent messages in the relevant thread(s),
   filter by sender or subject matching X, order by datetime DESC, and compare who sent the latest

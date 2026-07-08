@@ -1,4 +1,4 @@
-"""Fallback bundle rows for tracked email threads not yet in ``claude_message_outputs``."""
+"""Fallback bundle rows for tracked email threads not yet in ``message_outputs``."""
 
 from __future__ import annotations
 
@@ -101,7 +101,7 @@ def append_unsynced_email_threads_to_bundle(
     """
     Show tracked inbox threads in the dashboard bundle before LLM segmentation.
 
-    Tracked threads missing from ``claude_message_outputs`` are added from
+    Tracked threads missing from ``message_outputs`` are added from
     ``timeline_entries``. When a thread gains new timeline rows, only the new
     messages are appended.
     """
