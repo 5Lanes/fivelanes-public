@@ -2399,6 +2399,60 @@ def _ensure_message_outputs_schema(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError:
         # Existing duplicate successful rows prevent index creation until deduped.
         pass
+    _migrate_claude_message_outputs_if_needed(conn)
+
+
+def _migrate_claude_message_outputs_if_needed(conn: sqlite3.Connection) -> None:
+    """
+    One-time migration for the claude_message_outputs -> message_outputs rename.
+
+    The rename only introduced the new table name in code (``CREATE TABLE IF NOT
+    EXISTS message_outputs``); it never moved the rows that were already sitting
+    in the legacy ``claude_message_outputs`` table, so any database that had run
+    the old code ends up with two tables: an empty/partial ``message_outputs``
+    and the real history stranded in ``claude_message_outputs``. Copy anything
+    not already present (by the run_stamp/source_id unique key) into
+    ``message_outputs`` and drop the legacy table.
+    """
+    legacy_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='claude_message_outputs'"
+    ).fetchone()
+    if not legacy_exists:
+        return
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO message_outputs (
+            run_stamp, generated_at, thread_id, source_id, datetime, sender,
+            recipients, subject, raw_text, forwarded_from, cleaned_content,
+            quoted_reply, signature, api_error, snoozed, thread_summary_json
+        )
+        SELECT
+            run_stamp, generated_at, thread_id, source_id, datetime, sender,
+            recipients, subject, raw_text, forwarded_from, cleaned_content,
+            quoted_reply, signature, api_error, snoozed, thread_summary_json
+        FROM claude_message_outputs
+        """
+    )
+    conn.execute("DROP TABLE claude_message_outputs")
+
+
+def purge_stale_removed_threads(db_path: str, *, days: int = 30) -> int:
+    """
+    One-time cleanup: drop thread_tracking rows that have been removed
+    (``snoozed`` = 2) for more than ``days`` days. These rows only exist to
+    keep a thread from being re-added to the inbox after the user removes it;
+    a suppression that old isn't worth keeping around. Returns rows deleted.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    db_file = Path(db_path)
+    with connect_sqlite(db_file) as conn:
+        _ensure_thread_tracking_schema(conn)
+        cur = conn.execute(
+            "DELETE FROM thread_tracking WHERE snoozed = 2 AND updated_at < ?",
+            (cutoff,),
+        )
+        conn.commit()
+        return cur.rowcount
 
 
 _PLACEHOLDER_CLEANED = frozenset({"(no subject)", "image.png"})
