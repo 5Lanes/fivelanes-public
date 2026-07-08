@@ -150,6 +150,35 @@ def _dedupe_export_rows(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
     return deduped
 
 
+def _is_absolute_date(value: str) -> bool:
+    return bool(re.match(r"^\d{4}-\d{2}-\d{2}", (value or "").strip()))
+
+
+def _prior_absolute_dates(rows: List[Dict[str, str]]) -> Dict[Tuple[str, str, str], str]:
+    """Map (conversation, sender, content) -> earliest known absolute DATE seen so far.
+
+    LinkedIn sometimes shows only a bare clock time (no date) for a message that isn't
+    actually from today; ``_normalize_scraper_timestamp`` then anchors it to the scrape
+    time, so re-scraping the same old message stamps it with a new "today" every run.
+    Keeping the earliest absolute date we've already recorded for identical content
+    stops that content from drifting forward in time on each re-scrape.
+    """
+    lookup: Dict[Tuple[str, str, str], str] = {}
+    for row in rows:
+        date = str(row.get("DATE") or "").strip()
+        if not _is_absolute_date(date):
+            continue
+        key = (
+            str(row.get("CONVERSATION ID") or "").strip(),
+            str(row.get("FROM") or "").strip(),
+            str(row.get("CONTENT") or "").strip(),
+        )
+        existing = lookup.get(key)
+        if existing is None or date < existing:
+            lookup[key] = date
+    return lookup
+
+
 def _owner_profile_url() -> str:
     return (os.getenv("LINKEDIN_PROFILE_URL") or "").strip()
 
@@ -229,7 +258,12 @@ def _owner_display_name(scraped_rows: List[Dict[str, str]]) -> str:
     return configured or "Owner"
 
 
-def _scraper_row_to_export(row: Dict[str, str], *, owner_display: str) -> Dict[str, str]:
+def _scraper_row_to_export(
+    row: Dict[str, str],
+    *,
+    owner_display: str,
+    prior_dates: Dict[Tuple[str, str, str], str] | None = None,
+) -> Dict[str, str]:
     is_from_me = str(row.get("is_from_me") or "").strip().lower() == "true"
     participant = str(row.get("participant") or "").strip()
     participant_url = str(row.get("participant_url") or "").strip()
@@ -239,8 +273,9 @@ def _scraper_row_to_export(row: Dict[str, str], *, owner_display: str) -> Dict[s
     owner_url = _owner_profile_url()
     conversation_id = str(row.get("conversation_id") or "").strip()
     content = str(row.get("message") or "")
+    raw_timestamp = str(row.get("timestamp") or "")
     timestamp = _normalize_scraper_timestamp(
-        str(row.get("timestamp") or ""),
+        raw_timestamp,
         scraped_at=str(row.get("scraped_at") or ""),
     )
 
@@ -254,6 +289,11 @@ def _scraper_row_to_export(row: Dict[str, str], *, owner_display: str) -> Dict[s
         to_name = owner_display
         from_url = participant_url
         to_urls = owner_url
+
+    if not _is_absolute_date(raw_timestamp) and prior_dates:
+        prior = prior_dates.get((conversation_id, from_name.strip(), content.strip()))
+        if prior:
+            timestamp = prior
 
     return {
         "CONVERSATION ID": conversation_id,
@@ -299,9 +339,10 @@ def _merge_scraped_into_export(
         ]
 
     owner_display = _owner_display_name(scraped)
+    prior_dates = _prior_absolute_dates(existing)
     converted = _dedupe_export_rows(
         [
-            _scraper_row_to_export(row, owner_display=owner_display)
+            _scraper_row_to_export(row, owner_display=owner_display, prior_dates=prior_dates)
             for row in scraped
             if row.get("conversation_id")
         ]

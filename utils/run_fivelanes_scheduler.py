@@ -245,6 +245,17 @@ def _scheduler_is_idle(tz: ZoneInfo) -> bool:
     return is_active_day(now, cfg) and not in_quiet_hours(now, cfg)
 
 
+def _warm_gai_chat_cache() -> None:
+    """Refresh the GAI chat schema/snapshot cache after a run so the next chat turn is fast."""
+    try:
+        from utils.runtime_paths import database_path
+        from services.gai.db_context import warm_chat_context_cache
+
+        warm_chat_context_cache(database_path())
+    except Exception:
+        log.exception("Failed to warm GAI chat context cache")
+
+
 def scheduler_loop(*, run_immediately: bool = True) -> None:
     tz = scheduler_tz()
     cfg = get_schedule_config()
@@ -288,6 +299,7 @@ def scheduler_loop(*, run_immediately: bool = True) -> None:
                 continue
             elapsed = time.monotonic() - started
             log.info("Fivelanes run finished in %.1fs", elapsed)
+            _warm_gai_chat_cache()
         except Exception:
             log.exception("Scheduled fivelanes run failed")
 
