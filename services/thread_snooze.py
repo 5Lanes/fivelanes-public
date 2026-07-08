@@ -1,7 +1,7 @@
 """
 Thread snooze state and auto-unsnooze on new messages.
 
-``thread_tracking.snoozed`` and ``claude_message_outputs.snoozed`` stay in sync:
+``thread_tracking.snoozed`` and ``message_outputs.snoozed`` stay in sync:
   0 = active, 1 = snoozed, 2 = removed from tracking.
 
 Auto-unsnooze runs during email inbox refresh and when the dashboard bundle is built
@@ -142,9 +142,9 @@ def _clear_snooze_baseline(db_path: str, thread_id: str) -> None:
 
 
 def set_thread_snooze(db_path: str, thread_id: str, state: int) -> bool:
-    """Persist snooze state on ``thread_tracking`` and ``claude_message_outputs``."""
+    """Persist snooze state on ``thread_tracking`` and ``message_outputs``."""
     from utils.database import (
-        set_claude_outputs_thread_snoozed,
+        set_message_outputs_thread_snoozed,
         set_thread_tracking_snoozed,
     )
 
@@ -155,7 +155,7 @@ def set_thread_snooze(db_path: str, thread_id: str, state: int) -> bool:
     ok_tracking = set_thread_tracking_snoozed(
         db_path, inbox_thread_id=tid, snoozed=state_norm
     )
-    ok_claude = set_claude_outputs_thread_snoozed(
+    ok_outputs = set_message_outputs_thread_snoozed(
         db_path, thread_id=tid, snoozed=state_norm
     )
     if ok_tracking and _is_on_disk_thread(tid):
@@ -163,7 +163,7 @@ def set_thread_snooze(db_path: str, thread_id: str, state: int) -> bool:
             _persist_snooze_baseline(db_path, tid)
         elif state_norm == ACTIVE:
             _clear_snooze_baseline(db_path, tid)
-    return ok_tracking or ok_claude
+    return ok_tracking or ok_outputs
 
 
 def unsnooze_threads(db_path: str, thread_ids: Sequence[str]) -> None:
@@ -179,8 +179,8 @@ def unsnooze_threads(db_path: str, thread_ids: Sequence[str]) -> None:
 def remove_thread_tracking(db_path: str, thread_id: str) -> bool:
     """Mark thread removed (``REMOVED``); delete persisted text thread outputs."""
     from utils.database import (
-        delete_claude_outputs_for_thread,
-        set_claude_outputs_thread_snoozed,
+        delete_message_outputs_for_thread,
+        set_message_outputs_thread_snoozed,
         set_thread_tracking_snoozed,
     )
 
@@ -191,13 +191,13 @@ def remove_thread_tracking(db_path: str, thread_id: str) -> bool:
         db_path, inbox_thread_id=tid, snoozed=REMOVED
     )
     if tid.startswith("text:") or tid.startswith("slack:") or tid.startswith("linkedin:"):
-        deleted = delete_claude_outputs_for_thread(db_path, tid)
-        ok_claude = deleted > 0 or ok_tracking
+        deleted = delete_message_outputs_for_thread(db_path, tid)
+        ok_outputs = deleted > 0 or ok_tracking
     else:
-        ok_claude = set_claude_outputs_thread_snoozed(
+        ok_outputs = set_message_outputs_thread_snoozed(
             db_path, thread_id=tid, snoozed=REMOVED
         )
-    return ok_tracking or ok_claude
+    return ok_tracking or ok_outputs
 
 
 def snooze_map(db_path: str) -> Dict[str, int]:
@@ -216,7 +216,7 @@ def known_source_ids_for_thread(
     candidate_source_ids: set[str] | Sequence[str],
 ) -> set[str]:
     """
-    Source ids already in ``timeline_entries`` or successful ``claude_message_outputs``.
+    Source ids already in ``timeline_entries`` or successful ``message_outputs``.
     """
     from utils.database import _normalize_field, connect_sqlite
 
@@ -240,7 +240,7 @@ def known_source_ids_for_thread(
             for row in conn.execute(
                 f"""
                 SELECT DISTINCT source_id
-                FROM claude_message_outputs
+                FROM message_outputs
                 WHERE COALESCE(thread_id, '') = ?
                   AND source_id IN ({ph})
                   AND COALESCE(TRIM(api_error), '') = ''

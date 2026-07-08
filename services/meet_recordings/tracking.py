@@ -14,10 +14,11 @@ from services.meet_recordings.config import MEET_RECORDINGS_DIR
 from services.meet_recordings.docs import fetch_meet_recording_summary
 from services.meet_recordings.pull import get_docs_service, meeting_title_from_doc_name
 from services.thread_snooze import ACTIVE, is_removed, normalize_state
+from utils.conversation_sources import SOURCE_PREFIXES, make_source_key, parse_source_key
 
 log = logging.getLogger(__name__)
 
-MEET_THREAD_PREFIX = "meet:"
+MEET_THREAD_PREFIX = SOURCE_PREFIXES["meet"]
 MEET_KIND = "meet_recording"
 MEET_PAUSED_KIND = "meet_recording_paused"
 
@@ -28,21 +29,13 @@ def _utc_now_iso() -> str:
 
 def meet_inbox_thread_id(document_key: str) -> str:
     key = (document_key or "").strip()
-    if not key:
-        return ""
-    if key.startswith(MEET_THREAD_PREFIX):
-        return key
     if key.startswith("docs:"):
         key = key[5:]
-    return f"{MEET_THREAD_PREFIX}{key}"
+    return make_source_key("meet", key)
 
 
 def parse_meet_inbox_thread_id(inbox_thread_id: str) -> Optional[str]:
-    tid = (inbox_thread_id or "").strip()
-    if not tid.startswith(MEET_THREAD_PREFIX):
-        return None
-    key = tid[len(MEET_THREAD_PREFIX) :].strip()
-    return key or None
+    return parse_source_key("meet", inbox_thread_id)
 
 
 def imported_note_path(document_key: str, *, root: Path | None = None) -> Path:

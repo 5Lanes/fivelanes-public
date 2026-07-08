@@ -30,7 +30,7 @@ def list_latest_failed_segmentation_pairs(db_path: str) -> List[Dict[str, Any]]:
                                PARTITION BY COALESCE(thread_id, ''), COALESCE(source_id, '')
                                ORDER BY generated_at DESC, id DESC
                            ) AS rn
-                    FROM claude_message_outputs
+                    FROM message_outputs
                     WHERE COALESCE(TRIM(source_id), '') != ''
                 )
                 SELECT thread_id, source_id, api_error
@@ -66,7 +66,7 @@ def list_thread_ids_with_recovered_segmentation(db_path: str) -> List[str]:
             rows = conn.execute(
                 """
                 SELECT DISTINCT COALESCE(thread_id, '') AS thread_id, source_id, api_error
-                FROM claude_message_outputs
+                FROM message_outputs
                 WHERE COALESCE(TRIM(source_id), '') != ''
                   AND COALESCE(TRIM(thread_id), '') != ''
                   AND COALESCE(TRIM(api_error), '') != ''
@@ -89,7 +89,7 @@ def list_thread_ids_with_recovered_segmentation(db_path: str) -> List[str]:
                 ok = conn.execute(
                     """
                     SELECT 1
-                    FROM claude_message_outputs
+                    FROM message_outputs
                     WHERE COALESCE(thread_id, '') = ?
                       AND source_id = ?
                       AND COALESCE(TRIM(api_error), '') = ''
@@ -117,7 +117,7 @@ def list_thread_ids_with_bad_summary(db_path: str) -> List[str]:
                                PARTITION BY COALESCE(thread_id, '')
                                ORDER BY generated_at DESC, id DESC
                            ) AS rn
-                    FROM claude_message_outputs
+                    FROM message_outputs
                     WHERE COALESCE(TRIM(thread_id), '') != ''
                       AND COALESCE(TRIM(api_error), '') = ''
                 )
@@ -165,7 +165,7 @@ def retry_failed_pipeline_outputs(
         load_timeline_entry_by_source_id,
     )
     from services.pipeline.summary import summarize_thread
-    from utils.database import save_claude_run_outputs
+    from utils.database import save_message_outputs
     from utils.runtime_paths import database_path
 
     db = db_path or database_path()
@@ -279,7 +279,7 @@ def retry_failed_pipeline_outputs(
         per_message.extend(per_message_rows([entry], tsumm))
 
     if cleaned_new:
-        save_claude_run_outputs(
+        save_message_outputs(
             db,
             run_stamp=run_stamp,
             generated_at=generated_at,

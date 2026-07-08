@@ -44,7 +44,7 @@ def append_unsynced_linkedin_threads_to_bundle(db_path: str, bundle: Dict[str, A
     """
     Show on-disk LinkedIn messages in the dashboard bundle.
 
-    Tracked threads missing from ``claude_message_outputs`` are added wholesale.
+    Tracked threads missing from ``message_outputs`` are added wholesale.
     When the CSV export gains messages, only the new rows are appended.
     """
     keys = fetch_visible_conversation_keys(db_path)
