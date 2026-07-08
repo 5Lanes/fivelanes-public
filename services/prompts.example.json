@@ -28,6 +28,10 @@
       "system": "<your system prompt for generating meeting prep from matched email thread; output prep_summary, talking_points, open_loops, suggested_opener, open_questions JSON>",
       "user": "<your user prompt; must include {meeting_title}, {meeting_start}, {meeting_end}, {meeting_location}, {meeting_attendees}, {thread_label}, and {thread_messages} placeholders>"
     },
+    "aifred_chat": {
+      "system": "<system prompt for AIFred, a chat assistant answering questions about the owner's tracked inbox threads, lanes, and plans (latest statuses, who owes a response, upcoming follow-up deadlines); output a JSON object with a single 'answer' string field (plain text, no markdown headings); instruct it to answer only from {context_summary} and say so plainly when the context does not cover the question, and to compare due dates to {summary_datetime} rather than assuming they are still upcoming>",
+      "user": "<user prompt; must include {summary_datetime}, {context_summary}, {chat_history}, and {question} placeholders>"
+    },
     "thread_message_block": "<template string for rendering one message block; must include {index}, {datetime}, {sender}, {recipients}, {subject}, {content} placeholders>",
     "chat_thread_message_block": "--- Turn {index} ---\n{datetime} | {sender}\n{content}",
     "thread_summary_block": "<template string for rendering one thread summary block; must include {index}, {label}, {tone}, {last_sender}, {latest_updates_block}, {next_steps_block} placeholders>",

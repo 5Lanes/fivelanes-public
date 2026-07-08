@@ -43,9 +43,12 @@ from services.pipeline.fingerprint import (
 )
 from services.prompts import (
     EMAIL_REPLY_MAX_MESSAGES,
+    format_aifred_chat_prompt,
     format_email_reply_prompt,
     format_meeting_prep_prompt,
 )
+from services.aifred_context import build_aifred_context
+from services import llama_service
 from utils.database import (
     _meeting_dedupe_key,
     ensure_database_schema,
@@ -1596,6 +1599,53 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         out.update(prep)
         self._json_response(HTTPStatus.OK, out)
 
+    def _post_aifred_ask(self, body: Dict[str, Any]) -> None:
+        question = str(body.get("question") or "").strip()
+        if not question:
+            self._json_response(
+                HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_question"}
+            )
+            return
+        if not Path(DB_PATH).is_file():
+            self._json_response(
+                HTTPStatus.NOT_FOUND, {"ok": False, "error": "database_not_found"}
+            )
+            return
+        raw_history = body.get("chat_history")
+        history_lines: List[str] = []
+        if isinstance(raw_history, list):
+            for turn in raw_history[-20:]:
+                if not isinstance(turn, dict):
+                    continue
+                role = str(turn.get("role") or "").strip().lower()
+                content = str(turn.get("content") or "").strip()
+                if not content:
+                    continue
+                speaker = "Luisa" if role == "user" else "AIFred"
+                history_lines.append(f"{speaker}: {content}")
+        chat_history = "\n".join(history_lines)
+        try:
+            context_summary = build_aifred_context(DB_PATH)
+            prompt = format_aifred_chat_prompt(
+                question, context_summary=context_summary, chat_history=chat_history
+            )
+            result = llama_service.submit_aifred_chat_prompt(prompt, env_path=str(env_file()))
+        except RuntimeError as exc:
+            self._json_response(HTTPStatus.BAD_GATEWAY, {"ok": False, "error": str(exc)})
+            return
+        except Exception as exc:
+            self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": str(exc)}
+            )
+            return
+        answer = str(result.get("answer") or "").strip() if isinstance(result, dict) else ""
+        if not answer:
+            answer = (
+                "I couldn't generate an answer just now — please try rephrasing or ask again "
+                "in a moment."
+            )
+        self._json_response(HTTPStatus.OK, {"ok": True, "answer": answer})
+
     def _post_save_thread_draft(self, body: Dict[str, Any]) -> None:
         thread_id = str(body.get("thread_id") or body.get("inbox_thread_id") or "").strip()
         if not thread_id:
@@ -1911,6 +1961,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._post_email_reply(body)
         elif path == "/api/meeting-prep":
             self._post_meeting_prep(body)
+        elif path == "/api/aifred/ask":
+            self._post_aifred_ask(body)
         elif path == "/api/lanes/create":
             self._post_lane_create(body)
         elif path == "/api/lanes/add-thread":

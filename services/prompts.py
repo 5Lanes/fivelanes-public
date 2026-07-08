@@ -731,3 +731,23 @@ def format_meeting_prep_prompt(
         thread_label=(thread_label or "").strip() or "(unknown thread)",
         thread_messages=thread_messages,
     )
+
+
+def format_aifred_chat_prompt(
+    question: str,
+    *,
+    context_summary: str,
+    chat_history: str = "",
+    as_of: datetime | None = None,
+) -> PromptMessages:
+    """Build the 'Ask AIFred' assistant prompt from a snapshot of inbox/lane/plan state."""
+    return _with_summary_as_of(
+        _format_prompt_pair(
+            "aifred_chat",
+            question=(question or "").strip(),
+            context_summary=(context_summary or "").strip() or "(no tracked activity yet)",
+            chat_history=(chat_history or "").strip() or "(no prior turns in this chat)",
+            summary_datetime=summary_as_of_datetime(as_of=as_of),
+        ),
+        as_of=as_of,
+    )

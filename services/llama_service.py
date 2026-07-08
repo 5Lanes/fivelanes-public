@@ -209,6 +209,11 @@ THREAD_SUMMARY_RESPONSE_FORMAT: Dict[str, Any] = {
     },
     "required": ["latest_updates"],
 }
+AIFRED_CHAT_RESPONSE_FORMAT: Dict[str, Any] = {
+    "type": "object",
+    "properties": {"answer": {"type": "string"}},
+    "required": ["answer"],
+}
 LANE_SUMMARY_RESPONSE_FORMAT: Dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -535,6 +540,24 @@ def submit_meeting_prep_prompt(
     """Meeting prep: default model from ``OLLAMA_MODEL_SUMMARY``."""
     resolved = model or _resolve_ollama_model(env_path, "OLLAMA_MODEL_SUMMARY", MODEL_SUMMARY)
     return call_ollama_json(prompt, model=resolved, max_tokens=max_tokens, env_path=env_path)
+
+
+def submit_aifred_chat_prompt(
+    prompt: str | PromptMessages,
+    *,
+    model: Optional[str] = None,
+    max_tokens: int = 1200,
+    env_path: str = ".env",
+) -> Dict[str, Any]:
+    """Ask AIFred chat turn: default model from ``OLLAMA_MODEL_AIFRED`` (falls back to summary model)."""
+    resolved = model or _resolve_ollama_model(env_path, "OLLAMA_MODEL_AIFRED", MODEL_SUMMARY)
+    return call_ollama_json(
+        prompt,
+        model=resolved,
+        max_tokens=max_tokens,
+        env_path=env_path,
+        response_format=AIFRED_CHAT_RESPONSE_FORMAT,
+    )
 
 
 def list_available_models(env_path: str = ".env") -> List[str]:
