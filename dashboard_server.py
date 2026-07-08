@@ -43,12 +43,9 @@ from services.pipeline.fingerprint import (
 )
 from services.prompts import (
     EMAIL_REPLY_MAX_MESSAGES,
-    format_aifred_chat_prompt,
     format_email_reply_prompt,
     format_meeting_prep_prompt,
 )
-from services.aifred_context import build_aifred_context
-from services import llama_service
 from utils.database import (
     _meeting_dedupe_key,
     ensure_database_schema,
@@ -137,6 +134,16 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def _warm_gai_chat_cache() -> None:
+    """Refresh the GAI chat schema/snapshot cache so the next chat turn is served from cache."""
+    try:
+        from services.gai.db_context import warm_chat_context_cache
+
+        warm_chat_context_cache(DB_PATH)
+    except Exception:
+        log.exception("Failed to warm GAI chat context cache")
+
+
 def _start_pipeline_run() -> tuple[bool, Optional[str]]:
     with _pipeline_lock:
         if _pipeline_state["running"]:
@@ -158,6 +165,7 @@ def _start_pipeline_run() -> tuple[bool, Optional[str]]:
             with _pipeline_lock:
                 _pipeline_state["running"] = False
                 _pipeline_state["finished_at"] = _utc_now_iso()
+            _warm_gai_chat_cache()
 
     threading.Thread(
         target=_worker,
@@ -269,6 +277,32 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._send_cache_headers(etag, last_modified)
         self.end_headers()
         self.wfile.write(body)
+
+    def _write_chunked_bytes(self, data: bytes) -> None:
+        if not data:
+            return
+        self.wfile.write(f"{len(data):x}\r\n".encode("ascii"))
+        self.wfile.write(data)
+        self.wfile.write(b"\r\n")
+        self.wfile.flush()
+
+    def _ndjson_stream_response(
+        self,
+        status: int,
+        events: Any,
+    ) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+        try:
+            for event in events:
+                line = json.dumps(event, default=str) + "\n"
+                self._write_chunked_bytes(line.encode("utf-8"))
+        finally:
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
 
     def _get_summaries_bundle(self) -> None:
         db_file = Path(DB_PATH)
@@ -1599,52 +1633,77 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         out.update(prep)
         self._json_response(HTTPStatus.OK, out)
 
-    def _post_aifred_ask(self, body: Dict[str, Any]) -> None:
-        question = str(body.get("question") or "").strip()
-        if not question:
+    def _post_gai_chat(self, body: Dict[str, Any]) -> None:
+        message = str(body.get("message") or "").strip()
+        if not message:
             self._json_response(
-                HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_question"}
+                HTTPStatus.BAD_REQUEST,
+                {"ok": False, "error": "missing_message"},
             )
             return
-        if not Path(DB_PATH).is_file():
+        raw_history = body.get("history")
+        if raw_history is not None and not isinstance(raw_history, list):
             self._json_response(
-                HTTPStatus.NOT_FOUND, {"ok": False, "error": "database_not_found"}
+                HTTPStatus.BAD_REQUEST,
+                {"ok": False, "error": "invalid_history"},
             )
             return
-        raw_history = body.get("chat_history")
-        history_lines: List[str] = []
-        if isinstance(raw_history, list):
-            for turn in raw_history[-20:]:
-                if not isinstance(turn, dict):
-                    continue
-                role = str(turn.get("role") or "").strip().lower()
-                content = str(turn.get("content") or "").strip()
-                if not content:
-                    continue
-                speaker = "Luisa" if role == "user" else "AIFred"
-                history_lines.append(f"{speaker}: {content}")
-        chat_history = "\n".join(history_lines)
+        history: List[Dict[str, str]] = []
+        for item in raw_history or []:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "").strip()
+            content = str(item.get("content") or "").strip()
+            if role in ("user", "assistant") and content:
+                history.append({"role": role, "content": content})
+        session_context = body.get("session")
+        if session_context is not None and not isinstance(session_context, dict):
+            self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"ok": False, "error": "invalid_session"},
+            )
+            return
+        stream = body.get("stream") is True
         try:
-            context_summary = build_aifred_context(DB_PATH)
-            prompt = format_aifred_chat_prompt(
-                question, context_summary=context_summary, chat_history=chat_history
+            if stream:
+                from services.gai.chat import iter_gai_chat_events
+
+                self._ndjson_stream_response(
+                    HTTPStatus.OK,
+                    iter_gai_chat_events(
+                        DB_PATH,
+                        message,
+                        history=history,
+                        session_context=session_context or {},
+                    ),
+                )
+                return
+
+            from services.gai.chat import answer_question
+
+            result = answer_question(
+                DB_PATH,
+                message,
+                history=history,
+                session_context=session_context or {},
             )
-            result = llama_service.submit_aifred_chat_prompt(prompt, env_path=str(env_file()))
         except RuntimeError as exc:
-            self._json_response(HTTPStatus.BAD_GATEWAY, {"ok": False, "error": str(exc)})
+            self._json_response(
+                HTTPStatus.BAD_GATEWAY,
+                {"ok": False, "error": str(exc)},
+            )
             return
         except Exception as exc:
+            log.exception("GAI chat failed")
             self._json_response(
-                HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": str(exc)}
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"ok": False, "error": str(exc)},
             )
             return
-        answer = str(result.get("answer") or "").strip() if isinstance(result, dict) else ""
-        if not answer:
-            answer = (
-                "I couldn't generate an answer just now — please try rephrasing or ask again "
-                "in a moment."
-            )
-        self._json_response(HTTPStatus.OK, {"ok": True, "answer": answer})
+        if not result.get("ok"):
+            self._json_response(HTTPStatus.BAD_REQUEST, result)
+            return
+        self._json_response(HTTPStatus.OK, result)
 
     def _post_save_thread_draft(self, body: Dict[str, Any]) -> None:
         thread_id = str(body.get("thread_id") or body.get("inbox_thread_id") or "").strip()
@@ -1961,8 +2020,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._post_email_reply(body)
         elif path == "/api/meeting-prep":
             self._post_meeting_prep(body)
-        elif path == "/api/aifred/ask":
-            self._post_aifred_ask(body)
+        elif path == "/api/gai/chat":
+            self._post_gai_chat(body)
         elif path == "/api/lanes/create":
             self._post_lane_create(body)
         elif path == "/api/lanes/add-thread":
@@ -2074,6 +2133,11 @@ def main() -> None:
     log_path = configure_logging()
     log.info("Dashboard starting (pid=%d, log=%s)", os.getpid(), log_path)
     ensure_database_schema(DB_PATH)
+    threading.Thread(
+        target=_warm_gai_chat_cache,
+        name="fivelanes-gai-chat-cache-warmup",
+        daemon=True,
+    ).start()
     server = ThreadingHTTPServer((DASHBOARD_HOST, DASHBOARD_PORT), DashboardHandler)
     _print_dashboard_urls(DASHBOARD_HOST, DASHBOARD_PORT)
     scheduler = threading.Thread(

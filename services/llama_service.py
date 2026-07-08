@@ -357,6 +357,95 @@ def _ollama_generate_text(
     return str(parsed.get("response") or "").strip()
 
 
+def iter_ollama_generate_text(
+    *,
+    base: str,
+    headers: Dict[str, str],
+    model_name: str,
+    prompt: str,
+    system: str = "",
+    max_tokens: int,
+    response_format: Any | None,
+    env_path: str = ".env",
+):
+    """Stream text chunks from Ollama ``/api/generate`` (``stream: true``)."""
+    url = f"{base}/api/generate"
+    payload: Dict[str, Any] = {
+        "model": model_name,
+        "prompt": prompt,
+        "stream": True,
+        "options": {"num_predict": max_tokens},
+    }
+    if (system or "").strip():
+        payload["system"] = system.strip()
+    if response_format is not None:
+        payload["format"] = response_format
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    timeout_sec = _ollama_timeout_sec(env_path)
+    with llm_inference_slot():
+        try:
+            with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    chunk = str(obj.get("response") or "")
+                    if chunk:
+                        yield chunk
+                    if obj.get("done"):
+                        break
+        except TimeoutError as exc:
+            raise RuntimeError(
+                f"Ollama timed out after {timeout_sec}s ({base}, model={model_name})"
+            ) from exc
+        except urllib.error.HTTPError as exc:
+            err_body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Ollama API error ({exc.code}) for {model_name}: {err_body}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"Ollama request failed ({base}): {exc}") from exc
+
+
+def stream_ollama_text(
+    prompt: str | PromptMessages,
+    *,
+    model: str,
+    max_tokens: int = 1200,
+    env_path: str = ".env",
+    response_format: Any | None = None,
+):
+    """Yield streamed text chunks from Ollama for a prompt."""
+    base = _ollama_base_url(env_path)
+    if not base:
+        raise RuntimeError("OLLAMA_HOST is not set in environment or .env")
+    model_name = (model or "").strip()
+    if not model_name:
+        raise RuntimeError("Ollama model name is empty")
+    headers = _ollama_auth_headers(env_path)
+    system, user = _resolve_ollama_prompt(prompt)
+    if not user and system:
+        user = system
+        system = ""
+    yield from iter_ollama_generate_text(
+        base=base,
+        headers=headers,
+        model_name=model_name,
+        prompt=user,
+        system=system,
+        max_tokens=max_tokens,
+        response_format=response_format,
+        env_path=env_path,
+    )
+
+
 def _resolve_ollama_prompt(prompt: str | PromptMessages) -> tuple[str, str]:
     if isinstance(prompt, PromptMessages):
         return (prompt.system or "").strip(), (prompt.user or "").strip()

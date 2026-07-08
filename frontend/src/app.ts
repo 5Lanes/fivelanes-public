@@ -1,4 +1,4 @@
-import { mountAifredChat } from "./aifred_chat.js";
+import { bindGaiChatPanel, mountGaiChatDialog } from "./gai_chat_ui.js";
 import { bindPipelineControls } from "./pipeline_controls.js";
 import { bindSettingsPanel, mountSettingsDialog } from "./settings_panel.js";
 import { MEETINGS_LOOKAHEAD_DAYS, prefetchMeetings } from "./meetings_panel.js";
@@ -234,7 +234,8 @@ async function bootstrap(): Promise<void> {
   void refreshPipelineRunMeta(runMetaEl);
   mountSettingsDialog();
   bindSettingsPanel();
-  mountAifredChat();
+  mountGaiChatDialog();
+  bindGaiChatPanel();
   bindPipelineControls(() => {
     void refreshPipelineRunMeta(runMetaEl);
     void rerenderCurrentPage();

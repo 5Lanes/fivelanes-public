@@ -136,27 +136,26 @@ body {
   position: sticky;
   top: 0;
   z-index: 100;
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "brand actions"
+    "meta actions";
   align-items: center;
-  gap: 1rem;
+  column-gap: 1rem;
+  row-gap: 0.15rem;
   padding: 0.65rem 1.25rem;
   background: #0a0c0f;
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
 }
 
-.app-top-bar-lead {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  min-width: 0;
-}
-
 .app-top-bar-brand {
+  grid-area: brand;
   display: inline-flex;
   align-items: center;
   gap: 0.55rem;
+  min-width: 0;
   text-decoration: none;
   color: var(--text);
   border-radius: var(--radius-sm);
@@ -188,6 +187,14 @@ body {
   line-height: 1.2;
 }
 
+.app-top-bar-meta {
+  grid-area: meta;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
 .app-top-bar .run-meta,
 .app-top-bar .pipeline-status {
   margin: 0;
@@ -196,10 +203,12 @@ body {
 }
 
 .app-top-bar-actions {
+  grid-area: actions;
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-shrink: 0;
+  align-self: center;
 }
 
 .header-icon-btn svg {
@@ -1077,6 +1086,255 @@ header p.run-meta {
 
 .meeting-prep-thread-link:hover {
   text-decoration: underline;
+}
+
+.gai-chat-dialog {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0;
+  max-width: min(32rem, calc(100vw - 2rem));
+  width: 100%;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-md);
+}
+
+.gai-chat-dialog::backdrop {
+  background: color-mix(in srgb, #101216 45%, transparent);
+}
+
+.gai-chat-dialog-inner {
+  display: flex;
+  flex-direction: column;
+  max-height: min(85vh, 36rem);
+}
+
+.gai-chat-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1.1rem 1.25rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.gai-chat-dialog-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  line-height: 1.3;
+}
+
+.gai-chat-meta {
+  margin: 0.25rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-family: system-ui, sans-serif;
+}
+
+.gai-chat-head-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.gai-chat-reset {
+  flex-shrink: 0;
+  height: 2rem;
+  padding: 0 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.gai-chat-reset:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.gai-chat-close {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.gai-chat-close:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.gai-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 12rem;
+}
+
+.gai-chat-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.gai-chat-turn {
+  max-width: 92%;
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.gai-chat-bubble-user {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+}
+
+.gai-chat-bubble-assistant {
+  align-self: flex-start;
+  background: var(--hover);
+  border: 1px solid var(--border);
+}
+
+.gai-chat-role {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.gai-chat-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.gai-chat-dialog-foot {
+  padding: 0.75rem 1.25rem 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.gai-chat-form {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-end;
+}
+
+.gai-chat-input {
+  flex: 1;
+  min-height: 2.75rem;
+  max-height: 8rem;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.4;
+}
+
+.gai-chat-send {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 8px;
+  padding: 0.55rem 0.95rem;
+  background: var(--accent);
+  color: var(--surface);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gai-chat-send:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.gai-chat-send:not(:disabled):hover {
+  filter: brightness(1.05);
+}
+
+.gai-chat-live .gai-chat-content:empty:not(.gai-chat-thinking) {
+  display: none;
+}
+
+.gai-chat-thinking {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.gai-chat-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.65rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.gai-chat-progress-line::before {
+  content: "• ";
+  color: var(--accent);
+}
+
+.gai-chat-sql {
+  margin: 0.15rem 0 0;
+  padding: 0.55rem 0.65rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg) 88%, var(--border));
+  border: 1px solid var(--border);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  max-height: 8rem;
+  overflow: auto;
+}
+
+.gai-chat-stream-wrap {
+  margin-bottom: 0.65rem;
+}
+
+.gai-chat-stream-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.gai-chat-stream {
+  margin: 0;
+  padding: 0.55rem 0.65rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg) 92%, var(--border));
+  border: 1px dashed var(--border);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--muted);
+  max-height: 10rem;
+  overflow: auto;
 }
 
 .add-to-lane-dialog {
@@ -2408,6 +2666,30 @@ header p.run-meta {
 }
 
 @media (max-width: 960px) {
+  .app-top-bar {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "brand"
+      "meta"
+      "actions";
+    row-gap: 0.4rem;
+    padding: 0.55rem 0.75rem;
+  }
+
+  .app-top-bar-actions {
+    align-self: stretch;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 0.35rem;
+  }
+
+  .app-top-bar .run-meta,
+  .app-top-bar .pipeline-status,
+  .app-top-bar-meta {
+    line-height: 1.35;
+    word-break: break-word;
+  }
+
   .dashboard-layout {
     grid-template-columns: 1fr;
   }
