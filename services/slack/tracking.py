@@ -8,10 +8,11 @@ from typing import Any, Dict, Iterable, List, Optional, Set
 
 from services.slack.format import load_messages_for_key, primary_source_email
 from services.thread_snooze import ACTIVE, is_removed, normalize_state
+from utils.conversation_sources import SOURCE_PREFIXES, make_source_key, parse_source_key
 
 log = logging.getLogger(__name__)
 
-SLACK_THREAD_PREFIX = "slack:"
+SLACK_THREAD_PREFIX = SOURCE_PREFIXES["slack"]
 SLACK_KIND = "slack"
 SLACK_PAUSED_KIND = "slack_paused"
 
@@ -21,20 +22,11 @@ def _utc_now_iso() -> str:
 
 
 def slack_inbox_thread_id(conversation_key: str) -> str:
-    key = (conversation_key or "").strip()
-    if not key:
-        return ""
-    if key.startswith(SLACK_THREAD_PREFIX):
-        return key
-    return f"{SLACK_THREAD_PREFIX}{key}"
+    return make_source_key("slack", conversation_key)
 
 
 def parse_slack_inbox_thread_id(inbox_thread_id: str) -> Optional[str]:
-    tid = (inbox_thread_id or "").strip()
-    if not tid.startswith(SLACK_THREAD_PREFIX):
-        return None
-    key = tid[len(SLACK_THREAD_PREFIX) :].strip()
-    return key or None
+    return parse_source_key("slack", inbox_thread_id)
 
 
 def _slack_delivery_kind(row: Dict[str, Any]) -> str:

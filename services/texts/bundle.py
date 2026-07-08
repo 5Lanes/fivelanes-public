@@ -46,7 +46,7 @@ def append_unsynced_text_threads_to_bundle(db_path: str, bundle: Dict[str, Any])
     """
     Show on-disk text messages in the dashboard bundle.
 
-    Tracked threads missing from ``claude_message_outputs`` are added wholesale.
+    Tracked threads missing from ``message_outputs`` are added wholesale.
     When a rolling on-disk export gains messages, only the new rows are appended;
     older persisted history is never dropped for tracked threads.
     """

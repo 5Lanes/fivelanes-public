@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Delete duplicate ``claude_message_outputs`` rows by (thread_id, source_id).
+Delete duplicate ``message_outputs`` rows by (thread_id, source_id).
 
 Keeps the newest row per pair by ``generated_at`` (then ``id`` as tie-breaker).
 
 Usage (from repository root):
-  python3 utils/remove_duplicate_claude_message_outputs.py
-  python3 utils/remove_duplicate_claude_message_outputs.py --db /path/to/timeline.db
-  python3 utils/remove_duplicate_claude_message_outputs.py --dry-run
+  python3 utils/remove_duplicate_message_outputs.py
+  python3 utils/remove_duplicate_message_outputs.py --db /path/to/timeline.db
+  python3 utils/remove_duplicate_message_outputs.py --dry-run
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def _duplicate_ids_query() -> str:
                     PARTITION BY COALESCE(TRIM(thread_id), ''), TRIM(source_id)
                     ORDER BY generated_at DESC, id DESC
                 ) AS rn
-            FROM claude_message_outputs
+            FROM message_outputs
             WHERE COALESCE(TRIM(source_id), '') != ''
         )
         WHERE rn > 1
@@ -75,11 +75,11 @@ def main() -> int:
             """
             SELECT name
             FROM sqlite_master
-            WHERE type = 'table' AND name = 'claude_message_outputs'
+            WHERE type = 'table' AND name = 'message_outputs'
             """
         ).fetchone()
         if not table:
-            print(f"Table not found: claude_message_outputs ({db_path})", file=sys.stderr)
+            print(f"Table not found: message_outputs ({db_path})", file=sys.stderr)
             return 1
 
         (dupe_count,) = conn.execute(
@@ -88,17 +88,17 @@ def main() -> int:
         if args.dry_run:
             print(
                 f"Would delete {dupe_count} duplicate row(s) from "
-                f"claude_message_outputs ({db_path})"
+                f"message_outputs ({db_path})"
             )
             return 0
 
         conn.execute(
-            f"DELETE FROM claude_message_outputs WHERE id IN ({_duplicate_ids_query()})"
+            f"DELETE FROM message_outputs WHERE id IN ({_duplicate_ids_query()})"
         )
         (deleted,) = conn.execute("SELECT changes()").fetchone()
         conn.commit()
 
-    print(f"Deleted {deleted} duplicate row(s) from claude_message_outputs ({db_path})")
+    print(f"Deleted {deleted} duplicate row(s) from message_outputs ({db_path})")
     return 0
 
 

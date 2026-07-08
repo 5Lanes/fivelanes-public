@@ -41,7 +41,7 @@ from utils.database import (
     load_processed_cleaned_for_thread,
     load_processed_thread_source_pairs,
     notify_lane_summaries_for_thread,
-    save_claude_run_outputs,
+    save_message_outputs,
     save_thread_summary_cache,
 )
 from utils.runtime_paths import database_path
@@ -390,7 +390,7 @@ def persist_thread_summary(
     generated_at: str,
     apply_to_outputs: bool = False,
 ) -> int:
-    """Write summary cache and optionally update ``claude_message_outputs`` rows."""
+    """Write summary cache and optionally update ``message_outputs`` rows."""
     fp = compute_summary_fingerprint(summary_input, db_path=db_path, backend=backend)
     save_thread_summary_cache(
         db_path,
@@ -514,7 +514,7 @@ def run_threads_llm_pipeline(
         if cleaned_thread:
             cleaned_all.extend(cleaned_thread)
             per_message.extend(thread_per_message)
-            save_claude_run_outputs(
+            save_message_outputs(
                 db,
                 run_stamp=run_stamp,
                 generated_at=generated_at,

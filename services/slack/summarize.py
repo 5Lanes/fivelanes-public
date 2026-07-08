@@ -51,14 +51,14 @@ def _latest_thread_summary(db_path: str, thread_id: str) -> Dict[str, Any]:
         import sqlite3
         from pathlib import Path
 
-        from utils.database import _ensure_claude_outputs_schema, connect_sqlite
+        from utils.database import _ensure_message_outputs_schema, connect_sqlite
 
         with connect_sqlite(db_path) as conn:
-            _ensure_claude_outputs_schema(conn)
+            _ensure_message_outputs_schema(conn)
             row = conn.execute(
                 """
                 SELECT thread_summary_json
-                FROM claude_message_outputs
+                FROM message_outputs
                 WHERE COALESCE(thread_id, '') = ?
                   AND COALESCE(TRIM(api_error), '') = ''
                 ORDER BY datetime DESC, generated_at DESC, id DESC
@@ -106,7 +106,7 @@ def summarize_one_slack_thread(
     run_stamp: Optional[str] = None,
 ) -> Dict[str, Any]:
     from utils.api_error_detection import thread_summary_is_valid
-    from utils.database import apply_thread_resummary_to_db, save_claude_run_outputs
+    from utils.database import apply_thread_resummary_to_db, save_message_outputs
 
     key = (conversation_key or "").strip()
     if not key:
@@ -166,7 +166,7 @@ def summarize_one_slack_thread(
                     "subject": row["subject"],
                 }
             )
-        save_claude_run_outputs(
+        save_message_outputs(
             db_path,
             run_stamp=stamp,
             generated_at=generated_at,

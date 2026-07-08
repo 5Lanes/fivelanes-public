@@ -144,14 +144,14 @@ def prune_content_duplicates(db_path: Path, *, dry_run: bool) -> Tuple[int, int]
             return 0, 0
         if dry_run:
             source_ids = sorted({x["source_id"] for x in losers if x["source_id"]})
-            (claude_would,) = conn.execute(
+            (outputs_would,) = conn.execute(
                 f"""
-                SELECT COUNT(*) FROM claude_message_outputs
+                SELECT COUNT(*) FROM message_outputs
                 WHERE source_id IN ({",".join("?" for _ in source_ids)})
                 """,
                 source_ids,
             ).fetchone()
-            return len(losers), int(claude_would or 0)
+            return len(losers), int(outputs_would or 0)
 
         loser_ids = [x["id"] for x in losers]
         source_ids = sorted({x["source_id"] for x in losers if x["source_id"]})
@@ -161,16 +161,16 @@ def prune_content_duplicates(db_path: Path, *, dry_run: bool) -> Tuple[int, int]
             loser_ids,
         )
         (timeline_deleted,) = conn.execute("SELECT changes()").fetchone()
-        claude_deleted = 0
+        outputs_deleted = 0
         if source_ids:
             ph = ",".join("?" for _ in source_ids)
             conn.execute(
-                f"DELETE FROM claude_message_outputs WHERE source_id IN ({ph})",
+                f"DELETE FROM message_outputs WHERE source_id IN ({ph})",
                 source_ids,
             )
-            (claude_deleted,) = conn.execute("SELECT changes()").fetchone()
+            (outputs_deleted,) = conn.execute("SELECT changes()").fetchone()
         conn.commit()
-        return int(timeline_deleted or 0), int(claude_deleted or 0)
+        return int(timeline_deleted or 0), int(outputs_deleted or 0)
 
 
 def refresh_inbox_timeline(*, lookback_days: int, db_path: str) -> None:
@@ -269,18 +269,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                         params,
                     ).fetchone()
                     (c_n,) = conn.execute(
-                        f"SELECT COUNT(*) FROM claude_message_outputs WHERE source_id IN ({ph})",
+                        f"SELECT COUNT(*) FROM message_outputs WHERE source_id IN ({ph})",
                         params,
                     ).fetchone()
             print(
                 f"Would delete {t_n} inbox-shell timeline row(s) and "
-                f"{c_n} claude_message_outputs row(s)"
+                f"{c_n} message_outputs row(s)"
             )
         else:
             t_del, c_del = prune_inbox_shell_duplicate_entries(str(db_file))
             print(
                 f"Deleted {t_del} inbox-shell timeline row(s) and "
-                f"{c_del} claude_message_outputs row(s)"
+                f"{c_del} message_outputs row(s)"
             )
 
     if do_content:
@@ -288,12 +288,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.dry_run:
             print(
                 f"Would delete {t_del} content-duplicate timeline row(s) and "
-                f"{c_del} matching claude_message_outputs row(s)"
+                f"{c_del} matching message_outputs row(s)"
             )
         else:
             print(
                 f"Deleted {t_del} content-duplicate timeline row(s) and "
-                f"{c_del} matching claude_message_outputs row(s)"
+                f"{c_del} matching message_outputs row(s)"
             )
 
     return 0

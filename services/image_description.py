@@ -70,7 +70,7 @@ def cleaned_content_is_image_stub(process_body: str, cleaned_content: str) -> bo
 def fetch_prior_cleaned_content(
     db_path: str, thread_id: str, source_id: str
 ) -> str:
-    """Latest ``cleaned_content`` for a message from ``claude_message_outputs``."""
+    """Latest ``cleaned_content`` for a message from ``message_outputs``."""
     if not source_id:
         return ""
     try:
@@ -78,7 +78,7 @@ def fetch_prior_cleaned_content(
             row = conn.execute(
                 """
                 SELECT cleaned_content
-                FROM claude_message_outputs
+                FROM message_outputs
                 WHERE source_id = ? AND COALESCE(thread_id, '') = ?
                 ORDER BY generated_at DESC
                 LIMIT 1

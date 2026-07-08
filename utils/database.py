@@ -20,7 +20,7 @@ See README § "Thread identity: inbox tracking vs timeline messages".
 
 **``meeting_preps``** — LLM meeting prep briefs keyed by ``(dedupe_key, thread_id)``.
 
-**``claude_message_outputs``** — segmented/cleaned message rows and thread summaries.
+**``message_outputs``** — segmented/cleaned message rows and thread summaries.
 
 **``thread_summaries``** — cached thread summary fingerprints for skip/incremental resummary.
 
@@ -84,7 +84,7 @@ def ensure_database_schema(db_path: str) -> None:
         _ensure_lane_summaries_schema(conn)
         _ensure_thread_plans_schema(conn)
         _ensure_dismissed_todo_plans_schema(conn)
-        _ensure_claude_outputs_schema(conn)
+        _ensure_message_outputs_schema(conn)
         _ensure_thread_summaries_schema(conn)
         _ensure_thread_draft_replies_schema(conn)
         conn.commit()
@@ -1408,21 +1408,17 @@ def untrack_todo_plan_inbox_thread(db_path: str, *, inbox_thread_id: str) -> boo
 
     ``thread_plans`` rows are kept — Todo emails should exist only as plans.
     """
+    from utils.conversation_sources import classify_source
+
     tid = _normalize_field(inbox_thread_id)
-    if (
-        not tid
-        or tid.startswith("text:")
-        or tid.startswith("slack:")
-        or tid.startswith("linkedin:")
-        or tid.startswith("meet:")
-    ):
+    if not tid or classify_source(tid) in ("text", "slack", "linkedin", "meet"):
         return False
     now = datetime.now(timezone.utc).isoformat()
     db_file = Path(db_path)
     with connect_sqlite(db_file) as conn:
         _ensure_thread_tracking_schema(conn)
         _ensure_timeline_schema(conn)
-        _ensure_claude_outputs_schema(conn)
+        _ensure_message_outputs_schema(conn)
         _ensure_thread_summaries_schema(conn)
         _ensure_thread_draft_replies_schema(conn)
         _ensure_lanes_schema(conn)
@@ -1430,20 +1426,22 @@ def untrack_todo_plan_inbox_thread(db_path: str, *, inbox_thread_id: str) -> boo
             "DELETE FROM timeline_entries WHERE COALESCE(thread_id, '') = ?", (tid,)
         )
         conn.execute(
-            "DELETE FROM claude_message_outputs WHERE COALESCE(thread_id, '') = ?",
+            "DELETE FROM message_outputs WHERE COALESCE(thread_id, '') = ?",
             (tid,),
         )
         conn.execute("DELETE FROM thread_summaries WHERE thread_id = ?", (tid,))
         conn.execute("DELETE FROM thread_draft_replies WHERE thread_id = ?", (tid,))
         conn.execute("DELETE FROM lane_threads WHERE inbox_thread_id = ?", (tid,))
+        from utils.conversation_sources import classify_source
+
         conn.execute(
             """
             INSERT INTO thread_tracking (
                 inbox_thread_id, source_email, snoozed, inner_rfc_message_id,
                 resolved_oauth_account_id, resolution_error, inbox_delivery_kind,
-                created_at, updated_at
+                source_type, created_at, updated_at
             )
-            VALUES (?, '', 2, '', '', '', 'todo_plan', ?, ?)
+            VALUES (?, '', 2, '', '', '', 'todo_plan', ?, ?, ?)
             ON CONFLICT(inbox_thread_id) DO UPDATE SET
                 snoozed = 2,
                 inbox_delivery_kind = COALESCE(
@@ -1452,7 +1450,7 @@ def untrack_todo_plan_inbox_thread(db_path: str, *, inbox_thread_id: str) -> boo
                 ),
                 updated_at = excluded.updated_at
             """,
-            (tid, now, now),
+            (tid, classify_source(tid), now, now),
         )
         _sync_thread_tracking_has_plan(conn, tid)
         conn.commit()
@@ -1460,16 +1458,16 @@ def untrack_todo_plan_inbox_thread(db_path: str, *, inbox_thread_id: str) -> boo
 
 
 def load_thread_subjects(db_path: str, thread_id: str) -> List[str]:
-    """Distinct non-empty subjects from ``claude_message_outputs`` for one thread."""
+    """Distinct non-empty subjects from ``message_outputs`` for one thread."""
     tid = _normalize_field(thread_id)
     if not tid:
         return []
     db_file = Path(db_path)
     with connect_sqlite(db_file) as conn:
-        _ensure_claude_outputs_schema(conn)
+        _ensure_message_outputs_schema(conn)
         rows = conn.execute(
             """
-            SELECT DISTINCT subject FROM claude_message_outputs
+            SELECT DISTINCT subject FROM message_outputs
             WHERE COALESCE(thread_id, '') = ? AND TRIM(COALESCE(subject, '')) != ''
             """,
             (tid,),
@@ -1737,6 +1735,32 @@ def _ensure_thread_tracking_schema(conn: sqlite3.Connection) -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_thread_tracking_inbox_thread_id "
             "ON thread_tracking(inbox_thread_id)"
         )
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(thread_tracking)").fetchall()]
+    if "source_type" not in cols:
+        from utils.conversation_sources import classify_source
+
+        conn.execute("ALTER TABLE thread_tracking ADD COLUMN source_type TEXT")
+        rows = conn.execute("SELECT id, inbox_thread_id FROM thread_tracking").fetchall()
+        conn.executemany(
+            "UPDATE thread_tracking SET source_type = ? WHERE id = ?",
+            [(classify_source(tid), row_id) for row_id, tid in rows],
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_thread_tracking_source_type "
+            "ON thread_tracking(source_type)"
+        )
+    _drop_legacy_dead_tables(conn)
+
+
+def _drop_legacy_dead_tables(conn: sqlite3.Connection) -> None:
+    """
+    Drop tables with zero rows and zero code references left over from retired
+    features. ``people``/``person_threads``/``person_summaries`` predate lanes+areas
+    replacing "people" as the organizing concept; nothing reads or writes them.
+    """
+    conn.execute("DROP TABLE IF EXISTS person_threads")
+    conn.execute("DROP TABLE IF EXISTS person_summaries")
+    conn.execute("DROP TABLE IF EXISTS people")
 
 
 def replace_timeline_entries(db_path: str, rows: List[Dict[str, Any]]) -> int:
@@ -1905,6 +1929,7 @@ def upsert_thread_tracking(
                     ),
                     resolution_error = excluded.resolution_error,
                     inbox_delivery_kind = excluded.inbox_delivery_kind,
+                    source_type = excluded.source_type,
                     updated_at = excluded.updated_at
                 """
                 if apply_snooze
@@ -1932,18 +1957,24 @@ def upsert_thread_tracking(
                         NULLIF(excluded.inbox_delivery_kind, ''),
                         thread_tracking.inbox_delivery_kind
                     ),
+                    source_type = COALESCE(
+                        NULLIF(excluded.source_type, ''),
+                        thread_tracking.source_type
+                    ),
                     updated_at = excluded.updated_at
                 WHERE thread_tracking.snoozed != 2
                 """
             )
+            from utils.conversation_sources import classify_source
+
             conn.executemany(
                 f"""
                 INSERT INTO thread_tracking (
                     inbox_thread_id, gmail_inbox_thread_id, source_email, snoozed,
                     inner_rfc_message_id, resolved_oauth_account_id, resolution_error,
-                    inbox_delivery_kind, created_at, updated_at
+                    inbox_delivery_kind, source_type, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 {conflict_sql}
                 """,
                 [
@@ -1956,6 +1987,7 @@ def upsert_thread_tracking(
                         row["resolved_oauth_account_id"],
                         row.get("resolution_error", ""),
                         row.get("inbox_delivery_kind", ""),
+                        classify_source(row["inbox_thread_id"]),
                         row["created_at"],
                         row["updated_at"],
                     )
@@ -2031,7 +2063,7 @@ def remap_dashboard_thread_id(db_path: str, from_tid: str, to_tid: str) -> None:
         return
     with connect_sqlite(db_path) as conn:
         _ensure_timeline_schema(conn)
-        _ensure_claude_outputs_schema(conn)
+        _ensure_message_outputs_schema(conn)
         _ensure_thread_tracking_schema(conn)
         _ensure_lanes_schema(conn)
         _ensure_thread_plans_schema(conn)
@@ -2042,18 +2074,18 @@ def remap_dashboard_thread_id(db_path: str, from_tid: str, to_tid: str) -> None:
         )
         conn.execute(
             """
-            DELETE FROM claude_message_outputs
+            DELETE FROM message_outputs
             WHERE COALESCE(thread_id, '') = ?
               AND COALESCE(TRIM(source_id), '') != ''
               AND source_id IN (
-                  SELECT source_id FROM claude_message_outputs
+                  SELECT source_id FROM message_outputs
                   WHERE COALESCE(thread_id, '') = ?
               )
             """,
             (src, dst),
         )
         conn.execute(
-            "UPDATE claude_message_outputs SET thread_id = ? WHERE thread_id = ?",
+            "UPDATE message_outputs SET thread_id = ? WHERE thread_id = ?",
             (dst, src),
         )
         conn.execute(
@@ -2177,7 +2209,7 @@ def prune_inbox_shell_duplicate_entries(db_path: str) -> Tuple[int, int]:
     """
     Drop Fivelanes-inbox Bcc/Cc shell copies (``source_id`` = ``gmail_inbox_thread_id``).
 
-    Returns ``(timeline_deleted, claude_outputs_deleted)``.
+    Returns ``(timeline_deleted, message_outputs_deleted)``.
     """
     shell_ids: set[str] = set()
     for row in fetch_thread_tracking_rows(db_path):
@@ -2193,7 +2225,7 @@ def prune_inbox_shell_duplicate_entries(db_path: str) -> Tuple[int, int]:
     params = sorted(shell_ids)
     with connect_sqlite(db_path) as conn:
         _ensure_timeline_schema(conn)
-        _ensure_claude_outputs_schema(conn)
+        _ensure_message_outputs_schema(conn)
         cur_t = conn.execute(
             f"""
             DELETE FROM timeline_entries
@@ -2203,7 +2235,7 @@ def prune_inbox_shell_duplicate_entries(db_path: str) -> Tuple[int, int]:
         )
         cur_c = conn.execute(
             f"""
-            DELETE FROM claude_message_outputs
+            DELETE FROM message_outputs
             WHERE source_id IN ({placeholders})
             """,
             params,
@@ -2272,7 +2304,7 @@ def clear_snooze_only_for_threads(
 ) -> None:
     """
     Set ``snoozed`` from 1 → 0 for the given inbox thread ids on ``thread_tracking`` and on
-    ``claude_message_outputs`` rows keyed by ``thread_id``. Rows with ``snoozed`` = 2 (removed)
+    ``message_outputs`` rows keyed by ``thread_id``. Rows with ``snoozed`` = 2 (removed)
     are left unchanged.
     """
     tids: List[str] = []
@@ -2289,25 +2321,25 @@ def clear_snooze_only_for_threads(
     ph = ",".join("?" for _ in tids)
     with connect_sqlite(db_file) as conn:
         _ensure_thread_tracking_schema(conn)
-        _ensure_claude_outputs_schema(conn)
+        _ensure_message_outputs_schema(conn)
         conn.execute(
             f"UPDATE thread_tracking SET snoozed = 0, updated_at = ? "
             f"WHERE snoozed = 1 AND inbox_thread_id IN ({ph})",
             [now, *tids],
         )
         conn.execute(
-            f"UPDATE claude_message_outputs SET snoozed = 0 "
+            f"UPDATE message_outputs SET snoozed = 0 "
             f"WHERE snoozed = 1 AND COALESCE(thread_id, '') IN ({ph})",
             tids,
         )
         conn.commit()
 
 
-def _ensure_claude_outputs_schema(conn: sqlite3.Connection) -> None:
-    """Single-row-per-message table for Claude pipeline outputs."""
+def _ensure_message_outputs_schema(conn: sqlite3.Connection) -> None:
+    """Single-row-per-message table for LLM pipeline outputs (segmented/cleaned content)."""
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS claude_message_outputs (
+        CREATE TABLE IF NOT EXISTS message_outputs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_stamp TEXT NOT NULL,
             generated_at TEXT NOT NULL,
@@ -2324,39 +2356,42 @@ def _ensure_claude_outputs_schema(conn: sqlite3.Connection) -> None:
             signature TEXT,
             api_error TEXT,
             snoozed INTEGER NOT NULL DEFAULT 0,
-            thread_summary_json TEXT NOT NULL,
-            aggregate_summary_json TEXT NOT NULL
+            thread_summary_json TEXT NOT NULL
         )
         """
     )
     cols = {
-        row[1] for row in conn.execute("PRAGMA table_info(claude_message_outputs)").fetchall()
+        row[1] for row in conn.execute("PRAGMA table_info(message_outputs)").fetchall()
     }
     if "snoozed" not in cols:
         conn.execute(
-            "ALTER TABLE claude_message_outputs ADD COLUMN snoozed INTEGER NOT NULL DEFAULT 0"
+            "ALTER TABLE message_outputs ADD COLUMN snoozed INTEGER NOT NULL DEFAULT 0"
         )
+    if "aggregate_summary_json" in cols:
+        # Dead weight: written on every insert, never read anywhere (superseded by
+        # thread_summaries as the canonical per-thread summary store).
+        conn.execute("ALTER TABLE message_outputs DROP COLUMN aggregate_summary_json")
     conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_claude_message_outputs_run_source "
-        "ON claude_message_outputs(run_stamp, source_id)"
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_message_outputs_run_source "
+        "ON message_outputs(run_stamp, source_id)"
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_claude_message_outputs_run_stamp "
-        "ON claude_message_outputs(run_stamp)"
+        "CREATE INDEX IF NOT EXISTS idx_message_outputs_run_stamp "
+        "ON message_outputs(run_stamp)"
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_claude_message_outputs_thread_id "
-        "ON claude_message_outputs(thread_id)"
+        "CREATE INDEX IF NOT EXISTS idx_message_outputs_thread_id "
+        "ON message_outputs(thread_id)"
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_claude_message_outputs_thread_source "
-        "ON claude_message_outputs(thread_id, source_id)"
+        "CREATE INDEX IF NOT EXISTS idx_message_outputs_thread_source "
+        "ON message_outputs(thread_id, source_id)"
     )
     try:
         conn.execute(
             """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_claude_message_outputs_thread_source_success
-            ON claude_message_outputs(COALESCE(thread_id, ''), source_id)
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_message_outputs_thread_source_success
+            ON message_outputs(COALESCE(thread_id, ''), source_id)
             WHERE source_id IS NOT NULL AND source_id != ''
               AND COALESCE(TRIM(api_error), '') = ''
             """
@@ -2396,7 +2431,7 @@ def _prior_success_row_is_replaceable(
     return len(prior) < 120 and "\n" not in prior and prior.count(" ") < 4
 
 
-def _claude_outputs_latest_success_content_by_pair(
+def _message_outputs_latest_success_content_by_pair(
     conn: sqlite3.Connection,
 ) -> Dict[Tuple[str, str], str]:
     """Latest ``cleaned_content`` per ``(thread_id, source_id)`` for successful rows."""
@@ -2404,7 +2439,7 @@ def _claude_outputs_latest_success_content_by_pair(
         rows = conn.execute(
             """
             SELECT COALESCE(thread_id, ''), source_id, cleaned_content
-            FROM claude_message_outputs
+            FROM message_outputs
             WHERE source_id IS NOT NULL AND source_id != ''
               AND COALESCE(TRIM(api_error), '') = ''
             ORDER BY generated_at DESC, id DESC
@@ -2426,9 +2461,9 @@ def _claude_outputs_latest_success_content_by_pair(
     return out
 
 
-def _claude_outputs_successful_thread_source_pairs(conn: sqlite3.Connection) -> Set[Tuple[str, str]]:
+def _message_outputs_successful_thread_source_pairs(conn: sqlite3.Connection) -> Set[Tuple[str, str]]:
     """``(thread_id, source_id)`` pairs that already have a successful pipeline row."""
-    return set(_claude_outputs_latest_success_content_by_pair(conn).keys())
+    return set(_message_outputs_latest_success_content_by_pair(conn).keys())
 
 
 def load_all_processed_cleaned_by_thread(db_path: str) -> Dict[str, List[Dict[str, Any]]]:
@@ -2438,7 +2473,7 @@ def load_all_processed_cleaned_by_thread(db_path: str) -> Dict[str, List[Dict[st
     try:
         with connect_sqlite(db_path) as conn:
             conn.row_factory = sqlite3.Row
-            _ensure_claude_outputs_schema(conn)
+            _ensure_message_outputs_schema(conn)
             rows = conn.execute(
                 """
                 WITH ranked AS (
@@ -2448,7 +2483,7 @@ def load_all_processed_cleaned_by_thread(db_path: str) -> Dict[str, List[Dict[st
                                PARTITION BY COALESCE(thread_id, ''), COALESCE(source_id, '')
                                ORDER BY generated_at DESC, id DESC
                            ) AS rn
-                    FROM claude_message_outputs
+                    FROM message_outputs
                     WHERE COALESCE(TRIM(api_error), '') = ''
                 )
                 SELECT thread_id, source_id, datetime, sender, recipients, subject, raw_text,
@@ -2499,7 +2534,7 @@ def load_processed_cleaned_for_thread(
     try:
         with connect_sqlite(db_path) as conn:
             conn.row_factory = sqlite3.Row
-            _ensure_claude_outputs_schema(conn)
+            _ensure_message_outputs_schema(conn)
             rows = conn.execute(
                 """
                 WITH ranked AS (
@@ -2509,7 +2544,7 @@ def load_processed_cleaned_for_thread(
                                PARTITION BY COALESCE(source_id, '')
                                ORDER BY generated_at DESC, id DESC
                            ) AS rn
-                    FROM claude_message_outputs
+                    FROM message_outputs
                     WHERE thread_id = ?
                       AND COALESCE(TRIM(api_error), '') = ''
                 )
@@ -2769,10 +2804,10 @@ def apply_thread_resummary_to_db(
         ensure_ascii=False,
     )
     with connect_sqlite(db_path) as conn:
-        _ensure_claude_outputs_schema(conn)
+        _ensure_message_outputs_schema(conn)
         cur = conn.execute(
             """
-            UPDATE claude_message_outputs
+            UPDATE message_outputs
             SET thread_summary_json = ?, generated_at = ?
             WHERE COALESCE(thread_id, '') = ?
               AND COALESCE(TRIM(api_error), '') = ''
@@ -2786,12 +2821,12 @@ def apply_thread_resummary_to_db(
     return updated
 
 
-def load_latest_claude_output_snapshot_rows(db_path: str) -> List[Dict[str, Any]]:
+def load_latest_message_output_snapshot_rows(db_path: str) -> List[Dict[str, Any]]:
     """One row per (thread_id, source_id): latest ``generated_at`` (dashboard shape)."""
     try:
         with connect_sqlite(db_path) as conn:
             conn.row_factory = sqlite3.Row
-            _ensure_claude_outputs_schema(conn)
+            _ensure_message_outputs_schema(conn)
             rows = conn.execute(
                 """
                 WITH ranked AS (
@@ -2800,7 +2835,7 @@ def load_latest_claude_output_snapshot_rows(db_path: str) -> List[Dict[str, Any]
                                PARTITION BY COALESCE(thread_id, ''), COALESCE(source_id, '')
                                ORDER BY generated_at DESC, id DESC
                            ) AS rn
-                    FROM claude_message_outputs
+                    FROM message_outputs
                 )
                 SELECT run_stamp, generated_at, thread_id, source_id, datetime, sender,
                        recipients, subject, raw_text, forwarded_from, cleaned_content,
@@ -2871,7 +2906,7 @@ def pending_message_counts_by_thread(
     since_iso: str | None = None,
 ) -> Dict[str, int]:
     """
-    Per ``thread_id``, count messages not yet in successful ``claude_message_outputs``.
+    Per ``thread_id``, count messages not yet in successful ``message_outputs``.
 
     Email: ``timeline_entries`` rows within lookback missing a successful output row.
     Text: on-disk conversation messages missing a successful output row.
@@ -2889,11 +2924,11 @@ def pending_message_counts_by_thread(
     successful: set[tuple[str, str]] = set()
     try:
         with connect_sqlite(db_path) as conn:
-            _ensure_claude_outputs_schema(conn)
+            _ensure_message_outputs_schema(conn)
             for tid, sid in conn.execute(
                 """
                 SELECT COALESCE(thread_id, ''), source_id
-                FROM claude_message_outputs
+                FROM message_outputs
                 WHERE COALESCE(TRIM(source_id), '') != ''
                   AND COALESCE(TRIM(api_error), '') = ''
                 """
@@ -3003,25 +3038,21 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
     Dashboard summaries payload: latest message rows, snooze overrides, drafts, meeting preps.
     """
     from services.linkedin.tracking import (
-        LINKEDIN_THREAD_PREFIX,
         fetch_tracked_conversation_keys as fetch_tracked_linkedin_keys,
         fetch_visible_conversation_keys as fetch_visible_linkedin_keys,
         linkedin_inbox_thread_id as _linkedin_inbox_thread_id,
     )
     from services.meet_recordings.tracking import (
-        MEET_THREAD_PREFIX,
         fetch_tracked_document_keys as fetch_tracked_meet_keys,
         fetch_visible_document_keys as fetch_visible_meet_keys,
         meet_inbox_thread_id as _meet_inbox_thread_id,
     )
     from services.slack.tracking import (
-        SLACK_THREAD_PREFIX,
         fetch_tracked_conversation_keys as fetch_tracked_slack_keys,
         fetch_visible_conversation_keys as fetch_visible_slack_keys,
         slack_inbox_thread_id as _slack_inbox_thread_id,
     )
     from services.texts.tracking import (
-        TEXT_THREAD_PREFIX,
         fetch_tracked_conversation_keys,
         fetch_visible_conversation_keys as fetch_visible_text_keys,
         text_inbox_thread_id as _text_inbox_thread_id,
@@ -3032,6 +3063,7 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
         refresh_text_threads_auto_unsnooze,
         snooze_map,
     )
+    from utils.conversation_sources import classify_source
 
     refresh_text_threads_auto_unsnooze(db_path)
     refresh_slack_threads_auto_unsnooze(db_path)
@@ -3063,20 +3095,21 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
         finalized_by_thread[tid] = finalized
         return finalized
 
-    rows = load_latest_claude_output_snapshot_rows(db_path)
+    rows = load_latest_message_output_snapshot_rows(db_path)
     cleaned: List[Dict[str, Any]] = []
     summary: List[Dict[str, Any]] = []
     latest_run_stamp = ""
     latest_generated_at = ""
     for raw in rows:
         tid = _normalize_field(raw.get("thread_id"))
-        if tid.startswith(TEXT_THREAD_PREFIX) and tid not in tracked_text_thread_ids:
+        source = classify_source(tid)
+        if source == "text" and tid not in tracked_text_thread_ids:
             continue
-        if tid.startswith(SLACK_THREAD_PREFIX) and tid not in tracked_slack_thread_ids:
+        if source == "slack" and tid not in tracked_slack_thread_ids:
             continue
-        if tid.startswith(LINKEDIN_THREAD_PREFIX) and tid not in tracked_linkedin_thread_ids:
+        if source == "linkedin" and tid not in tracked_linkedin_thread_ids:
             continue
-        if tid.startswith(MEET_THREAD_PREFIX) and tid not in tracked_meet_thread_ids:
+        if source == "meet" and tid not in tracked_meet_thread_ids:
             continue
         fallback_summary = _parse_thread_summary_json(raw.get("thread_summary_json"))
         thread_summary = finalized_for_thread(tid, fallback_summary) if tid else fallback_summary
@@ -3187,8 +3220,8 @@ def load_processed_thread_source_pairs(db_path: str) -> Set[Tuple[str, str]]:
     """
     try:
         with connect_sqlite(db_path) as conn:
-            _ensure_claude_outputs_schema(conn)
-            return _claude_outputs_successful_thread_source_pairs(conn)
+            _ensure_message_outputs_schema(conn)
+            return _message_outputs_successful_thread_source_pairs(conn)
     except sqlite3.Error:
         return set()
 
@@ -3220,13 +3253,13 @@ def summaries_content_fingerprint(cleaned: List[Dict[str, Any]]) -> str:
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
-def claude_outputs_revision(db_path: str) -> str:
+def message_outputs_revision(db_path: str) -> str:
     """Latest ``generated_at`` among segmented rows (ETag/content-revision helper)."""
     try:
         with connect_sqlite(db_path) as conn:
-            _ensure_claude_outputs_schema(conn)
+            _ensure_message_outputs_schema(conn)
             row = conn.execute(
-                "SELECT MAX(generated_at) FROM claude_message_outputs"
+                "SELECT MAX(generated_at) FROM message_outputs"
             ).fetchone()
     except sqlite3.Error:
         return ""
@@ -3247,13 +3280,13 @@ def load_prior_cleaned_content_by_pair(db_path: str) -> Dict[Tuple[str, str], st
     """Latest successful ``cleaned_content`` per ``(thread_id, source_id)``."""
     try:
         with connect_sqlite(db_path) as conn:
-            _ensure_claude_outputs_schema(conn)
-            return _claude_outputs_latest_success_content_by_pair(conn)
+            _ensure_message_outputs_schema(conn)
+            return _message_outputs_latest_success_content_by_pair(conn)
     except sqlite3.Error:
         return {}
 
 
-def save_claude_run_outputs(
+def save_message_outputs(
     db_path: str,
     *,
     run_stamp: str,
@@ -3282,13 +3315,11 @@ def save_claude_run_outputs(
         )
         ts = row.get("thread_summary")
         summary_by_key[key] = ts if isinstance(ts, dict) else {}
-
-    aggregate_json = "{}"
     with connect_sqlite(db_file) as conn:
-        _ensure_claude_outputs_schema(conn)
+        _ensure_message_outputs_schema(conn)
         if replace_run_stamp:
-            conn.execute("DELETE FROM claude_message_outputs WHERE run_stamp = ?", (run_stamp,))
-        existing_content = _claude_outputs_latest_success_content_by_pair(conn)
+            conn.execute("DELETE FROM message_outputs WHERE run_stamp = ?", (run_stamp,))
+        existing_content = _message_outputs_latest_success_content_by_pair(conn)
         cleaned_to_insert: List[Dict[str, Any]] = []
         for row in cleaned:
             tid = _normalize_field(row.get("thread_id"))
@@ -3309,7 +3340,7 @@ def save_claude_run_outputs(
                     continue
                 conn.execute(
                     """
-                    DELETE FROM claude_message_outputs
+                    DELETE FROM message_outputs
                     WHERE COALESCE(thread_id, '') = ? AND source_id = ?
                       AND COALESCE(TRIM(api_error), '') = ''
                     """,
@@ -3323,13 +3354,12 @@ def save_claude_run_outputs(
         if cleaned_to_insert:
             conn.executemany(
                 """
-                INSERT OR IGNORE INTO claude_message_outputs (
+                INSERT OR IGNORE INTO message_outputs (
                     run_stamp, generated_at, thread_id, source_id, datetime, sender,
                     recipients, subject, raw_text, forwarded_from, cleaned_content,
-                    quoted_reply, signature, api_error, snoozed, thread_summary_json,
-                    aggregate_summary_json
+                    quoted_reply, signature, api_error, snoozed, thread_summary_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -3380,7 +3410,6 @@ def save_claude_run_outputs(
                             ),
                             ensure_ascii=False,
                         ),
-                        aggregate_json,
                     )
                     for row in cleaned_to_insert
                 ],
@@ -3390,26 +3419,26 @@ def save_claude_run_outputs(
     notify_summaries_bundle_dirty()
 
 
-def delete_claude_outputs_for_thread(db_path: str, thread_id: str) -> int:
-    """Delete all ``claude_message_outputs`` rows for one dashboard ``thread_id``."""
+def delete_message_outputs_for_thread(db_path: str, thread_id: str) -> int:
+    """Delete all ``message_outputs`` rows for one dashboard ``thread_id``."""
     tid = _normalize_field(thread_id)
     if not tid:
         return 0
     db_file = Path(db_path)
     with connect_sqlite(db_file) as conn:
-        _ensure_claude_outputs_schema(conn)
+        _ensure_message_outputs_schema(conn)
         cur = conn.execute(
-            "DELETE FROM claude_message_outputs WHERE COALESCE(thread_id, '') = ?",
+            "DELETE FROM message_outputs WHERE COALESCE(thread_id, '') = ?",
             (tid,),
         )
         conn.commit()
         return int(cur.rowcount or 0)
 
 
-def set_claude_outputs_thread_snoozed(
+def set_message_outputs_thread_snoozed(
     db_path: str, *, thread_id: str, snoozed: int
 ) -> bool:
-    """Persist snooze flag for all claude_message_outputs rows by thread_id."""
+    """Persist snooze flag for all message_outputs rows by thread_id."""
     tid = _normalize_field(thread_id)
     if not tid:
         return False
@@ -3417,9 +3446,9 @@ def set_claude_outputs_thread_snoozed(
     snooze_value = raw if raw in (0, 1, 2) else 0
     db_file = Path(db_path)
     with connect_sqlite(db_file) as conn:
-        _ensure_claude_outputs_schema(conn)
+        _ensure_message_outputs_schema(conn)
         cur = conn.execute(
-            "UPDATE claude_message_outputs SET snoozed = ? WHERE COALESCE(thread_id, '') = ?",
+            "UPDATE message_outputs SET snoozed = ? WHERE COALESCE(thread_id, '') = ?",
             (snooze_value, tid),
         )
         conn.commit()
@@ -3481,7 +3510,7 @@ def build_thread_draft_payload(
 
 
 def _ensure_thread_draft_replies_schema(conn: sqlite3.Connection) -> None:
-    """One row per Gmail thread id (matches ``claude_message_outputs.thread_id``)."""
+    """One row per Gmail thread id (matches ``message_outputs.thread_id``)."""
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS thread_draft_replies (
