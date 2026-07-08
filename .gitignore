@@ -5,6 +5,7 @@ __pycache__/
 *.py[cod]
 .DS_Store
 .cursor/
+.vscode/
 .claude/
 
 # OAuth config (real files only; examples stay tracked)

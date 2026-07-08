@@ -319,7 +319,10 @@ def _ollama_generate_text(
     max_tokens: int,
     response_format: Any | None,
     env_path: str = ".env",
-) -> str:
+    think: bool = False,
+) -> tuple[str, str]:
+    """Returns ``(response_text, thinking_text)``. ``thinking_text`` is empty unless ``think`` is set
+    and the model is a reasoning model that returns a separate ``thinking`` field."""
     url = f"{base}/api/generate"
     payload: Dict[str, Any] = {
         "model": model_name,
@@ -331,6 +334,8 @@ def _ollama_generate_text(
         payload["system"] = system.strip()
     if response_format is not None:
         payload["format"] = response_format
+    if think:
+        payload["think"] = True
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -353,8 +358,10 @@ def _ollama_generate_text(
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
-        return raw[:4000]
-    return str(parsed.get("response") or "").strip()
+        return raw[:4000], ""
+    response_text = str(parsed.get("response") or "").strip()
+    thinking_text = str(parsed.get("thinking") or "").strip() if think else ""
+    return response_text, thinking_text
 
 
 def iter_ollama_generate_text(
@@ -367,8 +374,14 @@ def iter_ollama_generate_text(
     max_tokens: int,
     response_format: Any | None,
     env_path: str = ".env",
+    think: bool = False,
+    high_priority: bool = False,
 ):
-    """Stream text chunks from Ollama ``/api/generate`` (``stream: true``)."""
+    """Stream ``(kind, text)`` chunks from Ollama ``/api/generate`` (``stream: true``).
+
+    ``kind`` is ``"thinking"`` for chain-of-thought text (only emitted when ``think=True``
+    and the model returns a ``thinking`` field) or ``"response"`` for regular output.
+    """
     url = f"{base}/api/generate"
     payload: Dict[str, Any] = {
         "model": model_name,
@@ -380,6 +393,8 @@ def iter_ollama_generate_text(
         payload["system"] = system.strip()
     if response_format is not None:
         payload["format"] = response_format
+    if think:
+        payload["think"] = True
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -387,7 +402,7 @@ def iter_ollama_generate_text(
         method="POST",
     )
     timeout_sec = _ollama_timeout_sec(env_path)
-    with llm_inference_slot():
+    with llm_inference_slot(high_priority=high_priority):
         try:
             with urllib.request.urlopen(request, timeout=timeout_sec) as response:
                 for raw_line in response:
@@ -398,9 +413,13 @@ def iter_ollama_generate_text(
                         obj = json.loads(line)
                     except json.JSONDecodeError:
                         continue
+                    if think:
+                        thinking_chunk = str(obj.get("thinking") or "")
+                        if thinking_chunk:
+                            yield "thinking", thinking_chunk
                     chunk = str(obj.get("response") or "")
                     if chunk:
-                        yield chunk
+                        yield "response", chunk
                     if obj.get("done"):
                         break
         except TimeoutError as exc:
@@ -421,8 +440,18 @@ def stream_ollama_text(
     max_tokens: int = 1200,
     env_path: str = ".env",
     response_format: Any | None = None,
+    think: bool = False,
+    high_priority: bool = False,
 ):
-    """Yield streamed text chunks from Ollama for a prompt."""
+    """Yield ``(kind, text)`` streamed chunks from Ollama for a prompt.
+
+    ``kind`` is ``"response"`` for normal output or ``"thinking"`` for chain-of-thought text.
+    ``think=True`` asks reasoning-capable models for their thinking trace; if the model
+    rejects the ``think`` option before any chunk is streamed, this silently falls back to a
+    non-thinking call rather than failing (mirrors ``call_ollama_json``'s ``think`` fallback).
+    ``high_priority=True`` lets this call cut ahead of queued background pipeline calls on the
+    shared Ollama slot — used for interactive chat.
+    """
     base = _ollama_base_url(env_path)
     if not base:
         raise RuntimeError("OLLAMA_HOST is not set in environment or .env")
@@ -434,16 +463,34 @@ def stream_ollama_text(
     if not user and system:
         user = system
         system = ""
-    yield from iter_ollama_generate_text(
-        base=base,
-        headers=headers,
-        model_name=model_name,
-        prompt=user,
-        system=system,
-        max_tokens=max_tokens,
-        response_format=response_format,
-        env_path=env_path,
-    )
+
+    def _iter(want_think: bool):
+        return iter_ollama_generate_text(
+            base=base,
+            headers=headers,
+            model_name=model_name,
+            prompt=user,
+            system=system,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            env_path=env_path,
+            think=want_think,
+            high_priority=high_priority,
+        )
+
+    if not think:
+        yield from _iter(False)
+        return
+
+    yielded_any = False
+    try:
+        for item in _iter(True):
+            yielded_any = True
+            yield item
+    except RuntimeError:
+        if yielded_any:
+            raise
+        yield from _iter(False)
 
 
 def _resolve_ollama_prompt(prompt: str | PromptMessages) -> tuple[str, str]:
@@ -459,6 +506,8 @@ def call_ollama_json(
     max_tokens: int = 1200,
     env_path: str = ".env",
     response_format: Any | None = "json",
+    think: bool = False,
+    high_priority: bool = False,
 ) -> Dict[str, Any]:
     """
     Call a remote Ollama ``/api/generate`` endpoint and parse a JSON object from the model text.
@@ -466,6 +515,15 @@ def call_ollama_json(
 
     ``response_format`` is passed to Ollama as ``format`` (``"json"`` or a JSON-schema dict). Pass ``None`` to
     disable structured output (legacy behavior).
+
+    ``think=True`` asks reasoning-capable models (e.g. deepseek-r1, qwen3) for their chain-of-thought via
+    Ollama's ``think`` option; the reasoning text (if any) comes back under the ``_thinking`` key of the
+    returned dict. Models that don't support ``think`` reject the request, so this silently falls back to
+    a non-thinking call rather than failing the whole prompt.
+
+    ``high_priority=True`` lets this call cut ahead of any background pipeline calls (segmentation,
+    summaries, email replies, meeting prep, lane summaries) still waiting for the shared inference slot —
+    used for the interactive "Ask AIFred" chat so it doesn't sit behind a queued pipeline run.
     """
     base = _ollama_base_url(env_path)
     if not base:
@@ -487,12 +545,11 @@ def call_ollama_json(
     else:
         formats_to_try = [response_format, "json", None]
 
-    combined = ""
-    last_http_error: Optional[RuntimeError] = None
-    with llm_inference_slot():
+    def _attempt(want_think: bool) -> tuple[str, str]:
+        last_http_error: Optional[RuntimeError] = None
         for fmt in formats_to_try:
             try:
-                combined = _ollama_generate_text(
+                return _ollama_generate_text(
                     base=base,
                     headers=headers,
                     model_name=model_name,
@@ -501,23 +558,36 @@ def call_ollama_json(
                     max_tokens=max_tokens,
                     response_format=fmt,
                     env_path=env_path,
+                    think=want_think,
                 )
-                last_http_error = None
-                break
             except RuntimeError as exc:
                 if fmt is formats_to_try[-1]:
                     raise
                 last_http_error = exc
-    if last_http_error is not None:
+        assert last_http_error is not None
         raise last_http_error
+
+    with llm_inference_slot(high_priority=high_priority):
+        if think:
+            try:
+                combined, thinking = _attempt(True)
+            except RuntimeError:
+                combined, thinking = _attempt(False)
+        else:
+            combined, thinking = _attempt(False)
 
     extracted = _extract_first_json_object(combined)
     if extracted:
+        if thinking:
+            extracted["_thinking"] = thinking
         return extracted
-    return {
+    result: Dict[str, Any] = {
         "raw_text": combined,
         "api_error": "Model returned prose instead of JSON; summary not structured.",
     }
+    if thinking:
+        result["_thinking"] = thinking
+    return result
 
 
 def submit_prompt(
@@ -638,7 +708,15 @@ def submit_aifred_chat_prompt(
     max_tokens: int = 1200,
     env_path: str = ".env",
 ) -> Dict[str, Any]:
-    """Ask AIFred chat turn: default model from ``OLLAMA_MODEL_AIFRED`` (falls back to summary model)."""
+    """Ask AIFred chat turn: default model from ``OLLAMA_MODEL_AIFRED`` (falls back to summary model).
+
+    Requests the model's reasoning trace (``think=True``); reasoning-capable models return it under
+    ``_thinking`` in the result. Models without reasoning support just skip it.
+
+    Runs ``high_priority`` so an in-progress "Run fivelanes" pipeline (segmentation, summaries, email
+    replies, meeting prep, lane summaries — all queued on the same shared Ollama slot) doesn't make the
+    user wait behind it just to get a chat answer.
+    """
     resolved = model or _resolve_ollama_model(env_path, "OLLAMA_MODEL_AIFRED", MODEL_SUMMARY)
     return call_ollama_json(
         prompt,
@@ -646,6 +724,8 @@ def submit_aifred_chat_prompt(
         max_tokens=max_tokens,
         env_path=env_path,
         response_format=AIFRED_CHAT_RESPONSE_FORMAT,
+        think=True,
+        high_priority=True,
     )
 
 

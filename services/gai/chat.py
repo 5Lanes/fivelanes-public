@@ -186,13 +186,15 @@ def _ask_llm_for_sql(
     )
     if emit is not None:
         combined = ""
-        for chunk in stream_ollama_text(
+        for kind, chunk in stream_ollama_text(
             prompt,
             model=_llm_model(),
             max_tokens=800,
             env_path=_env_path(),
             response_format=_SQL_RESPONSE_FORMAT,
         ):
+            if kind != "response":
+                continue
             combined += chunk
             _emit(emit, {"type": "token", "stage": "sql", "text": chunk})
         extracted = _extract_first_json_object(combined)
@@ -219,7 +221,9 @@ def _ask_llm_for_answer(
     person_response: Dict[str, Any] | None,
     snapshot: Dict[str, Any],
     emit: Optional[EmitFn] = None,
-) -> str:
+) -> tuple[str, str]:
+    """Returns ``(answer, thinking)``. ``thinking`` is the model's chain-of-thought trace,
+    empty if the model doesn't support reasoning."""
     _emit(emit, {"type": "progress", "message": "Writing answer with Llama…"})
     _emit(emit, {"type": "stage", "stage": "answer", "message": "Model output"})
     prompt = _answer_prompt(
@@ -233,16 +237,23 @@ def _ask_llm_for_answer(
     )
     if emit is not None:
         combined = ""
-        for chunk in stream_ollama_text(
+        thinking = ""
+        for kind, chunk in stream_ollama_text(
             prompt,
             model=_llm_model(),
             max_tokens=1200,
             env_path=_env_path(),
             response_format=None,
+            think=True,
+            high_priority=True,
         ):
-            combined += chunk
-            _emit(emit, {"type": "token", "stage": "answer", "text": chunk})
-        return combined.strip() or "No answer returned."
+            if kind == "thinking":
+                thinking += chunk
+                _emit(emit, {"type": "token", "stage": "answer", "kind": "thinking", "text": chunk})
+            else:
+                combined += chunk
+                _emit(emit, {"type": "token", "stage": "answer", "text": chunk})
+        return combined.strip() or "No answer returned.", thinking.strip()
 
     result = call_ollama_json(
         prompt,
@@ -250,11 +261,14 @@ def _ask_llm_for_answer(
         max_tokens=1200,
         env_path=_env_path(),
         response_format=None,
+        think=True,
+        high_priority=True,
     )
+    thinking = str(result.get("_thinking") or "").strip()
     raw = (result.get("raw_text") or result.get("answer") or "").strip()
     if raw:
-        return raw
-    return json.dumps(result, indent=2, default=str)
+        return raw, thinking
+    return json.dumps(result, indent=2, default=str), thinking
 
 
 def _person_lookup_result(
@@ -329,7 +343,7 @@ def _run_gai_chat(
             "Used Fivelanes arrival semantics: timeline_entries since local midnight plus "
             "new_since_refresh for chat channels."
         )
-        answer = _ask_llm_for_answer(
+        answer, thinking = _ask_llm_for_answer(
             question=question,
             sql="",
             reasoning=reasoning,
@@ -339,7 +353,7 @@ def _run_gai_chat(
             snapshot=snapshot,
             emit=emit,
         )
-        return {
+        out = {
             "ok": True,
             "question": question,
             "sql": "(structured arrivals lookup)",
@@ -349,6 +363,9 @@ def _run_gai_chat(
             "answer": answer,
             "last_person": session.get("last_person"),
         }
+        if thinking:
+            out["thinking"] = thinking
+        return out
 
     person = resolve_person_reference(question, turns, session_context=session)
     if person and _should_use_person_lookup(question, person):
@@ -443,7 +460,7 @@ def _run_gai_chat(
                 emit=emit,
             )
 
-    answer = _ask_llm_for_answer(
+    answer, thinking = _ask_llm_for_answer(
         question=question,
         sql=query_result["sql"],
         reasoning=reasoning,
@@ -453,7 +470,7 @@ def _run_gai_chat(
         snapshot=snapshot,
         emit=emit,
     )
-    return {
+    out = {
         "ok": True,
         "question": question,
         "sql": query_result["sql"],
@@ -463,6 +480,9 @@ def _run_gai_chat(
         "answer": answer,
         "last_person": person or session.get("last_person"),
     }
+    if thinking:
+        out["thinking"] = thinking
+    return out
 
 
 def iter_gai_chat_events(

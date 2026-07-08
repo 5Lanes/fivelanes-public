@@ -68,7 +68,10 @@ function renderMessages() {
         .map((turn) => {
         const role = turn.role === "user" ? "You" : "Alfred";
         const cls = turn.role === "user" ? "gai-chat-bubble-user" : "gai-chat-bubble-assistant";
-        return `<div class="gai-chat-turn ${cls}"><div class="gai-chat-role">${escapeHtml(role)}</div><div class="gai-chat-content">${formatMessageHtml(turn.content)}</div></div>`;
+        const reasoningBlock = turn.thinking
+            ? `<details class="gai-chat-reasoning"><summary>Thought process</summary><div class="gai-chat-reasoning-body">${formatMessageHtml(turn.thinking)}</div></details>`
+            : "";
+        return `<div class="gai-chat-turn ${cls}"><div class="gai-chat-role">${escapeHtml(role)}</div>${reasoningBlock}<div class="gai-chat-content">${formatMessageHtml(turn.content)}</div></div>`;
     })
         .join("");
     container.scrollTop = container.scrollHeight;
@@ -105,6 +108,10 @@ function createLiveBubble() {
         <div class="gai-chat-stream-label"></div>
         <pre class="gai-chat-stream"></pre>
       </div>
+      <details class="gai-chat-reasoning" hidden>
+        <summary>Thought process</summary>
+        <div class="gai-chat-reasoning-body"></div>
+      </details>
       <div class="gai-chat-content gai-chat-thinking">Thinking…</div>
     </div>`);
     const root = container.querySelector(".gai-chat-live");
@@ -114,7 +121,10 @@ function createLiveBubble() {
         streamEl: root.querySelector(".gai-chat-stream"),
         streamLabelEl: root.querySelector(".gai-chat-stream-label"),
         contentEl: root.querySelector(".gai-chat-content"),
+        thinkingWrapEl: root.querySelector(".gai-chat-reasoning"),
+        thinkingBodyEl: root.querySelector(".gai-chat-reasoning-body"),
         answerText: "",
+        thinkingText: "",
         streamText: "",
         streamStage: "",
     };
@@ -148,6 +158,13 @@ function setBubbleAnswer(bubble, answer) {
     bubble.contentEl.innerHTML = formatMessageHtml(answer);
     messagesEl().scrollTop = messagesEl().scrollHeight;
 }
+function updateThinkingOutput(bubble) {
+    if (bubble.thinkingText) {
+        bubble.thinkingWrapEl.hidden = false;
+        bubble.thinkingBodyEl.innerHTML = formatMessageHtml(bubble.thinkingText);
+    }
+    messagesEl().scrollTop = messagesEl().scrollHeight;
+}
 function handleStreamEvent(bubble, event) {
     const type = str(event.type);
     if (type === "progress") {
@@ -161,6 +178,11 @@ function handleStreamEvent(bubble, event) {
         return;
     }
     if (type === "token") {
+        if (str(event.kind) === "thinking") {
+            bubble.thinkingText += str(event.text);
+            updateThinkingOutput(bubble);
+            return;
+        }
         const stage = str(event.stage);
         if (stage && stage !== bubble.streamStage) {
             bubble.streamStage = stage;
@@ -191,6 +213,11 @@ function handleStreamEvent(bubble, event) {
         return;
     }
     if (type === "done") {
+        const thinking = str(event.thinking).trim();
+        if (thinking && !bubble.thinkingText) {
+            bubble.thinkingText = thinking;
+            updateThinkingOutput(bubble);
+        }
         const answer = str(event.answer).trim();
         if (answer)
             setBubbleAnswer(bubble, answer);
@@ -303,7 +330,8 @@ async function sendMessage(raw) {
                 throw new Error(str(result.error) || "Request failed");
             }
             const answer = str(result.answer).trim() || bubble.answerText.trim() || "No answer returned.";
-            history.push({ role: "assistant", content: answer });
+            const thinking = str(result.thinking).trim() || bubble.thinkingText.trim();
+            history.push({ role: "assistant", content: answer, ...(thinking ? { thinking } : {}) });
             const lastPerson = str(result.last_person).trim();
             if (lastPerson)
                 sessionContext.last_person = lastPerson;

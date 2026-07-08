@@ -12,6 +12,7 @@ type ChatRole = "user" | "assistant";
 type ChatTurn = {
   role: ChatRole;
   content: string;
+  thinking?: string;
 };
 
 const HISTORY_KEY = "aifred_chat_history";
@@ -34,6 +35,11 @@ function loadHistory(): ChatTurn[] {
     if (!Array.isArray(parsed)) return [];
     return parsed
       .filter((t): t is ChatTurn => t && (t.role === "user" || t.role === "assistant") && typeof t.content === "string")
+      .map((t) => ({
+        role: t.role,
+        content: t.content,
+        ...(typeof t.thinking === "string" && t.thinking ? { thinking: t.thinking } : {}),
+      }))
       .slice(-MAX_HISTORY_TURNS);
   } catch {
     return [];
@@ -55,10 +61,12 @@ function renderMessages(history: ChatTurn[]): void {
       '<p class="aifred-chat-empty">Ask AIFred about the latest thread statuses, who owes a response, or upcoming follow-ups.</p>';
   } else {
     messagesEl.innerHTML = history
-      .map(
-        (turn) =>
-          `<div class="aifred-chat-msg aifred-chat-msg-${turn.role}"><div class="aifred-chat-bubble">${escapeHtml(turn.content)}</div></div>`,
-      )
+      .map((turn) => {
+        const thinkingBlock = turn.thinking
+          ? `<details class="aifred-chat-thinking"><summary>Thinking</summary><div class="aifred-chat-thinking-body">${escapeHtml(turn.thinking)}</div></details>`
+          : "";
+        return `<div class="aifred-chat-msg aifred-chat-msg-${turn.role}">${thinkingBlock}<div class="aifred-chat-bubble">${escapeHtml(turn.content)}</div></div>`;
+      })
       .join("");
   }
   messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -98,8 +106,9 @@ async function handleSubmit(event: SubmitEvent): Promise<void> {
       throw new Error(str(data && data.error) || `Request failed (${res.status})`);
     }
     const answer = str(data.answer).trim() || "AIFred didn't return an answer — try again.";
+    const thinking = str(data.thinking).trim();
     const updated = loadHistory();
-    updated.push({ role: "assistant", content: answer });
+    updated.push({ role: "assistant", content: answer, ...(thinking ? { thinking } : {}) });
     saveHistory(updated);
     renderMessages(updated);
   } catch (err) {

@@ -8,6 +8,7 @@ import { escapeHtml, str } from "./shared/utils.js";
 export type ChatTurn = {
   role: "user" | "assistant";
   content: string;
+  thinking?: string;
 };
 
 type SessionContext = {
@@ -18,10 +19,12 @@ type StreamEvent = LooseObj & {
   type?: string;
   message?: string;
   stage?: string;
+  kind?: string;
   text?: string;
   sql?: string;
   reasoning?: string;
   answer?: string;
+  thinking?: string;
   last_person?: string;
   error?: string;
 };
@@ -32,7 +35,10 @@ type LiveBubble = {
   streamEl: HTMLElement;
   streamLabelEl: HTMLElement;
   contentEl: HTMLElement;
+  thinkingWrapEl: HTMLElement;
+  thinkingBodyEl: HTMLElement;
   answerText: string;
+  thinkingText: string;
   streamText: string;
   streamStage: string;
 };
@@ -106,7 +112,10 @@ function renderMessages(): void {
     .map((turn) => {
       const role = turn.role === "user" ? "You" : "Alfred";
       const cls = turn.role === "user" ? "gai-chat-bubble-user" : "gai-chat-bubble-assistant";
-      return `<div class="gai-chat-turn ${cls}"><div class="gai-chat-role">${escapeHtml(role)}</div><div class="gai-chat-content">${formatMessageHtml(turn.content)}</div></div>`;
+      const reasoningBlock = turn.thinking
+        ? `<details class="gai-chat-reasoning"><summary>Thought process</summary><div class="gai-chat-reasoning-body">${formatMessageHtml(turn.thinking)}</div></details>`
+        : "";
+      return `<div class="gai-chat-turn ${cls}"><div class="gai-chat-role">${escapeHtml(role)}</div>${reasoningBlock}<div class="gai-chat-content">${formatMessageHtml(turn.content)}</div></div>`;
     })
     .join("");
   container.scrollTop = container.scrollHeight;
@@ -146,6 +155,10 @@ function createLiveBubble(): LiveBubble {
         <div class="gai-chat-stream-label"></div>
         <pre class="gai-chat-stream"></pre>
       </div>
+      <details class="gai-chat-reasoning" hidden>
+        <summary>Thought process</summary>
+        <div class="gai-chat-reasoning-body"></div>
+      </details>
       <div class="gai-chat-content gai-chat-thinking">Thinking…</div>
     </div>`,
   );
@@ -156,7 +169,10 @@ function createLiveBubble(): LiveBubble {
     streamEl: root.querySelector(".gai-chat-stream") as HTMLElement,
     streamLabelEl: root.querySelector(".gai-chat-stream-label") as HTMLElement,
     contentEl: root.querySelector(".gai-chat-content") as HTMLElement,
+    thinkingWrapEl: root.querySelector(".gai-chat-reasoning") as HTMLElement,
+    thinkingBodyEl: root.querySelector(".gai-chat-reasoning-body") as HTMLElement,
     answerText: "",
+    thinkingText: "",
     streamText: "",
     streamStage: "",
   };
@@ -193,6 +209,14 @@ function setBubbleAnswer(bubble: LiveBubble, answer: string): void {
   messagesEl().scrollTop = messagesEl().scrollHeight;
 }
 
+function updateThinkingOutput(bubble: LiveBubble): void {
+  if (bubble.thinkingText) {
+    bubble.thinkingWrapEl.hidden = false;
+    bubble.thinkingBodyEl.innerHTML = formatMessageHtml(bubble.thinkingText);
+  }
+  messagesEl().scrollTop = messagesEl().scrollHeight;
+}
+
 function handleStreamEvent(bubble: LiveBubble, event: StreamEvent): void {
   const type = str(event.type);
   if (type === "progress") {
@@ -206,6 +230,11 @@ function handleStreamEvent(bubble: LiveBubble, event: StreamEvent): void {
     return;
   }
   if (type === "token") {
+    if (str(event.kind) === "thinking") {
+      bubble.thinkingText += str(event.text);
+      updateThinkingOutput(bubble);
+      return;
+    }
     const stage = str(event.stage);
     if (stage && stage !== bubble.streamStage) {
       bubble.streamStage = stage;
@@ -235,6 +264,11 @@ function handleStreamEvent(bubble: LiveBubble, event: StreamEvent): void {
     return;
   }
   if (type === "done") {
+    const thinking = str(event.thinking).trim();
+    if (thinking && !bubble.thinkingText) {
+      bubble.thinkingText = thinking;
+      updateThinkingOutput(bubble);
+    }
     const answer = str(event.answer).trim();
     if (answer) setBubbleAnswer(bubble, answer);
     return;
@@ -352,7 +386,8 @@ async function sendMessage(raw: string): Promise<void> {
         throw new Error(str(result.error) || "Request failed");
       }
       const answer = str(result.answer).trim() || bubble.answerText.trim() || "No answer returned.";
-      history.push({ role: "assistant", content: answer });
+      const thinking = str(result.thinking).trim() || bubble.thinkingText.trim();
+      history.push({ role: "assistant", content: answer, ...(thinking ? { thinking } : {}) });
       const lastPerson = str(result.last_person).trim();
       if (lastPerson) sessionContext.last_person = lastPerson;
     } catch (err) {

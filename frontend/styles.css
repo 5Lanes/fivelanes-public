@@ -1337,6 +1337,38 @@ header p.run-meta {
   overflow: auto;
 }
 
+.gai-chat-reasoning {
+  margin-bottom: 0.65rem;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: transparent;
+}
+
+.gai-chat-reasoning summary {
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding: 0.4rem 0.65rem;
+}
+
+.gai-chat-reasoning summary:hover {
+  color: var(--text);
+}
+
+.gai-chat-reasoning-body {
+  padding: 0 0.65rem 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 14rem;
+  overflow: auto;
+}
+
 .add-to-lane-dialog {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -5090,6 +5122,7 @@ details.body-detail summary {
   padding: 0.7rem 0.85rem;
   border-bottom: 1px solid var(--border);
   color: var(--text);
+  flex-shrink: 0;
 }
 .aifred-chat-header-actions {
   display: flex;
@@ -5121,8 +5154,10 @@ details.body-detail summary {
 .aifred-chat-close:hover { background: var(--hover); }
 
 .aifred-chat-messages {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0.85rem;
   display: flex;
   flex-direction: column;
@@ -5133,15 +5168,40 @@ details.body-detail summary {
   font-size: 0.85rem;
   margin: 0;
 }
-.aifred-chat-msg { display: flex; }
-.aifred-chat-msg-user { justify-content: flex-end; }
-.aifred-chat-msg-assistant { justify-content: flex-start; }
+.aifred-chat-msg { display: flex; flex-direction: column; gap: 0.3rem; }
+.aifred-chat-msg-user { align-items: flex-end; }
+.aifred-chat-msg-assistant { align-items: flex-start; }
 .aifred-chat-bubble {
   max-width: 85%;
   padding: 0.5rem 0.7rem;
   border-radius: var(--radius-md);
   font-size: 0.88rem;
   line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.aifred-chat-thinking {
+  max-width: 85%;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+}
+.aifred-chat-thinking summary {
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-muted, var(--text));
+  padding: 0.3rem 0.55rem;
+  opacity: 0.8;
+}
+.aifred-chat-thinking summary:hover { opacity: 1; }
+.aifred-chat-thinking-body {
+  padding: 0 0.6rem 0.55rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text-muted, var(--text));
   white-space: pre-wrap;
   overflow-wrap: break-word;
 }
@@ -5162,6 +5222,7 @@ details.body-detail summary {
   gap: 0.5rem;
   padding: 0.7rem 0.85rem;
   border-top: 1px solid var(--border);
+  flex-shrink: 0;
 }
 .aifred-chat-input {
   flex: 1;
