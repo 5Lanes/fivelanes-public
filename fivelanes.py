@@ -126,6 +126,22 @@ def main(
                 meet_result.get("summarized", 0),
                 meet_result.get("skipped", 0),
             )
+        if is_enabled("calendar_events"):
+            from services.calendar_events.matching import link_calendar_threads
+            from services.calendar_events.summarize import summarize_tracked_calendar_event_threads
+            from services.calendar_events.tracking import sync_calendar_event_threads
+
+            sync_result = sync_calendar_event_threads(DATABASE_NAME)
+            link_result = link_calendar_threads(DATABASE_NAME)
+            cal_result = summarize_tracked_calendar_event_threads(DATABASE_NAME)
+            log.info(
+                "Calendar event threads: %d synced, %d linked to conversations, "
+                "%d summaries updated, %d skipped",
+                sync_result.get("synced", 0),
+                link_result.get("linked", 0),
+                cal_result.get("summarized", 0),
+                cal_result.get("skipped", 0),
+            )
     except Exception as exc:
         log.warning("Channel thread summarization skipped: %s", exc)
     if (os.getenv("FIVELANES_RETRY_FAILED") or "1").strip().lower() not in (

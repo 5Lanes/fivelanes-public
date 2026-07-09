@@ -21,6 +21,7 @@ SOURCE_PREFIXES: dict[str, str] = {
     "meet": "meet:",
     "text": "text:",
     "todo": "todo:",
+    "calendar": "cal:",
     "email": "rfc:",
 }
 

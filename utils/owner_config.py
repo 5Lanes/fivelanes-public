@@ -76,6 +76,30 @@ def other_party_owes_pattern() -> Pattern[str]:
     )
 
 
+def is_likely_own_email(email: str) -> bool:
+    """Whether ``email`` matches an owner alias/hint (see :func:`owner_email_hints`)."""
+    e = (email or "").strip().lower()
+    if "@" not in e:
+        return False
+    local = e.split("@", 1)[0].split("+")[0]
+    try:
+        hints = owner_email_hints()
+    except ValueError:
+        hints = []
+    for hint in hints:
+        if not hint:
+            continue
+        if "@" in hint:
+            if e == hint:
+                return True
+            continue
+        if hint in e:
+            return True
+        if local == hint or local.startswith(f"{hint}."):
+            return True
+    return False
+
+
 def public_config_payload() -> dict:
     """Fields exposed to the dashboard via GET /api/config."""
     source_account = (os.getenv("SOURCE_ACCOUNT") or "").strip()
