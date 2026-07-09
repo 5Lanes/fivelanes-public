@@ -141,3 +141,27 @@ def test_backfill_migrates_pre_existing_lane_threads_data(tmp_path):
     db.ensure_database_schema(path)
 
     assert db.load_lane_thread_memberships(path) == {"1": ["rfc:legacy1"]}
+
+
+def test_link_thread_to_matching_thread_groups_into_same_conversation(db_path):
+    lane = db.create_lane(db_path, name="Test Lane")
+    db.add_thread_to_lane(db_path, lane_id=lane["id"], inbox_thread_id="rfc:email123")
+
+    conversation_id = db.link_thread_to_matching_thread(
+        db_path, inbox_thread_id="cal:event1", matched_inbox_thread_id="rfc:email123"
+    )
+
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        "SELECT inbox_thread_id FROM conversation_threads WHERE conversation_id = ?",
+        (conversation_id,),
+    ).fetchall()
+    conn.close()
+    assert {r[0] for r in rows} == {"rfc:email123", "cal:event1"}
+    # The calendar thread now surfaces in the same lane as the email thread it was matched to.
+    assert lane["id"] in db.lane_ids_for_thread(db_path, "cal:event1")
+
+
+def test_link_thread_to_matching_thread_missing_ids_is_noop(db_path):
+    assert db.link_thread_to_matching_thread(db_path, inbox_thread_id="", matched_inbox_thread_id="rfc:x") == 0
+    assert db.link_thread_to_matching_thread(db_path, inbox_thread_id="cal:x", matched_inbox_thread_id="") == 0

@@ -46,6 +46,7 @@ FEATURE_REGISTRY: dict[str, FeatureTier] = {
     "slack": FeatureTier.PREMIUM,
     "linkedin": FeatureTier.PREMIUM,
     "availability": FeatureTier.PREMIUM,
+    "calendar_events": FeatureTier.PREMIUM,
 }
 
 _OS_FEATURES = frozenset(

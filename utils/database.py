@@ -776,6 +776,55 @@ def create_lane(db_path: str, *, name: str, area_id: Optional[int] = None) -> Di
     }
 
 
+def link_thread_to_matching_thread(
+    db_path: str, *, inbox_thread_id: str, matched_inbox_thread_id: str
+) -> int:
+    """
+    Group ``inbox_thread_id`` into whichever conversation already contains
+    ``matched_inbox_thread_id`` (get-or-create for both). Unlike
+    :func:`_merge_thread_conversations` (which collapses a *duplicate* id into a canonical
+    one and discards it), both thread ids are kept — every thread previously in
+    ``inbox_thread_id``'s conversation is moved into ``matched_inbox_thread_id``'s
+    conversation as a sibling. Returns the resulting conversation id.
+    """
+    tid = _normalize_field(inbox_thread_id)
+    matched_tid = _normalize_field(matched_inbox_thread_id)
+    if not tid or not matched_tid:
+        return 0
+    now = datetime.now(timezone.utc).isoformat()
+    db_file = Path(db_path)
+    with connect_sqlite(db_file) as conn:
+        _ensure_conversations_schema(conn)
+        dst_conversation_id = _conversation_id_for_thread(conn, matched_tid, now=now)
+        src_conversation_id = _conversation_id_for_thread(conn, tid, now=now)
+        if src_conversation_id != dst_conversation_id:
+            conn.execute(
+                """
+                INSERT INTO conversation_threads (conversation_id, inbox_thread_id, created_at)
+                SELECT ?, inbox_thread_id, ? FROM conversation_threads WHERE conversation_id = ?
+                ON CONFLICT(conversation_id, inbox_thread_id) DO NOTHING
+                """,
+                (dst_conversation_id, now, src_conversation_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO lane_conversations (lane_id, conversation_id, created_at)
+                SELECT lane_id, ?, ? FROM lane_conversations WHERE conversation_id = ?
+                ON CONFLICT(lane_id, conversation_id) DO NOTHING
+                """,
+                (dst_conversation_id, now, src_conversation_id),
+            )
+            conn.execute(
+                "DELETE FROM lane_conversations WHERE conversation_id = ?", (src_conversation_id,)
+            )
+            conn.execute(
+                "DELETE FROM conversation_threads WHERE conversation_id = ?", (src_conversation_id,)
+            )
+            conn.execute("DELETE FROM conversations WHERE id = ?", (src_conversation_id,))
+        conn.commit()
+    return dst_conversation_id
+
+
 def add_thread_to_lane(db_path: str, *, lane_id: int, inbox_thread_id: str) -> bool:
     """Add a thread to a lane. Returns False if lane missing."""
     tid = _normalize_field(inbox_thread_id)
