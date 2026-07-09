@@ -244,7 +244,7 @@ def _ask_llm_for_answer(
             max_tokens=1200,
             env_path=_env_path(),
             response_format=None,
-            think=True,
+            think=False,
             high_priority=True,
         ):
             if kind == "thinking":
@@ -261,7 +261,7 @@ def _ask_llm_for_answer(
         max_tokens=1200,
         env_path=_env_path(),
         response_format=None,
-        think=True,
+        think=False,
         high_priority=True,
     )
     thinking = str(result.get("_thinking") or "").strip()

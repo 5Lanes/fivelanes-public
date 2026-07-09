@@ -548,6 +548,187 @@ def _ensure_lanes_schema(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(lanes)").fetchall()}
     if "area_id" not in columns:
         conn.execute("ALTER TABLE lanes ADD COLUMN area_id INTEGER REFERENCES lane_areas(id)")
+    _ensure_conversations_schema(conn)
+
+
+def _ensure_conversations_schema(conn: sqlite3.Connection) -> None:
+    """
+    ``conversations``/``conversation_threads``/``lane_conversations`` — the layer between
+    threads and lanes. A conversation groups one or more threads (many-to-many, any source
+    prefix); lanes point at conversations instead of threads directly.
+    """
+    tables = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    is_new = "conversations" not in tables
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS conversation_threads (
+            conversation_id INTEGER NOT NULL,
+            inbox_thread_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (conversation_id, inbox_thread_id),
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_conversation_threads_inbox_thread_id "
+        "ON conversation_threads(inbox_thread_id)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS lane_conversations (
+            lane_id INTEGER NOT NULL,
+            conversation_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (lane_id, conversation_id),
+            FOREIGN KEY (lane_id) REFERENCES lanes(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lane_conversations_conversation_id "
+        "ON lane_conversations(conversation_id)"
+    )
+    if is_new:
+        _backfill_conversations_from_lane_threads(conn)
+
+
+def _backfill_conversations_from_lane_threads(conn: sqlite3.Connection) -> None:
+    """One-time: give every existing ``lane_threads`` row's thread its own 1:1 conversation."""
+    now = datetime.now(timezone.utc).isoformat()
+    rows = conn.execute(
+        "SELECT DISTINCT lane_id, inbox_thread_id FROM lane_threads"
+    ).fetchall()
+    for lane_id, inbox_thread_id in rows:
+        conversation_id = _conversation_id_for_thread(conn, inbox_thread_id, now=now)
+        conn.execute(
+            """
+            INSERT INTO lane_conversations (lane_id, conversation_id, created_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(lane_id, conversation_id) DO NOTHING
+            """,
+            (lane_id, conversation_id, now),
+        )
+
+
+def _conversation_id_for_thread(
+    conn: sqlite3.Connection, inbox_thread_id: str, *, now: Optional[str] = None
+) -> int:
+    """Get-or-create: the (first) conversation containing ``inbox_thread_id``."""
+    tid = _normalize_field(inbox_thread_id)
+    row = conn.execute(
+        """
+        SELECT conversation_id FROM conversation_threads
+        WHERE inbox_thread_id = ?
+        ORDER BY conversation_id
+        LIMIT 1
+        """,
+        (tid,),
+    ).fetchone()
+    if row:
+        return int(row[0])
+    ts = now or datetime.now(timezone.utc).isoformat()
+    cur = conn.execute(
+        "INSERT INTO conversations (created_at, updated_at) VALUES (?, ?)",
+        (ts, ts),
+    )
+    conversation_id = int(cur.lastrowid or 0)
+    conn.execute(
+        """
+        INSERT INTO conversation_threads (conversation_id, inbox_thread_id, created_at)
+        VALUES (?, ?, ?)
+        """,
+        (conversation_id, tid, ts),
+    )
+    return conversation_id
+
+
+def _remove_thread_from_conversations(conn: sqlite3.Connection, inbox_thread_id: str) -> None:
+    """Detach a thread from its conversation(s); delete any conversation left with no threads."""
+    tid = _normalize_field(inbox_thread_id)
+    if not tid:
+        return
+    conversation_ids = [
+        int(r[0])
+        for r in conn.execute(
+            "SELECT conversation_id FROM conversation_threads WHERE inbox_thread_id = ?",
+            (tid,),
+        ).fetchall()
+    ]
+    conn.execute("DELETE FROM conversation_threads WHERE inbox_thread_id = ?", (tid,))
+    for conversation_id in conversation_ids:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM conversation_threads WHERE conversation_id = ?",
+            (conversation_id,),
+        ).fetchone()
+        if int((row or (0,))[0] or 0) == 0:
+            conn.execute(
+                "DELETE FROM lane_conversations WHERE conversation_id = ?", (conversation_id,)
+            )
+            conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+
+
+def _merge_thread_conversations(
+    conn: sqlite3.Connection, src_inbox_thread_id: str, dst_inbox_thread_id: str
+) -> None:
+    """
+    Fold ``src``'s conversation into ``dst``'s when two ``thread_tracking`` rows are merged
+    (``remap_dashboard_thread_id``, i.e. genuine duplicate collapse — not a user-driven merge).
+
+    Both threads may already have their own auto-created 1:1 conversation; since this call
+    path only ever fires for what's actually one physical thread, those conversations are
+    folded into one rather than left as two.
+    """
+    src = _normalize_field(src_inbox_thread_id)
+    dst = _normalize_field(dst_inbox_thread_id)
+    if not src or not dst or src == dst:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    dst_conversation_id = _conversation_id_for_thread(conn, dst, now=now)
+    src_conversation_ids = [
+        int(r[0])
+        for r in conn.execute(
+            "SELECT conversation_id FROM conversation_threads WHERE inbox_thread_id = ?",
+            (src,),
+        ).fetchall()
+        if int(r[0]) != dst_conversation_id
+    ]
+    for conversation_id in src_conversation_ids:
+        conn.execute(
+            """
+            INSERT INTO lane_conversations (lane_id, conversation_id, created_at)
+            SELECT lane_id, ?, ?
+            FROM lane_conversations
+            WHERE conversation_id = ?
+            ON CONFLICT(lane_id, conversation_id) DO NOTHING
+            """,
+            (dst_conversation_id, now, conversation_id),
+        )
+        conn.execute("DELETE FROM lane_conversations WHERE conversation_id = ?", (conversation_id,))
+        conn.execute(
+            "DELETE FROM conversation_threads WHERE conversation_id = ? AND inbox_thread_id = ?",
+            (conversation_id, src),
+        )
+        row = conn.execute(
+            "SELECT COUNT(*) FROM conversation_threads WHERE conversation_id = ?",
+            (conversation_id,),
+        ).fetchone()
+        if int((row or (0,))[0] or 0) == 0:
+            conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
 
 
 def _ensure_lane_areas_schema(conn: sqlite3.Connection) -> None:
@@ -607,13 +788,14 @@ def add_thread_to_lane(db_path: str, *, lane_id: int, inbox_thread_id: str) -> b
         row = conn.execute("SELECT id FROM lanes WHERE id = ?", (lane_id,)).fetchone()
         if not row:
             return False
+        conversation_id = _conversation_id_for_thread(conn, tid, now=now)
         conn.execute(
             """
-            INSERT INTO lane_threads (lane_id, inbox_thread_id, created_at)
+            INSERT INTO lane_conversations (lane_id, conversation_id, created_at)
             VALUES (?, ?, ?)
-            ON CONFLICT(lane_id, inbox_thread_id) DO NOTHING
+            ON CONFLICT(lane_id, conversation_id) DO NOTHING
             """,
-            (lane_id, tid, now),
+            (lane_id, conversation_id, now),
         )
         conn.execute(
             "UPDATE lanes SET updated_at = ? WHERE id = ?",
@@ -636,7 +818,13 @@ def remove_thread_from_lane(db_path: str, *, lane_id: int, inbox_thread_id: str)
         if not row:
             return False
         conn.execute(
-            "DELETE FROM lane_threads WHERE lane_id = ? AND inbox_thread_id = ?",
+            """
+            DELETE FROM lane_conversations
+            WHERE lane_id = ?
+              AND conversation_id IN (
+                  SELECT conversation_id FROM conversation_threads WHERE inbox_thread_id = ?
+              )
+            """,
             (lane_id, tid),
         )
         conn.execute(
@@ -677,7 +865,7 @@ def delete_lane(db_path: str, *, lane_id: int) -> bool:
         row = conn.execute("SELECT id FROM lanes WHERE id = ?", (lane_id,)).fetchone()
         if not row:
             return False
-        conn.execute("DELETE FROM lane_threads WHERE lane_id = ?", (lane_id,))
+        conn.execute("DELETE FROM lane_conversations WHERE lane_id = ?", (lane_id,))
         conn.execute("DELETE FROM lane_summaries WHERE lane_id = ?", (lane_id,))
         conn.execute("DELETE FROM lanes WHERE id = ?", (lane_id,))
         conn.commit()
@@ -830,10 +1018,11 @@ def lane_ids_for_thread(db_path: str, inbox_thread_id: str) -> List[int]:
         _ensure_lanes_schema(conn)
         rows = conn.execute(
             """
-            SELECT DISTINCT lane_id
-            FROM lane_threads
-            WHERE inbox_thread_id = ?
-            ORDER BY lane_id
+            SELECT DISTINCT lc.lane_id
+            FROM lane_conversations lc
+            JOIN conversation_threads ct ON ct.conversation_id = lc.conversation_id
+            WHERE ct.inbox_thread_id = ?
+            ORDER BY lc.lane_id
             """,
             (tid,),
         ).fetchall()
@@ -866,9 +1055,10 @@ def load_lane_thread_memberships(db_path: str) -> Dict[str, List[str]]:
         _ensure_lanes_schema(conn)
         rows = conn.execute(
             """
-            SELECT lane_id, inbox_thread_id
-            FROM lane_threads
-            ORDER BY lane_id, created_at
+            SELECT lc.lane_id, ct.inbox_thread_id
+            FROM lane_conversations lc
+            JOIN conversation_threads ct ON ct.conversation_id = lc.conversation_id
+            ORDER BY lc.lane_id, lc.created_at
             """
         ).fetchall()
     for lane_id, thread_id in rows:
@@ -1431,7 +1621,7 @@ def untrack_todo_plan_inbox_thread(db_path: str, *, inbox_thread_id: str) -> boo
         )
         conn.execute("DELETE FROM thread_summaries WHERE thread_id = ?", (tid,))
         conn.execute("DELETE FROM thread_draft_replies WHERE thread_id = ?", (tid,))
-        conn.execute("DELETE FROM lane_threads WHERE inbox_thread_id = ?", (tid,))
+        _remove_thread_from_conversations(conn, tid)
         from utils.conversation_sources import classify_source
 
         conn.execute(
@@ -2088,16 +2278,7 @@ def remap_dashboard_thread_id(db_path: str, from_tid: str, to_tid: str) -> None:
             "UPDATE message_outputs SET thread_id = ? WHERE thread_id = ?",
             (dst, src),
         )
-        conn.execute(
-            "UPDATE lane_threads SET inbox_thread_id = ? WHERE inbox_thread_id = ?",
-            (dst, src),
-        )
-        conn.execute(
-            "DELETE FROM lane_threads WHERE inbox_thread_id = ? AND rowid NOT IN ("
-            "SELECT MIN(rowid) FROM lane_threads WHERE inbox_thread_id = ? GROUP BY lane_id"
-            ")",
-            (dst, dst),
-        )
+        _merge_thread_conversations(conn, src, dst)
         conn.execute(
             "UPDATE thread_draft_replies SET thread_id = ? WHERE thread_id = ?",
             (dst, src),
@@ -2113,10 +2294,17 @@ def remap_dashboard_thread_id(db_path: str, from_tid: str, to_tid: str) -> None:
 
 
 _RFC_THREAD_PREFIX = "rfc:"
+_UNRESOLVED_THREAD_PREFIX = "unresolved:"
 
 
 def _is_rfc_thread_id(thread_id: str) -> bool:
     return str(thread_id or "").strip().startswith(_RFC_THREAD_PREFIX)
+
+
+def _is_fivelanes_derived_thread_id(thread_id: str) -> bool:
+    """True for both resolved (``rfc:``) and unresolved forward-derived ids."""
+    tid = str(thread_id or "").strip()
+    return tid.startswith(_RFC_THREAD_PREFIX) or tid.startswith(_UNRESOLVED_THREAD_PREFIX)
 
 
 def _cc_bcc_gmail_vs_rfc_pair(
@@ -2213,7 +2401,7 @@ def prune_inbox_shell_duplicate_entries(db_path: str) -> Tuple[int, int]:
     """
     shell_ids: set[str] = set()
     for row in fetch_thread_tracking_rows(db_path):
-        if not _is_rfc_thread_id(row.get("inbox_thread_id")):
+        if not _is_fivelanes_derived_thread_id(row.get("inbox_thread_id")):
             continue
         gid = _normalize_field(row.get("gmail_inbox_thread_id"))
         if gid:

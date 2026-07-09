@@ -6,7 +6,6 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
 from services.email.forwarding import (
-    body_contains_embedded_forwarded_thread,
     extract_envelope_rfc_message_id,
     extract_inner_rfc_message_id,
 )
@@ -57,14 +56,11 @@ def route_inbox_message(m: dict, inbox_lower: str) -> InboxRoute:
     inbox = (inbox_lower or "").strip().lower()
     to_, cc_, bcc_ = _recipient_headers_from_row(m)
     subject = str(m.get("subject") or "")
-    body = str(m.get("body") or "")
 
     if inbox and to_field_contains_address(to_, inbox):
         if subject_core_indicates_todo(subject):
             return InboxRoute.TODO_PLAN
-        if body_contains_embedded_forwarded_thread(body):
-            return InboxRoute.FORWARD_TO
-        return InboxRoute.DIRECT_TO
+        return InboxRoute.FORWARD_TO
 
     if inbox and not to_field_contains_address(to_, inbox) and (
         cc_field_contains_address(cc_, inbox)
@@ -76,6 +72,7 @@ def route_inbox_message(m: dict, inbox_lower: str) -> InboxRoute:
 
 
 RFC_THREAD_PREFIX = "rfc:"
+UNRESOLVED_THREAD_PREFIX = "unresolved:"
 
 
 def normalize_rfc_message_ref(ref: str) -> str:
@@ -109,7 +106,7 @@ def inbox_cc_delivery_matches_ref(m: dict, match_rfc: str) -> bool:
 
 def cc_bcc_fivelanes_thread_id(inner_rfc: str) -> str:
     """
-    Stable dashboard ``thread_id`` for one inbox-delivered conversation (Cc/Bcc or forward).
+    Stable dashboard ``thread_id`` for one forwarded conversation.
 
     Gmail may group unrelated deliveries into one inbox thread; Fivelanes keys each
     conversation by the resolved RFC Message-ID instead.
@@ -124,13 +121,27 @@ def is_rfc_fivelanes_thread_id(thread_id: str) -> bool:
     return str(thread_id or "").strip().startswith(RFC_THREAD_PREFIX)
 
 
+def is_unresolved_fivelanes_thread_id(thread_id: str) -> bool:
+    return str(thread_id or "").strip().startswith(UNRESOLVED_THREAD_PREFIX)
+
+
+def is_fivelanes_derived_thread_id(thread_id: str) -> bool:
+    """True when ``thread_id`` is a Fivelanes-derived key, not a raw Gmail thread id."""
+    from services.thread_snooze import ON_DISK_THREAD_PREFIXES
+
+    tid = str(thread_id or "").strip()
+    if is_rfc_fivelanes_thread_id(tid) or is_unresolved_fivelanes_thread_id(tid):
+        return True
+    return tid.startswith(ON_DISK_THREAD_PREFIXES)
+
+
 def gmail_inbox_thread_id_for_tracking(row: Dict[str, Any]) -> str:
     """Gmail thread id on the Fivelanes inbox account (for pulling Cc shells)."""
     stored = str(row.get("gmail_inbox_thread_id") or "").strip()
     if stored:
         return stored
     tid = str(row.get("inbox_thread_id") or "").strip()
-    if is_rfc_fivelanes_thread_id(tid):
+    if is_fivelanes_derived_thread_id(tid):
         return ""
     return tid
 

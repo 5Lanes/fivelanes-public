@@ -13,6 +13,7 @@ from services.email.forwarding import (
     primary_email_from_sender,
 )
 from services.email.inbox_route import (
+    UNRESOLVED_THREAD_PREFIX,
     InboxRoute,
     cc_bcc_fivelanes_thread_id,
     dedupe_timeline_rows_by_source_id,
@@ -146,30 +147,6 @@ def rewrite_inbox_seed(
         service, sorted_refs, inbox_lower, fallback=envelope_fallback
     )
 
-    if route == InboxRoute.DIRECT_TO:
-        deliveries: List[dict] = []
-        for ref in sorted_refs:
-            to_hdr, cc_hdr, bcc_hdr = recipient_headers_from_thread_message_ref(
-                service, ref
-            )
-            if recipients_contain_address(to_hdr, cc_hdr, bcc_hdr, inbox_lower):
-                deliveries.append(ref)
-        target_ref = _ref_matching_trigger(
-            deliveries if deliveries else sorted_refs, m
-        ) or sorted_refs[-1]
-        row = row_from_thread_ref(
-            service,
-            tid,
-            account_id,
-            account_email,
-            target_ref,
-            use_account_prefix,
-            include_body,
-        )
-        if row:
-            return _with_seed_meta(row, route=route, forwarder_email=forwarder_email)
-        return _with_seed_meta({**m, "forwarder_email": forwarder_email}, route=route, forwarder_email=forwarder_email)
-
     if route == InboxRoute.CC_BCC:
         cc_deliveries: List[dict] = []
         for ref in sorted_refs:
@@ -243,8 +220,6 @@ def build_tracking_row(
         )
         return None
     inner_rfc = resolve_ref_id(m, route)
-    if not inner_rfc and route == InboxRoute.DIRECT_TO:
-        inner_rfc = extract_envelope_rfc_message_id(m) or ""
     row: Dict[str, Any] = {
         "inbox_thread_id": tid,
         "source_email": source_email,
@@ -256,11 +231,15 @@ def build_tracking_row(
         "created_at": now_iso,
         "updated_at": now_iso,
     }
-    if route in (InboxRoute.FORWARD_TO, InboxRoute.CC_BCC):
+    if route == InboxRoute.FORWARD_TO:
         fivelanes_tid = cc_bcc_fivelanes_thread_id(row["inner_rfc_message_id"])
+        row["gmail_inbox_thread_id"] = tid
         if fivelanes_tid:
-            row["gmail_inbox_thread_id"] = tid
             row["inbox_thread_id"] = fivelanes_tid
+        else:
+            message_id = (m.get("message_id") or tid).strip()
+            row["inbox_thread_id"] = f"{UNRESOLVED_THREAD_PREFIX}{SOURCE_OAUTH_ACCOUNT_ID}:{message_id}"
+            row["resolution_error"] = "rfc_extraction_failed"
     return row
 
 
@@ -455,56 +434,6 @@ def pull_messages_where_cc_bcc_only(
     return rows
 
 
-def _envelope_rfc_from_inbox_direct_thread(
-    service: Any,
-    inbox_thread_id: str,
-    inbox_lower: str,
-) -> str:
-    """Envelope RFC Message-ID for the latest inbox delivery on a direct-to thread."""
-    if not inbox_thread_id or not inbox_lower:
-        return ""
-    try:
-        thr = (
-            service.users()
-            .threads()
-            .get(userId="me", id=inbox_thread_id, format="full")
-            .execute()
-        )
-    except HttpError as exc:
-        log.warning(
-            "Direct inbox RFC lookup failed for thread_id=%s: %s",
-            inbox_thread_id,
-            exc,
-        )
-        return ""
-
-    account_email = get_account_email(service)
-    deliveries: List[dict] = []
-    for full_msg in sorted(thr.get("messages") or [], key=internal_date_ms):
-        if gmail_message_is_draft(full_msg):
-            continue
-        pl = full_msg.get("payload") or {}
-        hdrs = pl.get("headers") or []
-        to_h = get_header(hdrs, "To")
-        cc_h = get_header(hdrs, "Cc")
-        bcc_h = get_header(hdrs, "Bcc")
-        if recipients_contain_address(to_h, cc_h, bcc_h, inbox_lower):
-            deliveries.append(full_msg)
-    target = deliveries[-1] if deliveries else None
-    if not target:
-        return ""
-    api_row = row_from_full_message(
-        service,
-        inbox_thread_id,
-        "",
-        account_email,
-        target,
-        False,
-        include_body=False,
-    )
-    return (extract_envelope_rfc_message_id(api_row) or "").strip()
-
-
 def _pull_and_bind_source_thread(
     *,
     account_id: str,
@@ -541,11 +470,8 @@ def _try_expand_from_source_mailbox_thread(
     *,
     route: InboxRoute,
     inbox_tid: str,
-    gmail_inbox_tid: str,
     source_email: str,
     inner_rfc: Optional[str],
-    source_service: Any,
-    inbox_lower: str,
     db_path: Optional[str],
     include_body: bool,
     force_full_refresh: bool,
@@ -556,10 +482,6 @@ def _try_expand_from_source_mailbox_thread(
     Inbox forward/cc shell copies use different Gmail message ids; those are ignored.
     """
     envelope_rfc = (inner_rfc or "").strip()
-    if not envelope_rfc and route == InboxRoute.DIRECT_TO:
-        envelope_rfc = _envelope_rfc_from_inbox_direct_thread(
-            source_service, gmail_inbox_tid, inbox_lower
-        )
     ctx = resolve_source_mailbox_thread(
         source_email=source_email,
         envelope_rfc=envelope_rfc,
@@ -768,52 +690,6 @@ def expand_thread(
 
     gmail_inbox_tid = gmail_inbox_thread_id_for_tracking(row) or inbox_tid
 
-    if route == InboxRoute.DIRECT_TO:
-        source_pull = _try_expand_from_source_mailbox_thread(
-            row,
-            route=route,
-            inbox_tid=inbox_tid,
-            gmail_inbox_tid=gmail_inbox_tid,
-            source_email=source_email,
-            inner_rfc=inner_rfc,
-            source_service=source_service,
-            inbox_lower=inbox_lower,
-            db_path=db_path,
-            include_body=include_body,
-            force_full_refresh=force_full_refresh,
-        )
-        if source_pull is not None:
-            return source_pull
-        if (
-            db_path
-            and not force_full_refresh
-            and thread_timeline_is_current(
-                db_path,
-                inbox_tid,
-                peek_timeline_source_ids_for_thread(
-                    source_service,
-                    inbox_tid,
-                    inbox_shell_skip="none",
-                ),
-            )
-        ):
-            log.info("Thread unchanged (metadata peek): inbox_thread_id=%s", inbox_tid)
-            return [], source_oauth_id
-        rows = pull_timeline_messages_for_threads(
-            source_service,
-            source_oauth_id,
-            [inbox_tid],
-            include_body=include_body,
-            fetch_oauth_account_id=source_oauth_id,
-            inbox_shell_skip="none",
-            db_path=db_path,
-            timeline_thread_id=inbox_tid,
-            force_full_refresh=force_full_refresh,
-        )
-        for r in rows:
-            r["inbox_delivery_kind"] = route.value
-        return rows, source_oauth_id
-
     effective_inner = inner_rfc
     if not effective_inner and route == InboxRoute.CC_BCC and inbox_lower:
         effective_inner = _envelope_ref_from_inbox_cc_thread(
@@ -944,11 +820,8 @@ def expand_thread(
         expand_row,
         route=route,
         inbox_tid=inbox_tid,
-        gmail_inbox_tid=gmail_inbox_tid,
         source_email=source_email,
         inner_rfc=effective_inner,
-        source_service=source_service,
-        inbox_lower=inbox_lower,
         db_path=db_path,
         include_body=include_body,
         force_full_refresh=force_full_refresh,

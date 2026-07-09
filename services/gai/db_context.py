@@ -655,7 +655,8 @@ def structured_snapshot(db_path: str | Path) -> Dict[str, Any]:
                 "UNION ALL SELECT 'message_outputs', COUNT(*) FROM message_outputs "
                 "UNION ALL SELECT 'lanes', COUNT(*) FROM lanes "
                 "UNION ALL SELECT 'lane_areas', COUNT(*) FROM lane_areas "
-                "UNION ALL SELECT 'lane_threads', COUNT(*) FROM lane_threads "
+                "UNION ALL SELECT 'conversations', COUNT(*) FROM conversations "
+                "UNION ALL SELECT 'lane_conversations', COUNT(*) FROM lane_conversations "
                 "UNION ALL SELECT 'meetings', COUNT(*) FROM meetings "
                 "UNION ALL SELECT 'thread_plans', COUNT(*) FROM thread_plans"
             ).fetchall()

@@ -159,6 +159,13 @@ Or use [`fivelanes.py`](fivelanes.py): `run_email_pipeline()` and `run_llm_pipel
 
 The dashboard (`dashboard_server.py`) serves the thread UI when `DASHBOARD_HOST` / `DASHBOARD_PORT` are set.
 
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
 ## Inbox delivery scenarios
 
 Mail to/cc/bcc `SOURCE_ACCOUNT` is routed in [`services/email/inbox_process.py`](services/email/inbox_process.py) (`InboxRoute`). Gmail fetch only lives in [`services/email/inbox_pull.py`](services/email/inbox_pull.py); LLM body prep lives in [`services/email/inbox_delivery.py`](services/email/inbox_delivery.py).

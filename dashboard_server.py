@@ -130,6 +130,24 @@ _pipeline_state: Dict[str, Any] = {
     "finished_at": None,
 }
 
+# One lock per premium channel so a track/pull-triggered background summarize and a
+# manual "Generate summaries" click can never run concurrently and double-bill the LLM.
+_CHANNEL_SUMMARIZE_LOCKS: Dict[str, threading.Lock] = {
+    "texts": threading.Lock(),
+    "slack": threading.Lock(),
+    "linkedin": threading.Lock(),
+    "meet_recordings": threading.Lock(),
+}
+
+
+def _run_channel_summarize(channel: str, fn):
+    """Run ``fn`` (a zero-arg summarize call) serialized against other summarize calls
+    for the same channel. Blocks rather than skipping, since callers may pass
+    ``force=True`` and expect the run to actually happen."""
+    lock = _CHANNEL_SUMMARIZE_LOCKS[channel]
+    with lock:
+        return fn()
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -368,10 +386,13 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         raw = body.get("conversation_keys")
         force = bool(body.get("force"))
         try:
-            result = summarize_tracked_text_threads(
-                DB_PATH,
-                conversation_keys=raw if isinstance(raw, list) else None,
-                force=force,
+            result = _run_channel_summarize(
+                "texts",
+                lambda: summarize_tracked_text_threads(
+                    DB_PATH,
+                    conversation_keys=raw if isinstance(raw, list) else None,
+                    force=force,
+                ),
             )
         except Exception as exc:
             log.exception("texts summarize failed")
@@ -424,8 +445,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
         def _summarize_worker() -> None:
             try:
-                summarize_tracked_text_threads(
-                    DB_PATH, conversation_keys=keys, force=True
+                _run_channel_summarize(
+                    "texts",
+                    lambda: summarize_tracked_text_threads(
+                        DB_PATH, conversation_keys=keys, force=True
+                    ),
                 )
             except Exception:
                 log.exception("Background text summarization failed")
@@ -504,8 +528,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
         def _summarize_worker() -> None:
             try:
-                summarize_tracked_meet_recordings(
-                    DB_PATH, document_keys=keys, force=True
+                _run_channel_summarize(
+                    "meet_recordings",
+                    lambda: summarize_tracked_meet_recordings(
+                        DB_PATH, document_keys=keys, force=True
+                    ),
                 )
             except Exception:
                 log.exception("Background meet recording summarization failed")
@@ -526,10 +553,13 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         raw = body.get("document_keys")
         force = bool(body.get("force"))
         try:
-            result = summarize_tracked_meet_recordings(
-                DB_PATH,
-                document_keys=raw if isinstance(raw, list) else None,
-                force=force,
+            result = _run_channel_summarize(
+                "meet_recordings",
+                lambda: summarize_tracked_meet_recordings(
+                    DB_PATH,
+                    document_keys=raw if isinstance(raw, list) else None,
+                    force=force,
+                ),
             )
         except Exception as exc:
             log.exception("meet recordings summarize failed")
@@ -549,10 +579,13 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         raw = body.get("conversation_keys")
         force = bool(body.get("force"))
         try:
-            result = summarize_tracked_slack_threads(
-                DB_PATH,
-                conversation_keys=raw if isinstance(raw, list) else None,
-                force=force,
+            result = _run_channel_summarize(
+                "slack",
+                lambda: summarize_tracked_slack_threads(
+                    DB_PATH,
+                    conversation_keys=raw if isinstance(raw, list) else None,
+                    force=force,
+                ),
             )
         except Exception as exc:
             log.exception("slack summarize failed")
@@ -605,8 +638,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
         def _summarize_worker() -> None:
             try:
-                summarize_tracked_slack_threads(
-                    DB_PATH, conversation_keys=keys, force=True
+                _run_channel_summarize(
+                    "slack",
+                    lambda: summarize_tracked_slack_threads(
+                        DB_PATH, conversation_keys=keys, force=True
+                    ),
                 )
             except Exception:
                 log.exception("Background Slack summarization failed")
@@ -645,8 +681,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
         def _summarize_worker() -> None:
             try:
-                summarize_tracked_linkedin_threads(
-                    DB_PATH, conversation_keys=pulled_keys or None
+                _run_channel_summarize(
+                    "linkedin",
+                    lambda: summarize_tracked_linkedin_threads(
+                        DB_PATH, conversation_keys=pulled_keys or None
+                    ),
                 )
             except Exception:
                 log.exception("Background LinkedIn summarization after pull failed")
@@ -668,10 +707,13 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         raw = body.get("conversation_keys")
         force = bool(body.get("force"))
         try:
-            result = summarize_tracked_linkedin_threads(
-                DB_PATH,
-                conversation_keys=raw if isinstance(raw, list) else None,
-                force=force,
+            result = _run_channel_summarize(
+                "linkedin",
+                lambda: summarize_tracked_linkedin_threads(
+                    DB_PATH,
+                    conversation_keys=raw if isinstance(raw, list) else None,
+                    force=force,
+                ),
             )
         except Exception as exc:
             log.exception("linkedin summarize failed")
@@ -728,8 +770,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
         def _summarize_worker() -> None:
             try:
-                summarize_tracked_linkedin_threads(
-                    DB_PATH, conversation_keys=keys, force=True
+                _run_channel_summarize(
+                    "linkedin",
+                    lambda: summarize_tracked_linkedin_threads(
+                        DB_PATH, conversation_keys=keys, force=True
+                    ),
                 )
             except Exception:
                 log.exception("Background LinkedIn summarization failed")
