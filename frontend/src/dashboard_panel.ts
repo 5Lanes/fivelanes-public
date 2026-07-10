@@ -31,7 +31,6 @@ import {
   todayYmdLocal,
 } from "./shared/time_ui.js";
 import { ensureAvailabilityDocLoaded } from "./shared/availability_windows.js";
-import { isFeatureEnabled } from "./shared/features.js";
 import { escapeHtml } from "./shared/utils.js";
 import {
   bindMeetingPrepInteractions,
@@ -193,9 +192,7 @@ export async function refreshDashboard(
     onMeetingPrepSaved?: (cacheKey: string, prep: LooseObj) => void;
   },
 ): Promise<{ meetingCount: number; linkedMeetingCount: number; trackingThreadCount: number }> {
-  if (isFeatureEnabled("availability")) {
-    await ensureAvailabilityDocLoaded();
-  }
+  await ensureAvailabilityDocLoaded();
   const tracking = threads.filter((t) => {
     const snooze = Number(t.messages[0]?.summary?.snoozed || 0);
     return snooze === 0 || snooze === 1;

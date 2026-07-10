@@ -755,11 +755,16 @@ def run_calendar_availability_pull(
     project_root: Path,
     *,
     weeks: int = 4,
+    lookback_days: int = 0,
     rules_path: Optional[Path] = None,
     out_path: Path,
 ) -> Dict[str, Any]:
     """
     Fetch calendars for ``weeks`` from now, build availability JSON, write ``out_path``.
+
+    ``lookback_days`` additionally fetches events that already ended up to that many
+    days ago, so past events stay in the ``meetings`` table (and their track) instead
+    of being dropped by the next export's full replace.
 
     Returns the document dict (same as written to disk).
     """
@@ -774,12 +779,13 @@ def run_calendar_availability_pull(
         rules_display = str(rp)
 
     now = datetime.now(timezone.utc)
+    fetch_start = now - timedelta(days=max(0, lookback_days))
     window_end = now + timedelta(days=7 * weeks)
     cal_pairs = include_calendar_pairs_from_rules(rules)
     if cal_pairs is not None:
         log.info("Calendar availability: restricting to %d calendar(s) from rules", len(cal_pairs))
     events = pull_calendar_events_time_window(
-        now,
+        fetch_start,
         window_end,
         max_results_per_page=250,
         include_calendar_pairs=cal_pairs,
@@ -796,6 +802,8 @@ def run_calendar_availability_pull(
         window_end_exclusive_utc=window_end,
         calendar_filter_pairs=cal_pairs,
     )
+    doc["meta"]["lookback_days"] = max(0, lookback_days)
+    doc["meta"]["events_window_start_utc"] = _to_rfc3339_z(fetch_start)
 
     out_path = out_path.resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)

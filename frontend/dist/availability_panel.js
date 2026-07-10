@@ -3,7 +3,7 @@
  * and shows likely-open / virtual-only windows for the next 7 calendar days (document TZ).
  */
 import { dayHeadingLabelShort, endOfDayInZone, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, startOfDayInZone, todayYmdInTz, } from "./shared/time_ui.js";
-import { isFeatureEnabled } from "./shared/features.js";
+import { ensureFeaturesLoaded, isFeatureEnabled } from "./shared/features.js";
 import { escapeHtml } from "./shared/utils.js";
 function str(v) {
     return typeof v === "string" ? v : "";
@@ -256,6 +256,7 @@ function renderAgendaHtml(data) {
 }
 /** Render availability agenda into any container (dashboard schedule rail). */
 export async function refreshAvailabilityInto(agendaEl, data) {
+    await ensureFeaturesLoaded();
     if (!isFeatureEnabled("availability")) {
         agendaEl.innerHTML = "";
         return;
@@ -278,6 +279,7 @@ export async function refreshAvailabilityPanel() {
     const agendaEl = document.getElementById("availability-agenda");
     if (!section || !metaEl || !agendaEl)
         return;
+    await ensureFeaturesLoaded();
     if (!isFeatureEnabled("availability"))
         return;
     const url = `/out/availability_calendar_latest.json?cb=${Date.now()}`;

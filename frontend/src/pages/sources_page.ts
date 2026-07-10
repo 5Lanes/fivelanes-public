@@ -1,6 +1,11 @@
 import { bindEmailCapturePanel, renderEmailCapturePanel } from "../email_capture_panel.js";
 import { isFeatureEnabled } from "../shared/features.js";
 import {
+  bindCalendarSetupInteractions,
+  mountCalendarSetupPage,
+  renderCalendarSetupPage,
+} from "./calendar_setup_page.js";
+import {
   bindLinkedinSetupInteractions,
   mountLinkedinSetupPage,
   renderLinkedinSetupPage,
@@ -22,7 +27,7 @@ import {
 } from "./texts_setup_page.js";
 
 const SOURCES_TAB_KEY = "fivelanes_sources_tab";
-const VALID_SOURCES = ["email", "texts", "slack", "linkedin", "meet"] as const;
+const VALID_SOURCES = ["email", "texts", "slack", "linkedin", "meet", "calendar"] as const;
 type SourceTab = (typeof VALID_SOURCES)[number];
 
 const PAGE_HTML = `
@@ -33,12 +38,14 @@ const PAGE_HTML = `
     <button type="button" class="source-tab" role="tab" data-source="slack" data-feature="slack" aria-controls="source-panel-slack">Slack</button>
     <button type="button" class="source-tab" role="tab" data-source="linkedin" data-feature="linkedin" aria-controls="source-panel-linkedin">LinkedIn</button>
     <button type="button" class="source-tab" role="tab" data-source="meet" data-feature="meet_recordings" aria-controls="source-panel-meet">Meet notes</button>
+    <button type="button" class="source-tab" role="tab" data-source="calendar" data-feature="calendar_events" aria-controls="source-panel-calendar">Calendar</button>
   </div>
   <div class="source-tab-panel is-active" role="tabpanel" id="source-panel-email" data-source="email"></div>
   <div class="source-tab-panel" role="tabpanel" id="source-panel-texts" data-source="texts" hidden></div>
   <div class="source-tab-panel" role="tabpanel" id="source-panel-slack" data-source="slack" hidden></div>
   <div class="source-tab-panel" role="tabpanel" id="source-panel-linkedin" data-source="linkedin" hidden></div>
   <div class="source-tab-panel" role="tabpanel" id="source-panel-meet" data-source="meet" hidden></div>
+  <div class="source-tab-panel" role="tabpanel" id="source-panel-calendar" data-source="calendar" hidden></div>
 </div>`;
 
 let panelsInitialized = false;
@@ -61,7 +68,8 @@ function sourceTabEnabled(source: SourceTab): boolean {
   if (source === "texts") return isFeatureEnabled("texts");
   if (source === "slack") return isFeatureEnabled("slack");
   if (source === "linkedin") return isFeatureEnabled("linkedin");
-  return isFeatureEnabled("meet_recordings");
+  if (source === "meet") return isFeatureEnabled("meet_recordings");
+  return isFeatureEnabled("calendar_events");
 }
 
 function setActiveSourceTab(source: SourceTab): void {
@@ -121,6 +129,12 @@ async function ensureSourcePanels(): Promise<void> {
     mountMeetRecordingsSetupPage(meetPanel);
     bindMeetRecordingsSetupInteractions();
   }
+
+  const calendarPanel = document.getElementById("source-panel-calendar");
+  if (calendarPanel && isFeatureEnabled("calendar_events")) {
+    mountCalendarSetupPage(calendarPanel);
+    bindCalendarSetupInteractions();
+  }
 }
 
 async function refreshSourcePanel(source: SourceTab): Promise<void> {
@@ -143,6 +157,10 @@ async function refreshSourcePanel(source: SourceTab): Promise<void> {
   }
   if (source === "meet" && isFeatureEnabled("meet_recordings")) {
     await renderMeetRecordingsSetupPage();
+    return;
+  }
+  if (source === "calendar" && isFeatureEnabled("calendar_events")) {
+    await renderCalendarSetupPage();
   }
 }
 

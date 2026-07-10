@@ -15,6 +15,7 @@ from services.email.recipients import (
     to_field_contains_address,
 )
 from services.email.subject import extract_todo_plan_action, subject_core_indicates_todo
+from utils.conversation_sources import classify_source
 from utils.database import (
     create_todo_thread_plan,
     fetch_removed_inbox_thread_ids,
@@ -141,7 +142,7 @@ def gmail_inbox_thread_id_for_tracking(row: Dict[str, Any]) -> str:
     if stored:
         return stored
     tid = str(row.get("inbox_thread_id") or "").strip()
-    if is_fivelanes_derived_thread_id(tid):
+    if is_fivelanes_derived_thread_id(tid) or classify_source(tid) != "email":
         return ""
     return tid
 

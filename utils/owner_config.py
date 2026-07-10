@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from functools import lru_cache
 from typing import List, Pattern
+
+from services.email.address import normalize_gmail_address
+
+log = logging.getLogger(__name__)
 
 
 def owner_name() -> str:
@@ -36,7 +41,12 @@ def summary_routing_aliases() -> List[str]:
 
 
 def owner_email_hints() -> List[str]:
-    """Substrings and local parts used to recognize the owner's email addresses."""
+    """Domains and full addresses used to recognize the owner's email addresses.
+
+    Bare entries (no ``@``) are treated as owned *domains* (e.g. ``ainovva.com``); entries
+    with ``@`` are exact addresses, matched via :func:`normalize_gmail_address` so aliasing
+    (``+tag``, and dots in Gmail local parts) doesn't cause false negatives.
+    """
     hints: List[str] = []
     seen: set[str] = set()
     for alias in summary_routing_aliases():
@@ -45,12 +55,48 @@ def owner_email_hints() -> List[str]:
                 seen.add(alias)
                 hints.append(alias)
             continue
-        local, domain = alias.split("@", 1)
-        for part in [domain, local.split("+")[0], alias]:
+        _, domain = alias.split("@", 1)
+        for part in [domain, normalize_gmail_address(alias)]:
             if part and part not in seen:
                 seen.add(part)
                 hints.append(part)
+    source_domain = (os.getenv("SOURCE_DOMAIN") or "").strip().lower()
+    if source_domain and source_domain not in seen:
+        seen.add(source_domain)
+        hints.append(source_domain)
+    for email in _connected_account_emails():
+        if email not in seen:
+            seen.add(email)
+            hints.append(email)
     return hints
+
+
+@lru_cache(maxsize=1)
+def _connected_account_emails() -> frozenset:
+    """Normalized addresses for every connected mailbox: ``tokens.json`` ``account`` fields
+    (fast, offline) plus live Gmail profile/send-as identities (covers aliases that were
+    never saved to ``tokens.json``, e.g. a send-as address on a different name).
+
+    Cached per process; results never change within a single pipeline run.
+    """
+    emails: set[str] = set()
+    try:
+        from services.gmail_client import _load_tokens
+
+        for data in _load_tokens().values():
+            acct = (data.get("account") or "").strip().lower()
+            if acct and "@" in acct:
+                emails.add(normalize_gmail_address(acct))
+    except Exception:
+        log.debug("Could not read tokens.json account fields for owner recognition", exc_info=True)
+    try:
+        from services.gmail_client import get_all_gmail_services, mailbox_identity_emails
+
+        for account_id, service in get_all_gmail_services():
+            emails.update(mailbox_identity_emails(service, account_id))
+    except Exception:
+        log.debug("Could not fetch live mailbox identities for owner recognition", exc_info=True)
+    return frozenset(emails)
 
 
 def owner_name_variants() -> List[str]:
@@ -77,11 +123,15 @@ def other_party_owes_pattern() -> Pattern[str]:
 
 
 def is_likely_own_email(email: str) -> bool:
-    """Whether ``email`` matches an owner alias/hint (see :func:`owner_email_hints`)."""
-    e = (email or "").strip().lower()
-    if "@" not in e:
+    """Whether ``email`` matches an owner alias/hint (see :func:`owner_email_hints`).
+
+    Matching is exact (address or domain), not substring — a coworker or contact who
+    happens to share the owner's first name must not be misclassified as "the owner".
+    """
+    e = normalize_gmail_address(email)
+    if not e or "@" not in e:
         return False
-    local = e.split("@", 1)[0].split("+")[0]
+    domain = e.split("@", 1)[1]
     try:
         hints = owner_email_hints()
     except ValueError:
@@ -93,9 +143,7 @@ def is_likely_own_email(email: str) -> bool:
             if e == hint:
                 return True
             continue
-        if hint in e:
-            return True
-        if local == hint or local.startswith(f"{hint}."):
+        if domain == hint:
             return True
     return False
 

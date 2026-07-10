@@ -1,5 +1,5 @@
 import { escapeHtml } from "./utils.js";
-import { isFeatureEnabled } from "./features.js";
+import { ensureFeaturesLoaded, isFeatureEnabled } from "./features.js";
 import { extractSlotMentions } from "./slot_mentions.js";
 import { findStructuredMentionsInText, mergeMentionLists } from "./structured_slot_mentions.js";
 let currentDoc = null;
@@ -277,6 +277,7 @@ function tooltipForMatch(match) {
     ].join("\n");
 }
 export async function ensureAvailabilityDocLoaded() {
+    await ensureFeaturesLoaded();
     if (!isFeatureEnabled("availability")) {
         currentDoc = null;
         return;

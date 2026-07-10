@@ -55,7 +55,15 @@ async function pollPipelineStatus() {
         setRunButtonRunning(running);
         setSettingsControlsLocked(running);
         if (running) {
-            setStatus("Fivelanes is running…");
+            const detail = str(status.detail);
+            const detailBit = detail ? ` (${detail})` : "";
+            if (status.stalled) {
+                const idleMin = Math.round(Number(status.idle_sec ?? 0) / 60);
+                setStatus(`Fivelanes appears stuck${detailBit} — no progress for ${idleMin}m.`, "warn");
+            }
+            else {
+                setStatus(`Fivelanes is running…${detailBit}`);
+            }
             return;
         }
         stopPolling();

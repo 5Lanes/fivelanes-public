@@ -20,7 +20,7 @@ const statusEl = document.getElementById("pipeline-status") as HTMLParagraphElem
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let onRunComplete: (() => void) | null = null;
 
-function setStatus(message: string, kind: "info" | "error" = "info"): void {
+function setStatus(message: string, kind: "info" | "error" | "warn" = "info"): void {
   if (!statusEl) return;
   statusEl.textContent = message;
   statusEl.hidden = !message;
@@ -70,7 +70,17 @@ async function pollPipelineStatus(): Promise<void> {
     setSettingsControlsLocked(running);
 
     if (running) {
-      setStatus("Fivelanes is running…");
+      const detail = str(status.detail);
+      const detailBit = detail ? ` (${detail})` : "";
+      if (status.stalled) {
+        const idleMin = Math.round(Number(status.idle_sec ?? 0) / 60);
+        setStatus(
+          `Fivelanes appears stuck${detailBit} — no progress for ${idleMin}m.`,
+          "warn",
+        );
+      } else {
+        setStatus(`Fivelanes is running…${detailBit}`);
+      }
       return;
     }
 

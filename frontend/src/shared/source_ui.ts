@@ -1,4 +1,5 @@
 import {
+  threadIsCalendarEvent,
   threadIsEmail,
   threadIsLinkedin,
   threadIsMeetRecording,
@@ -8,7 +9,7 @@ import {
 import type { ThreadView } from "./types.js";
 import { escapeHtml } from "./utils.js";
 
-export type SourceChannel = "email" | "text" | "slack" | "linkedin" | "meet";
+export type SourceChannel = "email" | "text" | "slack" | "linkedin" | "meet" | "calendar";
 
 const SOURCE_LABELS: Record<SourceChannel, string> = {
   email: "Email",
@@ -16,6 +17,7 @@ const SOURCE_LABELS: Record<SourceChannel, string> = {
   slack: "Slack",
   linkedin: "LinkedIn",
   meet: "Meet notes",
+  calendar: "Calendar",
 };
 
 export function threadChannelForThread(thread: ThreadView): SourceChannel {
@@ -23,6 +25,7 @@ export function threadChannelForThread(thread: ThreadView): SourceChannel {
   if (threadIsSlack(thread)) return "slack";
   if (threadIsLinkedin(thread)) return "linkedin";
   if (threadIsMeetRecording(thread)) return "meet";
+  if (threadIsCalendarEvent(thread)) return "calendar";
   return "email";
 }
 
@@ -37,7 +40,9 @@ export function sourcePillHtml(channel: SourceChannel, label?: string): string {
           ? "slack"
           : channel === "linkedin"
             ? "linkedin"
-            : "meet";
+            : channel === "meet"
+              ? "meet"
+              : "calendar";
   return `<span class="source-pill source-pill--${mod}">${escapeHtml(text)}</span>`;
 }
 

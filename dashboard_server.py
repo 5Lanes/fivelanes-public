@@ -113,6 +113,12 @@ from services.meet_recordings import (
     set_tracked_document_keys as set_tracked_meet_keys,
     summarize_tracked_meet_recordings,
 )
+from services.calendar_events import (
+    fetch_tracked_calendar_dedupe_keys,
+    list_meeting_catalog,
+    set_tracked_meeting_keys,
+    summarize_tracked_calendar_event_threads,
+)
 from utils.run_fivelanes_scheduler import (
     pipeline_run_in_progress,
     run_fivelanes_cycle,
@@ -137,6 +143,7 @@ _CHANNEL_SUMMARIZE_LOCKS: Dict[str, threading.Lock] = {
     "slack": threading.Lock(),
     "linkedin": threading.Lock(),
     "meet_recordings": threading.Lock(),
+    "calendar_events": threading.Lock(),
 }
 
 
@@ -150,6 +157,21 @@ def _run_channel_summarize(channel: str, fn):
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+PIPELINE_STALL_THRESHOLD_SEC = int((os.getenv("FIVELANES_STALL_THRESHOLD_SEC") or "900").strip() or "900")
+
+
+def _seconds_since_iso(value: Any) -> Optional[float]:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - dt).total_seconds()
 
 
 def _warm_gai_chat_cache() -> None:
@@ -211,6 +233,12 @@ def _pipeline_status_payload() -> Dict[str, Any]:
     if running and last_run and str(last_run.get("status") or "") == "running":
         payload["started_at"] = last_run.get("started_at") or payload["started_at"]
         payload["error"] = last_run.get("error") or payload["error"]
+        payload["stage"] = last_run.get("stage")
+        payload["detail"] = last_run.get("detail")
+        heartbeat = last_run.get("progress_at") or last_run.get("started_at")
+        idle_sec = _seconds_since_iso(heartbeat)
+        payload["idle_sec"] = idle_sec
+        payload["stalled"] = bool(idle_sec is not None and idle_sec >= PIPELINE_STALL_THRESHOLD_SEC)
     payload["last_run"] = last_run
     return payload
 
@@ -563,6 +591,94 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             )
         except Exception as exc:
             log.exception("meet recordings summarize failed")
+            self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"ok": False, "error": str(exc)},
+            )
+            return
+        self._json_response(HTTPStatus.OK, result)
+
+    def _get_calendar_catalog(self) -> None:
+        if not Path(DB_PATH).is_file():
+            self._json_response(
+                HTTPStatus.NOT_FOUND, {"ok": False, "error": "database_not_found"}
+            )
+            return
+        catalog = list_meeting_catalog(DB_PATH)
+        tracked = fetch_tracked_calendar_dedupe_keys(DB_PATH)
+        self._json_response(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "catalog": catalog,
+                "tracked": tracked,
+            },
+        )
+
+    def _post_calendar_track(self, body: Dict[str, Any]) -> None:
+        if not Path(DB_PATH).is_file():
+            self._json_response(
+                HTTPStatus.NOT_FOUND, {"ok": False, "error": "database_not_found"}
+            )
+            return
+        raw = body.get("dedupe_keys")
+        if raw is None:
+            raw = body.get("tracked")
+        if not isinstance(raw, list):
+            self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"ok": False, "error": "missing_dedupe_keys"},
+            )
+            return
+        try:
+            result = set_tracked_meeting_keys(DB_PATH, raw)
+        except Exception as exc:
+            log.exception("calendar track failed")
+            self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"ok": False, "error": str(exc)},
+            )
+            return
+
+        keys = result.get("tracked") if isinstance(result.get("tracked"), list) else raw
+
+        def _summarize_worker() -> None:
+            try:
+                _run_channel_summarize(
+                    "calendar_events",
+                    lambda: summarize_tracked_calendar_event_threads(
+                        DB_PATH, dedupe_keys=keys, force=True
+                    ),
+                )
+            except Exception:
+                log.exception("Background calendar summarization failed")
+
+        threading.Thread(
+            target=_summarize_worker,
+            name="calendar-summarize",
+            daemon=True,
+        ).start()
+        self._json_response(HTTPStatus.OK, result)
+
+    def _post_calendar_summarize(self, body: Dict[str, Any]) -> None:
+        if not Path(DB_PATH).is_file():
+            self._json_response(
+                HTTPStatus.NOT_FOUND, {"ok": False, "error": "database_not_found"}
+            )
+            return
+        raw = body.get("dedupe_keys")
+        force = bool(body.get("force"))
+        try:
+            result = _run_channel_summarize(
+                "calendar_events",
+                lambda: summarize_tracked_calendar_event_threads(
+                    DB_PATH,
+                    dedupe_keys=raw if isinstance(raw, list) else None,
+                    force=force,
+                ),
+            )
+        except Exception as exc:
+            log.exception("calendar summarize failed")
             self._json_response(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
                 {"ok": False, "error": str(exc)},
@@ -2011,6 +2127,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if path == "/api/meet-recordings/catalog":
             self._get_meet_recordings_catalog()
             return
+        if path == "/api/calendar/catalog":
+            self._get_calendar_catalog()
+            return
         if path == "/timeline.db":
             self._get_timeline_db()
             return
@@ -2029,6 +2148,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "/slack-setup",
             "/linkedin-setup",
             "/meet-recordings-setup",
+            "/calendar-setup",
         ):
             self._serve_app_shell()
             return
@@ -2123,6 +2243,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._post_meet_recordings_track(body)
         elif path == "/api/meet-recordings/summarize":
             self._post_meet_recordings_summarize(body)
+        elif path == "/api/calendar/track":
+            self._post_calendar_track(body)
+        elif path == "/api/calendar/summarize":
+            self._post_calendar_summarize(body)
         else:
             log.warning("POST %s not handled (raw path=%r)", path, self.path)
             self._json_response(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not_found"})

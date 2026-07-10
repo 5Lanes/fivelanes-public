@@ -24,6 +24,7 @@ import {
   pendingMessageCountForThread,
   pendingMessagePillHtml,
   shouldShowThreadMessageBlocks,
+  threadIsCalendarEvent,
   threadIsEmail,
   threadIsLinkedin,
   threadIsMeetRecording,
@@ -35,6 +36,7 @@ import {
   threadSummaryErrorHtml,
   threadSummaryForDisplay,
 } from "../shared/thread_domain.js";
+import { ensureAvailabilityDocLoaded } from "../shared/availability_windows.js";
 import type { LooseObj, ThreadView } from "../shared/types.js";
 import { escapeHtml, formatDate, formatRecipients, str, toneClass } from "../shared/utils.js";
 import { applyNavFeatureVisibility, isFeatureEnabled } from "../shared/features.js";
@@ -82,13 +84,14 @@ function openMobileThreadDetail(threadId: string): void {
 }
 
 let threadViewMode: "active" | "snoozed" | "removed" = "active";
-let threadChannelFilter: "all" | "text" | "slack" | "linkedin" | "meet" | "email" = "all";
+let threadChannelFilter: "all" | "text" | "slack" | "linkedin" | "meet" | "calendar" | "email" = "all";
 const SOURCE_FILTER_DEFS: Array<{ id: SourceChannel; label: string; feature?: string }> = [
   { id: "email", label: "Email" },
   { id: "text", label: "Text", feature: "texts" },
   { id: "slack", label: "Slack", feature: "slack" },
   { id: "linkedin", label: "LinkedIn", feature: "linkedin" },
   { id: "meet", label: "Meet", feature: "meet_recordings" },
+  { id: "calendar", label: "Calendar" },
 ];
 let threadSourceFilters = new Set<SourceChannel>(SOURCE_FILTER_DEFS.map((s) => s.id));
 let threadAssignmentFilter: "all" | "unassigned" = "all";
@@ -187,6 +190,7 @@ function sourceFilterCounts(threads: ThreadView[]): Record<SourceChannel, number
     slack: 0,
     linkedin: 0,
     meet: 0,
+    calendar: 0,
   };
   for (const thread of threads) {
     counts[threadChannelForThread(thread)] += 1;
@@ -237,6 +241,7 @@ function filterThreadsByChannel(threads: ThreadView[]): ThreadView[] {
   if (threadChannelFilter === "slack") return threads.filter(threadIsSlack);
   if (threadChannelFilter === "linkedin") return threads.filter(threadIsLinkedin);
   if (threadChannelFilter === "meet") return threads.filter(threadIsMeetRecording);
+  if (threadChannelFilter === "calendar") return threads.filter(threadIsCalendarEvent);
   return threads.filter(threadIsEmail);
 }
 
@@ -245,6 +250,7 @@ function channelFilterEmptyMessage(): string {
   if (threadChannelFilter === "slack") return "No Slack threads in this view.";
   if (threadChannelFilter === "linkedin") return "No LinkedIn threads in this view.";
   if (threadChannelFilter === "meet") return "No Meet recording threads in this view.";
+  if (threadChannelFilter === "calendar") return "No calendar events in this view.";
   return "No email threads in this view.";
 }
 
@@ -396,6 +402,7 @@ function renderNav(
     slack: number;
     linkedin: number;
     meet: number;
+    calendar: number;
     email: number;
   },
 ): void {
@@ -460,6 +467,7 @@ function renderNav(
   if (isFeatureEnabled("meet_recordings")) {
     channelOptions.push({ id: "meet", label: "Meet notes", count: channelCounts.meet });
   }
+  channelOptions.push({ id: "calendar", label: "Calendar", count: channelCounts.calendar });
   channelOptions.push({ id: "email", label: "Emails", count: channelCounts.email });
   for (const { id, label, count } of channelOptions) {
     const btn = document.createElement("button");
@@ -658,10 +666,11 @@ function bindDashboardToolbarInteractions(): void {
     if (panel && !panel.hidden) positionSourceDropdownPanel();
   });
 
-  document.getElementById("dashboard-threads-root")?.addEventListener("click", (ev) => {
+  document.addEventListener("click", (ev) => {
     const target = ev.target as HTMLElement;
+    const root = document.getElementById("dashboard-threads-root");
     const toolbar = document.getElementById("dashboard-thread-toolbar");
-    if (!toolbar) return;
+    if (!toolbar || !root?.contains(target)) return;
 
     const modeBtn = target.closest("[data-thread-mode]") as HTMLButtonElement | null;
     if (modeBtn && toolbar.contains(modeBtn)) {
@@ -708,8 +717,11 @@ function bindDashboardToolbarInteractions(): void {
     }
   });
 
-  document.getElementById("dashboard-threads-root")?.addEventListener("change", (ev) => {
-    const input = (ev.target as HTMLElement).closest("input[data-source-filter]") as HTMLInputElement | null;
+  document.addEventListener("change", (ev) => {
+    const target = ev.target as HTMLElement;
+    const root = document.getElementById("dashboard-threads-root");
+    if (!root?.contains(target)) return;
+    const input = target.closest("input[data-source-filter]") as HTMLInputElement | null;
     if (!input) return;
     syncThreadSourceFiltersFromCheckboxes();
     updateSourceDropdownLabel();
@@ -811,6 +823,7 @@ export async function renderDashboardThreadsInline(): Promise<void> {
   const data = getCurrentData();
   if (!data) return;
   ensureDashboardThreadsShell();
+  await ensureAvailabilityDocLoaded();
 
   const { active, snoozed, removed, snoozedCount, removedCount } = partitionThreadsBySnooze(getCurrentThreads());
   const bySnooze = threadViewMode === "snoozed" ? snoozed : threadViewMode === "removed" ? removed : active;
@@ -834,6 +847,7 @@ export async function renderThreadsPage(): Promise<void> {
   const data = getCurrentData();
   if (!data) return;
   applyNavFeatureVisibility();
+  await ensureAvailabilityDocLoaded();
 
   const { active, snoozed, removed, snoozedCount, removedCount } = partitionThreadsBySnooze(getCurrentThreads());
   const bySnooze = threadViewMode === "snoozed" ? snoozed : threadViewMode === "removed" ? removed : active;
@@ -843,6 +857,7 @@ export async function renderThreadsPage(): Promise<void> {
     slack: bySnooze.filter(threadIsSlack).length,
     linkedin: bySnooze.filter(threadIsLinkedin).length,
     meet: bySnooze.filter(threadIsMeetRecording).length,
+    calendar: bySnooze.filter(threadIsCalendarEvent).length,
     email: bySnooze.filter(threadIsEmail).length,
   };
   if (threadChannelFilter === "text" && (!isFeatureEnabled("texts") || channelCounts.text === 0)) {
@@ -858,6 +873,8 @@ export async function renderThreadsPage(): Promise<void> {
     threadChannelFilter === "meet" &&
     (!isFeatureEnabled("meet_recordings") || channelCounts.meet === 0)
   ) {
+    threadChannelFilter = "all";
+  } else if (threadChannelFilter === "calendar" && channelCounts.calendar === 0) {
     threadChannelFilter = "all";
   } else if (threadChannelFilter === "email" && channelCounts.email === 0) threadChannelFilter = "all";
   const visible = filterThreadsByChannel(bySnooze);

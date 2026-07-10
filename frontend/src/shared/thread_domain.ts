@@ -120,7 +120,8 @@ export function threadMessagesForDisplay(
     thread.id.startsWith("text:") ||
     thread.id.startsWith("slack:") ||
     thread.id.startsWith("linkedin:") ||
-    thread.id.startsWith("meet:")
+    thread.id.startsWith("meet:") ||
+    thread.id.startsWith("cal:")
   ) {
     return [...thread.messages];
   }
@@ -227,12 +228,22 @@ export function threadIsMeetRecording(thread: ThreadView): boolean {
   );
 }
 
+export function threadIsCalendarEvent(thread: ThreadView): boolean {
+  const primary = thread.messages[0] || { cleaned: null, summary: null };
+  const c0 = (primary.cleaned || {}) as LooseObj;
+  const s = threadSummaryForDisplay(thread);
+  return (
+    str(s.channel || c0.channel) === "calendar_event" || thread.id.startsWith("cal:")
+  );
+}
+
 export function threadIsEmail(thread: ThreadView): boolean {
   return (
     !threadIsText(thread) &&
     !threadIsSlack(thread) &&
     !threadIsLinkedin(thread) &&
-    !threadIsMeetRecording(thread)
+    !threadIsMeetRecording(thread) &&
+    !threadIsCalendarEvent(thread)
   );
 }
 

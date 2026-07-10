@@ -1,4 +1,4 @@
-import { threadIsLinkedin, threadIsMeetRecording, threadIsSlack, threadIsText, } from "./thread_domain.js";
+import { threadIsCalendarEvent, threadIsLinkedin, threadIsMeetRecording, threadIsSlack, threadIsText, } from "./thread_domain.js";
 import { escapeHtml } from "./utils.js";
 const SOURCE_LABELS = {
     email: "Email",
@@ -6,6 +6,7 @@ const SOURCE_LABELS = {
     slack: "Slack",
     linkedin: "LinkedIn",
     meet: "Meet notes",
+    calendar: "Calendar",
 };
 export function threadChannelForThread(thread) {
     if (threadIsText(thread))
@@ -16,6 +17,8 @@ export function threadChannelForThread(thread) {
         return "linkedin";
     if (threadIsMeetRecording(thread))
         return "meet";
+    if (threadIsCalendarEvent(thread))
+        return "calendar";
     return "email";
 }
 export function sourcePillHtml(channel, label) {
@@ -28,7 +31,9 @@ export function sourcePillHtml(channel, label) {
                 ? "slack"
                 : channel === "linkedin"
                     ? "linkedin"
-                    : "meet";
+                    : channel === "meet"
+                        ? "meet"
+                        : "calendar";
     return `<span class="source-pill source-pill--${mod}">${escapeHtml(text)}</span>`;
 }
 export function laneAreaColorVar(colorIndex) {

@@ -446,15 +446,6 @@ export function applyThreadSummary(threadId, summary) {
         row.summary_api_error = str(summary.api_error);
     }
 }
-function planIdsFingerprint(data) {
-    if (!Array.isArray(data.thread_plans))
-        return "";
-    return data.thread_plans
-        .map((row) => Number(row.id) || 0)
-        .filter((id) => id > 0)
-        .sort((a, b) => a - b)
-        .join(",");
-}
 export function syncSummariesBundleCache() {
     if (!currentData)
         return;
@@ -479,12 +470,6 @@ export function readCachedBundle() {
     catch {
         return null;
     }
-}
-export function bundleChanged(prev, next) {
-    return (str(prev.run_stamp) !== str(next.data.run_stamp) ||
-        str(prev.generated_at) !== str(next.data.generated_at) ||
-        str(prev.content_fingerprint) !== str(next.data.content_fingerprint) ||
-        planIdsFingerprint(prev) !== planIdsFingerprint(next.data));
 }
 export async function loadLatestBundle() {
     if (location.protocol === "file:") {

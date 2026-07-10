@@ -21,7 +21,8 @@ Environment (same names as dashboard_server where applicable):
   FIVELANES_SCHEDULER_TZ       IANA timezone for quiet hours (default: system local)
   FIVELANES_SCHEDULER_WEEKDAYS run on Mon–Fri when 1/true (default: true)
   FIVELANES_SCHEDULER_WEEKENDS run on Sat–Sun when 1/true (default: true)
-  CALENDAR_AVAILABILITY_DISABLE, CALENDAR_AVAILABILITY_WEEKS — same as dashboard_server
+  CALENDAR_AVAILABILITY_DISABLE, CALENDAR_AVAILABILITY_WEEKS,
+  CALENDAR_AVAILABILITY_LOOKBACK_DAYS — same as dashboard_server
 
 Also used by ``dashboard_server.py`` (background thread).
 """
@@ -62,6 +63,17 @@ def _calendar_availability_weeks_from_env() -> int:
 
 
 CALENDAR_AVAILABILITY_WEEKS = _calendar_availability_weeks_from_env()
+
+
+def _calendar_availability_lookback_days_from_env() -> int:
+    raw = (os.getenv("CALENDAR_AVAILABILITY_LOOKBACK_DAYS") or "60").strip() or "60"
+    try:
+        return max(0, min(365, int(raw)))
+    except ValueError:
+        return 60
+
+
+CALENDAR_AVAILABILITY_LOOKBACK_DAYS = _calendar_availability_lookback_days_from_env()
 
 _pipeline_run_lock = threading.Lock()
 _last_run_finished_mono: float = 0.0
@@ -164,6 +176,7 @@ def run_fivelanes_cycle(*, trigger: str = "scheduler", blocking: bool = True) ->
                 run_calendar_availability_pull(
                     data_path(),
                     weeks=CALENDAR_AVAILABILITY_WEEKS,
+                    lookback_days=CALENDAR_AVAILABILITY_LOOKBACK_DAYS,
                     out_path=out_json,
                 )
             except Exception:
@@ -279,8 +292,9 @@ def scheduler_loop(*, run_immediately: bool = True) -> None:
         log.info("Calendar availability export: disabled")
     else:
         log.info(
-            "Calendar availability export: after each run (%d weeks)",
+            "Calendar availability export: after each run (%d weeks forward, %d days lookback)",
             CALENDAR_AVAILABILITY_WEEKS,
+            CALENDAR_AVAILABILITY_LOOKBACK_DAYS,
         )
 
     if not run_immediately:

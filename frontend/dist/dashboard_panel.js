@@ -7,7 +7,6 @@ import { formatPlanByWhen, sortPlansByDueDate, planLinkedThreadLabel, planDueSta
 import { renderMentionAwareText } from "./shared/thread_domain.js";
 import { dayHeadingLabelLong, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdLocal, } from "./shared/time_ui.js";
 import { ensureAvailabilityDocLoaded } from "./shared/availability_windows.js";
-import { isFeatureEnabled } from "./shared/features.js";
 import { escapeHtml } from "./shared/utils.js";
 import { bindMeetingPrepInteractions, clearMeetingPrepContexts, configureMeetingPrep, meetingPrepLinkHtml, } from "./meeting_prep_ui.js";
 export const DASHBOARD_MEETINGS_LOOKAHEAD_DAYS = 7;
@@ -117,9 +116,7 @@ function renderDashboardAgendaHtml(meetings, matchByKey, tz, days) {
     return `<div class="dash-avail-agenda">${sections.join("")}</div>`;
 }
 export async function refreshDashboard(threads, opts) {
-    if (isFeatureEnabled("availability")) {
-        await ensureAvailabilityDocLoaded();
-    }
+    await ensureAvailabilityDocLoaded();
     const tracking = threads.filter((t) => {
         const snooze = Number(t.messages[0]?.summary?.snoozed || 0);
         return snooze === 0 || snooze === 1;

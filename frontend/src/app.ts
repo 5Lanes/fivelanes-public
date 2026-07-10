@@ -39,7 +39,7 @@ import {
 } from "./pages/meet_recordings_setup_page.js";
 import { refreshPipelineRunMeta } from "./pipeline_run_meta.js";
 import { refreshPlanNotifications } from "./shared/plan_notifications.js";
-import { bundleChanged, getBundleMutationGeneration, loadLatestBundle, readCachedBundle, setBundle, setBundleFromNetwork } from "./shared/summaries_store.js";
+import { getBundleMutationGeneration, loadLatestBundle, readCachedBundle, setBundle, setBundleFromNetwork } from "./shared/summaries_store.js";
 import { applyNavFeatureVisibility, isFeatureEnabled, setFeaturesConfigForTests } from "./shared/features.js";
 import { setOwnerConfigForTests } from "./shared/owner_config.js";
 import { setDisplaySourceAccount } from "./shared/thread_domain.js";
@@ -54,6 +54,7 @@ const LEGACY_SETUP_REDIRECTS: Record<string, string> = {
   "/slack-setup": "/sources#slack",
   "/linkedin-setup": "/sources#linkedin",
   "/meet-recordings-setup": "/sources#meet",
+  "/calendar-setup": "/sources#calendar",
 };
 
 /** Returns true if the browser is navigating away (legacy redirect). */
@@ -264,10 +265,8 @@ async function bootstrap(): Promise<void> {
     applyConfig(config);
 
     if (needsBundle && fresh) {
-      if (!cached || bundleChanged(cached.data, fresh)) {
-        if (setBundleFromNetwork(fresh.data, fresh.label, mutationGenAtFetch)) {
-          await renderPage(route);
-        }
+      if (setBundleFromNetwork(fresh.data, fresh.label, mutationGenAtFetch)) {
+        await renderPage(route);
       }
     } else if (!cached) {
       await renderPage(route);

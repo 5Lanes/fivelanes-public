@@ -15,7 +15,7 @@ import {
   findMatchingThread,
   type ThreadMatchContext,
 } from "./thread_meeting_match.js";
-import { isFeatureEnabled } from "./shared/features.js";
+import { ensureFeaturesLoaded, isFeatureEnabled } from "./shared/features.js";
 import { partitionThreadsBySnooze, threadLabel } from "./shared/thread_domain.js";
 import {
   addDaysToYmd,
@@ -290,6 +290,7 @@ function renderAgendaHtml(
 }
 
 async function loadAvailabilityData(): Promise<LooseObj | null> {
+  await ensureFeaturesLoaded();
   if (!isFeatureEnabled("availability")) return null;
   try {
     const res = await fetch(`/out/availability_calendar_latest.json?cb=${Date.now()}`, {

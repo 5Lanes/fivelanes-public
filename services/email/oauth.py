@@ -6,8 +6,9 @@ import secrets
 from typing import Dict, Optional, Tuple
 
 from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
 
-from services.gmail_client import SCOPES
+from services.gmail_client import SCOPES, _get_account_email
 from .config import CREDENTIALS_PATH, TOKENS_PATH
 
 log = logging.getLogger(__name__)
@@ -56,6 +57,12 @@ def exchange_code_for_token(redirect_uri: str, code: str, state: str) -> Optiona
         creds = flow.credentials
         tokens = _load_tokens()
         tokens[account_id] = json.loads(creds.to_json())
+        try:
+            email = _get_account_email(build("gmail", "v1", credentials=creds))
+            if email:
+                tokens[account_id]["account"] = email
+        except Exception:
+            log.debug("Could not stamp account email for %s", account_id, exc_info=True)
         _save_tokens(tokens)
         return account_id
     except Exception as e:

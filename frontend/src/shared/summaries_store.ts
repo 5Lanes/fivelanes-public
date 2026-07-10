@@ -441,15 +441,6 @@ export function applyThreadSummary(threadId: string, summary: LooseObj): void {
   }
 }
 
-function planIdsFingerprint(data: LooseObj): string {
-  if (!Array.isArray(data.thread_plans)) return "";
-  return (data.thread_plans as LooseObj[])
-    .map((row) => Number(row.id) || 0)
-    .filter((id) => id > 0)
-    .sort((a, b) => a - b)
-    .join(",");
-}
-
 export function syncSummariesBundleCache(): void {
   if (!currentData) return;
   writeCachedBundle(currentData, null);
@@ -472,18 +463,6 @@ export function readCachedBundle(): { data: LooseObj; label: string } | null {
   } catch {
     return null;
   }
-}
-
-export function bundleChanged(
-  prev: LooseObj,
-  next: { data: LooseObj; label: string },
-): boolean {
-  return (
-    str(prev.run_stamp) !== str(next.data.run_stamp) ||
-    str(prev.generated_at) !== str(next.data.generated_at) ||
-    str(prev.content_fingerprint) !== str(next.data.content_fingerprint) ||
-    planIdsFingerprint(prev) !== planIdsFingerprint(next.data)
-  );
 }
 
 export async function loadLatestBundle(): Promise<{ data: LooseObj; label: string }> {

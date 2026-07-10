@@ -84,6 +84,22 @@ def record_pipeline_run_finish(
         )
 
 
+def record_pipeline_progress(*, stage: str, detail: str = "") -> None:
+    """Update the in-progress run entry with a heartbeat so a stalled run is detectable.
+
+    No-ops if the last logged run isn't ``status == "running"`` (e.g. called after the
+    run already finished, or from a context with no active run log entry).
+    """
+    with _lock:
+        prev = load_last_pipeline_run()
+        if not prev or str(prev.get("status") or "") != "running":
+            return
+        prev["stage"] = stage
+        prev["detail"] = detail
+        prev["progress_at"] = _utc_now_iso()
+        _write(prev)
+
+
 def load_last_pipeline_run() -> Optional[Dict[str, Any]]:
     path = _log_path()
     if not path.is_file():

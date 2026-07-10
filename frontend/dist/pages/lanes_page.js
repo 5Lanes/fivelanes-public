@@ -255,10 +255,13 @@ function laneCardHtml(lane, threadIds, summary, expanded, opts = {}) {
         const thread = getCurrentThreads().find((t) => t.id === tid);
         const label = escapeHtml(thread ? threadEmailSubject(thread) : tid);
         const pill = thread ? sourcePillHtml(threadChannelForThread(thread)) : "";
+        const planBtn = thread
+            ? `<button type="button" class="create-plan-btn lane-thread-create-plan-btn" data-add-plan-thread-id="${escapeHtml(tid)}">Create a plan</button>`
+            : "";
         if (opts.linkThreads && thread) {
-            return `<li><a class="lane-thread-link" href="${escapeHtml(threadPageHref(tid))}">${pill}${label}</a></li>`;
+            return `<li><a class="lane-thread-link" href="${escapeHtml(threadPageHref(tid))}">${pill}${label}</a>${planBtn}</li>`;
         }
-        return `<li>${pill}${label}</li>`;
+        return `<li>${pill}${label}${planBtn}</li>`;
     })
         .filter(Boolean)
         .join("");
@@ -458,7 +461,7 @@ function renderDashboardLanesTabs(listEl, lanes, data) {
       </div>`;
     })
         .join("");
-    listEl.innerHTML = `<div class="lanes-tabs">
+    listEl.innerHTML = `${renderAreaToolbar()}<div class="lanes-tabs">
     <div class="lanes-tab-bar" role="tablist" aria-label="Lanes">${tabButtons}</div>
     <div class="lanes-tab-panels">${panels}</div>
   </div>`;
@@ -472,9 +475,12 @@ function renderLanesList() {
     syncLaneSortSelect();
     syncArchivedViewToolbar();
     if (!lanes.length) {
-        listEl.innerHTML = showArchivedLanes
+        const emptyMessage = showArchivedLanes
             ? `<p class="lanes-empty">No archived lanes.</p>`
             : `<p class="lanes-empty">No lanes yet. Create one to group threads.</p>`;
+        listEl.innerHTML = isDashboardLanesList(listEl)
+            ? `${renderAreaToolbar()}${emptyMessage}`
+            : emptyMessage;
         activeLaneTabId = null;
         return;
     }
@@ -784,9 +790,27 @@ export function bindLanesInteractions() {
         const target = ev.target;
         if (!target || !isLaneUi(target))
             return;
+        const addPlanBtn = target.closest("button.create-plan-btn");
+        if (addPlanBtn) {
+            const threadId = str(addPlanBtn.dataset.addPlanThreadId);
+            if (!threadId)
+                return;
+            void (async () => {
+                const { openDashboardAddPlanForThread } = await import("./dashboard_page.js");
+                await openDashboardAddPlanForThread(threadId);
+                const url = new URL(location.href);
+                url.pathname = "/dashboard";
+                url.searchParams.set("thread", threadId);
+                url.hash = "schedule-plans";
+                history.pushState(null, "", `${url.pathname}${url.search}${url.hash}`);
+            })();
+            return;
+        }
         if (target.closest(".lanes-show-archived-btn")) {
             const btn = target.closest(".lanes-show-archived-btn");
-            showArchivedLanes = btn.dataset.trackInbox === "archived";
+            showArchivedLanes = btn.dataset.trackInbox
+                ? btn.dataset.trackInbox === "archived"
+                : !showArchivedLanes;
             assignLaneId = null;
             activeLaneTabId = null;
             renderLanesList();

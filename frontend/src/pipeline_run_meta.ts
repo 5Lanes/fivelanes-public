@@ -39,9 +39,16 @@ function triggerLabel(trigger: string): string {
 export function pipelineRunMetaText(status: LooseObj): string {
   if (Boolean(status.running)) {
     const started = str(status.started_at);
-    return started
+    const base = started
       ? `Pipeline running since ${formatDate(started)}…`
       : "Pipeline running…";
+    if (status.stalled) {
+      const idleMin = Math.round(Number(status.idle_sec ?? 0) / 60);
+      const detail = str(status.detail);
+      const detailBit = detail ? ` (${detail})` : "";
+      return `${base} stuck${detailBit} — no progress for ${idleMin}m`;
+    }
+    return base;
   }
 
   const last = (status.last_run ?? {}) as LooseObj;
@@ -72,6 +79,7 @@ export async function refreshPipelineRunMeta(
     const text = pipelineRunMetaText(status);
     runMetaEl.textContent = text;
     runMetaEl.hidden = !text;
+    runMetaEl.dataset.kind = status.stalled ? "warn" : "";
   } catch {
     /* offline / server down */
   }

@@ -191,6 +191,31 @@ def _tsx_cli(scraper_dir: Path) -> Path:
     return scraper_dir / "node_modules" / "tsx" / "dist" / "cli.mjs"
 
 
+_SCRAPER_TIMEOUT_SEC = 900
+
+
+def _clean_scraper_error(detail: str) -> str:
+    """Turn raw scraper stderr into a short, actionable message.
+
+    Playwright errors embed a multi-line "Call log:" trace in their message and
+    Node may emit other noise on stderr; neither is useful to show a user in the
+    dashboard, so we recognize the common failure shapes and otherwise fall back
+    to just the first line of output.
+    """
+    text = detail.strip()
+    lowered = text.lower()
+    if "session expired" in lowered:
+        return text.splitlines()[0]
+    if "checkpoint" in lowered or ("timeout" in lowered and "call log" in lowered):
+        return (
+            "LinkedIn requires additional verification (checkpoint/CAPTCHA) or the "
+            "browser timed out mid-login. Run `npm run login` in headed mode in your "
+            "data linkedin/ folder to refresh the session, then retry the pull."
+        )
+    first_line = text.splitlines()[0] if text else ""
+    return first_line or "linkedin_scraper_failed"
+
+
 def _run_scraper(*, output_path: Path, selections_path: Path) -> None:
     scraper_dir = LINKEDIN_SCRAPER_DIR
     package_json = scraper_dir / "package.json"
@@ -221,18 +246,25 @@ def _run_scraper(*, output_path: Path, selections_path: Path) -> None:
         str(output_path),
     ]
     log.info("Running LinkedIn scraper: %s (cwd=%s)", " ".join(cmd), scraper_dir)
-    completed = subprocess.run(
-        cmd,
-        cwd=scraper_dir,
-        capture_output=True,
-        text=True,
-        timeout=900,
-        check=False,
-        env=env,
-    )
+    try:
+        completed = subprocess.run(
+            cmd,
+            cwd=scraper_dir,
+            capture_output=True,
+            text=True,
+            timeout=_SCRAPER_TIMEOUT_SEC,
+            check=False,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"LinkedIn scraper timed out after {_SCRAPER_TIMEOUT_SEC // 60} minutes. "
+            "It may be stuck on a login checkpoint — run `npm run login` headed in "
+            "your data linkedin/ folder and retry."
+        ) from None
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "").strip()
-        raise RuntimeError(detail or "linkedin_scraper_failed")
+        raise RuntimeError(_clean_scraper_error(detail) if detail else "linkedin_scraper_failed")
     if not output_path.is_file():
         raise RuntimeError(f"linkedin_scraper_produced_no_output: {output_path}")
 

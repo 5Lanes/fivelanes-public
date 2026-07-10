@@ -6,7 +6,9 @@ import copy
 import hashlib
 import logging
 import sqlite3
+import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -25,6 +27,7 @@ from services.image_description import (
     process_timeline_message_segmentation,
     should_reprocess_image_only_row,
 )
+from services.llm_inference_lock import inference_capacity
 from services.llm_service import LlmBackend, get_llm_backend
 from services.pipeline.summary import (
     compute_summary_fingerprint,
@@ -44,6 +47,7 @@ from utils.database import (
     save_message_outputs,
     save_thread_summary_cache,
 )
+from utils.pipeline_run_log import record_pipeline_progress
 from utils.runtime_paths import database_path
 
 log = logging.getLogger(__name__)
@@ -479,14 +483,35 @@ def run_threads_llm_pipeline(
     db = db_path or database_path()
     llm = get_llm_backend(backend=backend)
     run_stamp = run_stamp_utc()
-    log.info("Thread LLM pipeline run_stamp=%s backend=%s", run_stamp, llm.name)
+    run_started = time.monotonic()
+    log.info(
+        "Thread LLM pipeline run_stamp=%s backend=%s lookback_days=%s", run_stamp, llm.name, days
+    )
 
+    t0 = time.monotonic()
     grouped = load_timeline_entries_by_thread(db, lookback_days=days)
+    log.info(
+        "Thread LLM pipeline: loaded %d thread(s) / %d timeline row(s) in %.2fs",
+        len(grouped),
+        sum(len(rows) for rows in grouped.values()),
+        time.monotonic() - t0,
+    )
     if not grouped:
         return [], []
 
-    processed_pairs = load_processed_thread_source_pairs(db)
-    prior_cleaned_by_pair = load_prior_cleaned_content_by_pair(db)
+    # message_outputs history is unbounded, unlike the timeline scan above — bound the
+    # "already processed" lookups too, with a buffer past the lookback window so a message
+    # just outside it isn't mistaken for new.
+    t0 = time.monotonic()
+    processed_since = (datetime.now(timezone.utc) - timedelta(days=days + 14)).isoformat()
+    processed_pairs = load_processed_thread_source_pairs(db, since=processed_since)
+    prior_cleaned_by_pair = load_prior_cleaned_content_by_pair(db, since=processed_since)
+    log.info(
+        "Thread LLM pipeline: loaded %d already-processed pair(s) (since=%s) in %.2fs",
+        len(processed_pairs),
+        processed_since,
+        time.monotonic() - t0,
+    )
     seg_cache: SegmentationCache = {}
     cleaned_all: List[Dict[str, Any]] = []
     per_message: List[Dict[str, Any]] = []
@@ -500,29 +525,74 @@ def run_threads_llm_pipeline(
         ),
     )
 
-    for thread_id in thread_keys:
-        cleaned_thread, thread_per_message = process_thread_llm(
-            db,
-            thread_id,
-            grouped[thread_id],
-            processed_pairs=processed_pairs,
-            prior_cleaned_by_pair=prior_cleaned_by_pair,
-            seg_cache=seg_cache,
-            llm=llm,
-            generated_at=generated_at,
-        )
-        if cleaned_thread:
-            cleaned_all.extend(cleaned_thread)
-            per_message.extend(thread_per_message)
-            save_message_outputs(
+    total_threads = len(thread_keys)
+    # Threads are processed concurrently (bounded by the shared Ollama inference-slot
+    # capacity) so multiple LLM requests are in flight at once instead of one at a time;
+    # results are drained and persisted here on the main thread as each thread finishes,
+    # so completion order (and this progress log) is no longer strictly sequential.
+    max_workers = max(1, min(total_threads, inference_capacity()))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                process_thread_llm,
                 db,
-                run_stamp=run_stamp,
+                thread_id,
+                grouped[thread_id],
+                processed_pairs=processed_pairs,
+                prior_cleaned_by_pair=prior_cleaned_by_pair,
+                seg_cache=seg_cache,
+                llm=llm,
                 generated_at=generated_at,
-                cleaned=cleaned_thread,
-                per_message=thread_per_message,
-                replace_run_stamp=False,
+            ): thread_id
+            for thread_id in thread_keys
+        }
+        threads_updated = 0
+        threads_skipped = 0
+        for index, future in enumerate(as_completed(futures), start=1):
+            thread_id = futures[future]
+            cleaned_thread, thread_per_message = future.result()
+            record_pipeline_progress(
+                stage="llm_segment_summarize",
+                detail=f"thread {index}/{total_threads}",
             )
+            if cleaned_thread:
+                threads_updated += 1
+                log.info(
+                    "Thread LLM pipeline: thread %d/%d thread_id=%s updated (%d message(s) segmented)",
+                    index,
+                    total_threads,
+                    thread_id,
+                    len(cleaned_thread),
+                )
+                cleaned_all.extend(cleaned_thread)
+                per_message.extend(thread_per_message)
+                save_message_outputs(
+                    db,
+                    run_stamp=run_stamp,
+                    generated_at=generated_at,
+                    cleaned=cleaned_thread,
+                    per_message=thread_per_message,
+                    replace_run_stamp=False,
+                )
+            else:
+                threads_skipped += 1
+                log.debug(
+                    "Thread LLM pipeline: thread %d/%d thread_id=%s skipped (no new messages)",
+                    index,
+                    total_threads,
+                    thread_id,
+                )
 
+    log.info(
+        "Thread LLM pipeline run_stamp=%s done in %.2fs: %d/%d thread(s) updated, "
+        "%d skipped (no new messages), %d message(s) segmented",
+        run_stamp,
+        time.monotonic() - run_started,
+        threads_updated,
+        total_threads,
+        threads_skipped,
+        len(cleaned_all),
+    )
     return cleaned_all, per_message
 
 

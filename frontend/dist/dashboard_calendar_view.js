@@ -5,7 +5,7 @@ import { buildDayAgenda, getAvailabilityTimeZone } from "./availability_panel.js
 import { DASHBOARD_MEETINGS_LOOKAHEAD_DAYS } from "./dashboard_panel.js";
 import { meetingDedupeKey, meetingsInNextDays, loadMeetings, } from "./meetings_panel.js";
 import { buildThreadMatchContexts, findMatchingThread, } from "./thread_meeting_match.js";
-import { isFeatureEnabled } from "./shared/features.js";
+import { ensureFeaturesLoaded, isFeatureEnabled } from "./shared/features.js";
 import { partitionThreadsBySnooze, threadLabel } from "./shared/thread_domain.js";
 import { addDaysToYmd, dayHeadingLabelShort, formatTime12InTz, formatTimeRange12InTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdInTz, } from "./shared/time_ui.js";
 import { getCurrentData, getCurrentThreads, threadTrackPath } from "./shared/summaries_store.js";
@@ -230,6 +230,7 @@ function renderAgendaHtml(tz, availability, meetings, matchByKey) {
     return sections.join("");
 }
 async function loadAvailabilityData() {
+    await ensureFeaturesLoaded();
     if (!isFeatureEnabled("availability"))
         return null;
     try {

@@ -26,7 +26,7 @@ let dialogEl: HTMLDialogElement | null = null;
 let controlsLocked = false;
 
 function backendDisplayName(backend: BackendName): string {
-  return backend === "claude" ? "Claude" : "Llama";
+  return backend === "claude" ? "Claude" : "Local";
 }
 
 function hourOptions(): string {
@@ -240,7 +240,7 @@ export function mountSettingsDialog(): void {
         <div class="backend-control">
           <span class="backend-label" id="backend-label">Backend: …</span>
           <div class="backend-switch" id="backend-switch" role="group" aria-labelledby="backend-label">
-            <button type="button" class="backend-switch-btn" data-backend="llama" aria-pressed="false">Llama</button>
+            <button type="button" class="backend-switch-btn" data-backend="llama" aria-pressed="false">Local</button>
             <button type="button" class="backend-switch-btn" data-backend="claude" aria-pressed="false">Claude</button>
           </div>
         </div>

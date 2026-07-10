@@ -27,6 +27,8 @@
   --source-linkedin-soft: color-mix(in srgb, var(--lane-purple) 12%, var(--surface));
   --source-meet: var(--lane-orange);
   --source-meet-soft: color-mix(in srgb, var(--lane-orange) 12%, var(--surface));
+  --source-calendar: var(--lane-yellow);
+  --source-calendar-soft: color-mix(in srgb, var(--lane-yellow) 12%, var(--surface));
 
   /* Surfaces */
   --bg: #101216;
@@ -353,6 +355,10 @@ header {
 
 .pipeline-status[data-kind="error"] {
   color: var(--error);
+}
+
+.pipeline-status[data-kind="warn"] {
+  color: var(--warn);
 }
 
 .brand {
@@ -778,6 +784,7 @@ header p.run-meta {
 .dashboard-plan-edit-form input[type="date"],
 .dashboard-plan-edit-form select {
   width: 100%;
+  min-width: 0;
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -2352,6 +2359,13 @@ header p.run-meta {
 
 .lane-assigned-threads li {
   margin-bottom: 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.lane-thread-create-plan-btn {
+  flex: 0 0 auto;
 }
 
 .lane-empty-threads {
@@ -2564,6 +2578,8 @@ header p.run-meta {
 
 .add-plan-field input,
 .add-plan-field select {
+  width: 100%;
+  min-width: 0;
   padding: 0.45rem 0.55rem;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -3228,6 +3244,10 @@ details.body-detail summary {
   font-size: 0.9rem;
   color: var(--muted);
   font-family: system-ui, sans-serif;
+}
+
+.run-meta[data-kind="warn"] {
+  color: var(--warn);
 }
 
 /* Open slots (next 7 days) in threads page right rail */
@@ -4301,6 +4321,7 @@ details.body-detail summary {
 .source-pill--slack { background: var(--source-slack-soft); color: var(--source-slack); }
 .source-pill--linkedin { background: var(--source-linkedin-soft); color: var(--source-linkedin); }
 .source-pill--meet { background: var(--source-meet-soft); color: var(--source-meet); }
+.source-pill--calendar { background: var(--source-calendar-soft); color: var(--source-calendar); }
 .source-highlight-list {
   list-style: none;
   margin: 0;
@@ -4331,6 +4352,10 @@ details.body-detail summary {
 .source-highlight-list .source-highlight[data-source="meet"] {
   border-left-color: var(--source-meet);
   background: color-mix(in srgb, var(--source-meet) 8%, transparent);
+}
+.source-highlight-list .source-highlight[data-source="calendar"] {
+  border-left-color: var(--source-calendar);
+  background: color-mix(in srgb, var(--source-calendar) 8%, transparent);
 }
 .source-highlight-list .source-pill {
   margin-right: 0.35rem;
@@ -4492,6 +4517,9 @@ details.body-detail summary {
 }
 .track-body .lane-assigned-threads li {
   margin-bottom: 0.3rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 .track-body .lane-assigned-threads .lane-thread-link {
   color: var(--accent);

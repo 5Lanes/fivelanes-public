@@ -1,6 +1,7 @@
 import { applySavedThreadDraft, applyThreadSummary, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, setBundle, threadLaneIds, threadTrackPath, } from "../shared/summaries_store.js";
 import { syncLaneSummaryJobsFromServer } from "./lanes_page.js";
-import { counterpartyAvailabilityForSummary, counterpartyAvailabilitySectionHtml, formatDraftReplyMarkdown, formatChatSenderLabel, latestUpdatesForThread, listSection, ownerNextStepsForThread, messageSourceDetailsHtml, nextStepsSectionHtml, partitionThreadsBySnooze, pendingMessageCountForThread, pendingMessagePillHtml, shouldShowThreadMessageBlocks, threadIsEmail, threadIsLinkedin, threadIsMeetRecording, threadIsSlack, threadIsText, threadLabel, threadMessagesForDisplay, threadMessagesForReply, threadSummaryErrorHtml, threadSummaryForDisplay, } from "../shared/thread_domain.js";
+import { counterpartyAvailabilityForSummary, counterpartyAvailabilitySectionHtml, formatDraftReplyMarkdown, formatChatSenderLabel, latestUpdatesForThread, listSection, ownerNextStepsForThread, messageSourceDetailsHtml, nextStepsSectionHtml, partitionThreadsBySnooze, pendingMessageCountForThread, pendingMessagePillHtml, shouldShowThreadMessageBlocks, threadIsCalendarEvent, threadIsEmail, threadIsLinkedin, threadIsMeetRecording, threadIsSlack, threadIsText, threadLabel, threadMessagesForDisplay, threadMessagesForReply, threadSummaryErrorHtml, threadSummaryForDisplay, } from "../shared/thread_domain.js";
+import { ensureAvailabilityDocLoaded } from "../shared/availability_windows.js";
 import { escapeHtml, formatDate, formatRecipients, str, toneClass } from "../shared/utils.js";
 import { applyNavFeatureVisibility, isFeatureEnabled } from "../shared/features.js";
 import { sourcePillHtml, threadChannelForThread } from "../shared/source_ui.js";
@@ -49,6 +50,7 @@ const SOURCE_FILTER_DEFS = [
     { id: "slack", label: "Slack", feature: "slack" },
     { id: "linkedin", label: "LinkedIn", feature: "linkedin" },
     { id: "meet", label: "Meet", feature: "meet_recordings" },
+    { id: "calendar", label: "Calendar" },
 ];
 let threadSourceFilters = new Set(SOURCE_FILTER_DEFS.map((s) => s.id));
 let threadAssignmentFilter = "all";
@@ -136,6 +138,7 @@ function sourceFilterCounts(threads) {
         slack: 0,
         linkedin: 0,
         meet: 0,
+        calendar: 0,
     };
     for (const thread of threads) {
         counts[threadChannelForThread(thread)] += 1;
@@ -196,6 +199,8 @@ function filterThreadsByChannel(threads) {
         return threads.filter(threadIsLinkedin);
     if (threadChannelFilter === "meet")
         return threads.filter(threadIsMeetRecording);
+    if (threadChannelFilter === "calendar")
+        return threads.filter(threadIsCalendarEvent);
     return threads.filter(threadIsEmail);
 }
 function channelFilterEmptyMessage() {
@@ -207,6 +212,8 @@ function channelFilterEmptyMessage() {
         return "No LinkedIn threads in this view.";
     if (threadChannelFilter === "meet")
         return "No Meet recording threads in this view.";
+    if (threadChannelFilter === "calendar")
+        return "No calendar events in this view.";
     return "No email threads in this view.";
 }
 function threadNavItemLabel(thread, data) {
@@ -392,6 +399,7 @@ function renderNav(threads, snoozedCount, removedCount, channelCounts) {
     if (isFeatureEnabled("meet_recordings")) {
         channelOptions.push({ id: "meet", label: "Meet notes", count: channelCounts.meet });
     }
+    channelOptions.push({ id: "calendar", label: "Calendar", count: channelCounts.calendar });
     channelOptions.push({ id: "email", label: "Emails", count: channelCounts.email });
     for (const { id, label, count } of channelOptions) {
         const btn = document.createElement("button");
@@ -581,10 +589,11 @@ function bindDashboardToolbarInteractions() {
         if (panel && !panel.hidden)
             positionSourceDropdownPanel();
     });
-    document.getElementById("dashboard-threads-root")?.addEventListener("click", (ev) => {
+    document.addEventListener("click", (ev) => {
         const target = ev.target;
+        const root = document.getElementById("dashboard-threads-root");
         const toolbar = document.getElementById("dashboard-thread-toolbar");
-        if (!toolbar)
+        if (!toolbar || !root?.contains(target))
             return;
         const modeBtn = target.closest("[data-thread-mode]");
         if (modeBtn && toolbar.contains(modeBtn)) {
@@ -630,8 +639,12 @@ function bindDashboardToolbarInteractions() {
             void renderDashboardThreadsInline();
         }
     });
-    document.getElementById("dashboard-threads-root")?.addEventListener("change", (ev) => {
-        const input = ev.target.closest("input[data-source-filter]");
+    document.addEventListener("change", (ev) => {
+        const target = ev.target;
+        const root = document.getElementById("dashboard-threads-root");
+        if (!root?.contains(target))
+            return;
+        const input = target.closest("input[data-source-filter]");
         if (!input)
             return;
         syncThreadSourceFiltersFromCheckboxes();
@@ -721,6 +734,7 @@ export async function renderDashboardThreadsInline() {
     if (!data)
         return;
     ensureDashboardThreadsShell();
+    await ensureAvailabilityDocLoaded();
     const { active, snoozed, removed, snoozedCount, removedCount } = partitionThreadsBySnooze(getCurrentThreads());
     const bySnooze = threadViewMode === "snoozed" ? snoozed : threadViewMode === "removed" ? removed : active;
     renderDashboardThreadsToolbar(bySnooze, snoozedCount, removedCount);
@@ -739,6 +753,7 @@ export async function renderThreadsPage() {
     if (!data)
         return;
     applyNavFeatureVisibility();
+    await ensureAvailabilityDocLoaded();
     const { active, snoozed, removed, snoozedCount, removedCount } = partitionThreadsBySnooze(getCurrentThreads());
     const bySnooze = threadViewMode === "snoozed" ? snoozed : threadViewMode === "removed" ? removed : active;
     const channelCounts = {
@@ -747,6 +762,7 @@ export async function renderThreadsPage() {
         slack: bySnooze.filter(threadIsSlack).length,
         linkedin: bySnooze.filter(threadIsLinkedin).length,
         meet: bySnooze.filter(threadIsMeetRecording).length,
+        calendar: bySnooze.filter(threadIsCalendarEvent).length,
         email: bySnooze.filter(threadIsEmail).length,
     };
     if (threadChannelFilter === "text" && (!isFeatureEnabled("texts") || channelCounts.text === 0)) {
@@ -761,6 +777,9 @@ export async function renderThreadsPage() {
     }
     else if (threadChannelFilter === "meet" &&
         (!isFeatureEnabled("meet_recordings") || channelCounts.meet === 0)) {
+        threadChannelFilter = "all";
+    }
+    else if (threadChannelFilter === "calendar" && channelCounts.calendar === 0) {
         threadChannelFilter = "all";
     }
     else if (threadChannelFilter === "email" && channelCounts.email === 0)

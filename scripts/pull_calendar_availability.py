@@ -156,6 +156,13 @@ def main() -> None:
     )
     parser.add_argument("--weeks", type=int, default=4, help="Weeks forward from now (default 4).")
     parser.add_argument(
+        "--lookback-days",
+        type=int,
+        default=60,
+        help="Also fetch events that ended up to this many days ago, so past events "
+        "stay tracked (default 60; 0 disables lookback).",
+    )
+    parser.add_argument(
         "--rules",
         type=Path,
         default=DEFAULT_RULES,
@@ -170,6 +177,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.weeks < 1 or args.weeks > 52:
         parser.error("--weeks must be between 1 and 52")
+    if args.lookback_days < 0 or args.lookback_days > 365:
+        parser.error("--lookback-days must be between 0 and 365")
     if ZoneInfo is None:
         print("Python 3.9+ with zoneinfo is required.", file=sys.stderr)
         sys.exit(1)
@@ -192,6 +201,7 @@ def main() -> None:
     run_calendar_availability_pull(
         data_path(),
         weeks=args.weeks,
+        lookback_days=args.lookback_days,
         rules_path=rules_path,
         out_path=out_path,
     )

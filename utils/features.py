@@ -73,6 +73,9 @@ _ROUTE_FEATURES: dict[tuple[str, str], str] = {
     ("POST", "/api/meet-recordings/pull"): "meet_recordings",
     ("POST", "/api/meet-recordings/track"): "meet_recordings",
     ("POST", "/api/meet-recordings/summarize"): "meet_recordings",
+    ("GET", "/api/calendar/catalog"): "calendar_events",
+    ("POST", "/api/calendar/track"): "calendar_events",
+    ("POST", "/api/calendar/summarize"): "calendar_events",
 }
 
 _premium_unlocked = False

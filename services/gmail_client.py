@@ -151,10 +151,32 @@ def _auto_reauthorize_account(account_id: str) -> Optional[Credentials]:
         tokens = _load_tokens()
         tokens[account_id] = json.loads(creds.to_json())
         _save_tokens(tokens)
+        if creds.valid:
+            _stamp_account_email(account_id, creds, tokens)
         return creds if creds.valid else None
     except Exception as exc:
         log.exception("Auto OAuth re-authorization failed for %s: %s", account_id, exc)
         return None
+
+
+def _stamp_account_email(account_id: str, creds: Credentials, tokens: Dict[str, dict]) -> None:
+    """Best-effort: record this mailbox's real address in tokens.json's ``account`` field.
+
+    google-auth's ``Credentials.to_json()`` never populates ``account`` on its own, so
+    without this it stays ``""`` forever. Owner-email recognition (``utils/owner_config``)
+    reads this field to tell "the owner" apart from other attendees, so a missing/blank
+    value there causes the owner's own address to be misclassified as external.
+    """
+    if tokens.get(account_id, {}).get("account"):
+        return
+    try:
+        service = build("gmail", "v1", credentials=creds)
+        email = _get_account_email(service)
+        if email:
+            tokens[account_id]["account"] = email
+            _save_tokens(tokens)
+    except Exception:
+        log.debug("Could not stamp account email for %s", account_id, exc_info=True)
 
 
 def _get_credentials(account_id: str) -> Optional[Credentials]:
@@ -172,6 +194,7 @@ def _get_credentials(account_id: str) -> Optional[Credentials]:
             log.warning("Refresh token failed for %s; attempting interactive reauth.", account_id)
             return _auto_reauthorize_account(account_id)
     if creds.valid:
+        _stamp_account_email(account_id, creds, tokens)
         return creds
     return _auto_reauthorize_account(account_id)
 

@@ -45,21 +45,29 @@ import hashlib
 import json
 import os
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
 
 # Wait up to 60s when another connection holds the database (pipeline + dashboard overlap).
 _SQLITE_BUSY_TIMEOUT_MS = 60_000
 
 
+@contextmanager
 def connect_sqlite(
     db_path: str | Path,
     *,
     row_factory: Any = None,
     timeout: float | None = None,
-) -> sqlite3.Connection:
-    """Open SQLite with WAL mode and a long busy timeout for concurrent dashboard + pipeline access."""
+) -> Iterator[sqlite3.Connection]:
+    """Open SQLite with WAL mode and a long busy timeout for concurrent dashboard + pipeline access.
+
+    Every call site uses this as ``with connect_sqlite(...) as conn:``. A bare
+    ``sqlite3.Connection`` used that way only commits/rolls back on exit — it never closes the
+    connection, which leaked one file descriptor per call across the whole app. This wraps it in
+    a real context manager so the connection (and its fd) is always closed on exit.
+    """
     db_file = Path(db_path)
     conn = sqlite3.connect(
         db_file,
@@ -69,6 +77,14 @@ def connect_sqlite(
     conn.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_MS}")
     if row_factory is not None:
         conn.row_factory = row_factory
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
     return conn
 
 
@@ -1763,16 +1779,21 @@ def _meeting_bounds_utc(start_iso: str, end_iso: str) -> Optional[Tuple[datetime
     return start, end
 
 
-def fetch_meetings_rows(db_path: str, *, days: Optional[int] = None) -> List[Dict[str, Any]]:
+def fetch_meetings_rows(
+    db_path: str, *, days: Optional[int] = None, lookback_days: int = 0
+) -> List[Dict[str, Any]]:
     """
     Return meeting rows (attendees parsed from JSON).
 
     When ``days`` is set, only rows that may still be active or start within the
     next ``days`` calendar days are returned (matches dashboard lookahead filtering).
+    ``lookback_days`` extends that same filter backwards, keeping rows that already
+    ended up to that many days ago (default 0: past events are excluded, as before).
     """
     db_file = Path(db_path)
     now = datetime.now(timezone.utc)
     horizon = now + timedelta(days=days) if days is not None and days > 0 else None
+    past_floor = now - timedelta(days=lookback_days) if lookback_days > 0 else now
     with connect_sqlite(db_file) as conn:
         _ensure_meetings_schema(conn)
         cur = conn.execute(
@@ -1794,7 +1815,7 @@ def fetch_meetings_rows(db_path: str, *, days: Optional[int] = None) -> List[Dic
                 if bounds is None:
                     continue
                 start_u, end_u = bounds
-                if start_u >= horizon or end_u < now:
+                if start_u >= horizon or end_u < past_floor:
                     continue
             attendees: List[str] = []
             try:
@@ -2515,6 +2536,30 @@ def fetch_thread_tracking_rows(db_path: str) -> List[Dict[str, Any]]:
         return out
 
 
+def delete_thread_tracking_rows(db_path: str, inbox_thread_ids: List[str]) -> int:
+    """
+    Fully remove tracked threads: detach from conversations/lanes, drop their
+    timeline entries, then delete the ``thread_tracking`` rows. Returns the number
+    of ``thread_tracking`` rows removed.
+    """
+    ids = sorted({t for t in (_normalize_field(tid) for tid in inbox_thread_ids) if t})
+    if not ids:
+        return 0
+    db_file = Path(db_path)
+    deleted = 0
+    with connect_sqlite(db_file) as conn:
+        _ensure_thread_tracking_schema(conn)
+        _ensure_timeline_schema(conn)
+        _ensure_lanes_schema(conn)
+        for tid in ids:
+            _remove_thread_from_conversations(conn, tid)
+            conn.execute("DELETE FROM timeline_entries WHERE thread_id = ?", (tid,))
+            cur = conn.execute("DELETE FROM thread_tracking WHERE inbox_thread_id = ?", (tid,))
+            deleted += max(0, cur.rowcount)
+        conn.commit()
+    return deleted
+
+
 def set_thread_tracking_snoozed(
     db_path: str, *, inbox_thread_id: str, snoozed: int
 ) -> bool:
@@ -2624,6 +2669,10 @@ def _ensure_message_outputs_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_message_outputs_thread_source "
         "ON message_outputs(thread_id, source_id)"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_message_outputs_datetime "
+        "ON message_outputs(datetime)"
+    )
     try:
         conn.execute(
             """
@@ -2724,18 +2773,38 @@ def _prior_success_row_is_replaceable(
 
 def _message_outputs_latest_success_content_by_pair(
     conn: sqlite3.Connection,
+    *,
+    since: Optional[str] = None,
 ) -> Dict[Tuple[str, str], str]:
-    """Latest ``cleaned_content`` per ``(thread_id, source_id)`` for successful rows."""
+    """Latest ``cleaned_content`` per ``(thread_id, source_id)`` for successful rows.
+
+    ``since`` (an ISO datetime) restricts to rows whose message ``datetime`` is on or
+    after it — pass the pipeline's lookback bound (with a buffer) to avoid scanning the
+    whole table's history on every run.
+    """
     try:
-        rows = conn.execute(
-            """
-            SELECT COALESCE(thread_id, ''), source_id, cleaned_content
-            FROM message_outputs
-            WHERE source_id IS NOT NULL AND source_id != ''
-              AND COALESCE(TRIM(api_error), '') = ''
-            ORDER BY generated_at DESC, id DESC
-            """
-        ).fetchall()
+        if since:
+            rows = conn.execute(
+                """
+                SELECT COALESCE(thread_id, ''), source_id, cleaned_content
+                FROM message_outputs
+                WHERE source_id IS NOT NULL AND source_id != ''
+                  AND COALESCE(TRIM(api_error), '') = ''
+                  AND datetime >= ?
+                ORDER BY generated_at DESC, id DESC
+                """,
+                (since,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT COALESCE(thread_id, ''), source_id, cleaned_content
+                FROM message_outputs
+                WHERE source_id IS NOT NULL AND source_id != ''
+                  AND COALESCE(TRIM(api_error), '') = ''
+                ORDER BY generated_at DESC, id DESC
+                """
+            ).fetchall()
     except sqlite3.Error:
         return {}
     out: Dict[Tuple[str, str], str] = {}
@@ -2752,9 +2821,13 @@ def _message_outputs_latest_success_content_by_pair(
     return out
 
 
-def _message_outputs_successful_thread_source_pairs(conn: sqlite3.Connection) -> Set[Tuple[str, str]]:
+def _message_outputs_successful_thread_source_pairs(
+    conn: sqlite3.Connection,
+    *,
+    since: Optional[str] = None,
+) -> Set[Tuple[str, str]]:
     """``(thread_id, source_id)`` pairs that already have a successful pipeline row."""
-    return set(_message_outputs_latest_success_content_by_pair(conn).keys())
+    return set(_message_outputs_latest_success_content_by_pair(conn, since=since).keys())
 
 
 def load_all_processed_cleaned_by_thread(db_path: str) -> Dict[str, List[Dict[str, Any]]]:
@@ -3502,17 +3575,22 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
     return bundle
 
 
-def load_processed_thread_source_pairs(db_path: str) -> Set[Tuple[str, str]]:
+def load_processed_thread_source_pairs(
+    db_path: str,
+    *,
+    since: Optional[str] = None,
+) -> Set[Tuple[str, str]]:
     """
     (thread_id, source_id) pairs that already have a successful pipeline row.
 
     Pairs that only have rows with a non-empty ``api_error`` are omitted so a later run can
-    re-segment and insert a new row.
+    re-segment and insert a new row. ``since`` bounds the scan to rows on or after that ISO
+    datetime (see ``_message_outputs_latest_success_content_by_pair``).
     """
     try:
         with connect_sqlite(db_path) as conn:
             _ensure_message_outputs_schema(conn)
-            return _message_outputs_successful_thread_source_pairs(conn)
+            return _message_outputs_successful_thread_source_pairs(conn, since=since)
     except sqlite3.Error:
         return set()
 
@@ -3567,12 +3645,19 @@ def notify_summaries_bundle_dirty() -> None:
         pass
 
 
-def load_prior_cleaned_content_by_pair(db_path: str) -> Dict[Tuple[str, str], str]:
-    """Latest successful ``cleaned_content`` per ``(thread_id, source_id)``."""
+def load_prior_cleaned_content_by_pair(
+    db_path: str,
+    *,
+    since: Optional[str] = None,
+) -> Dict[Tuple[str, str], str]:
+    """Latest successful ``cleaned_content`` per ``(thread_id, source_id)``.
+
+    ``since`` bounds the scan to rows on or after that ISO datetime.
+    """
     try:
         with connect_sqlite(db_path) as conn:
             _ensure_message_outputs_schema(conn)
-            return _message_outputs_latest_success_content_by_pair(conn)
+            return _message_outputs_latest_success_content_by_pair(conn, since=since)
     except sqlite3.Error:
         return {}
 

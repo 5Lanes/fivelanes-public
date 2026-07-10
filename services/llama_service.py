@@ -1,4 +1,5 @@
 import base64
+import dataclasses
 import json
 import os
 import re
@@ -26,6 +27,27 @@ from services.prompts import (
     format_thread_summary_prompt,
     parse_emails,
 )
+
+
+_VERBOSITY_NUDGE = (
+    "Be thorough, not terse: write 4-8 substantive `latest_updates` bullets when the thread "
+    "supports it, each a full sentence with concrete specifics (dates, names, deliverables). "
+    "Local models tend to over-compress threads into one or two fragments — do not do that; "
+    "cover every material development, not just the last message."
+)
+
+
+def _with_verbosity_nudge(prompt: str | PromptMessages) -> str | PromptMessages:
+    """Append an explicit detail/length instruction to the system prompt.
+
+    Local Ollama models default to much terser summaries than Claude on the same shared
+    prompt template, so the nudge is applied only on this backend rather than in the
+    shared prompt (which would also lengthen Claude's already-adequate summaries).
+    """
+    if not isinstance(prompt, PromptMessages):
+        return f"{prompt}\n\n{_VERBOSITY_NUDGE}"
+    system = f"{prompt.system}\n\n{_VERBOSITY_NUDGE}" if prompt.system else _VERBOSITY_NUDGE
+    return dataclasses.replace(prompt, system=system)
 
 
 def _parse_env_file(env_path: str = ".env") -> Dict[str, str]:
@@ -69,6 +91,24 @@ def _ollama_auth_headers(env_path: str = ".env") -> Dict[str, str]:
 def _resolve_ollama_model(env_path: str, env_key: str, fallback: str) -> str:
     pairs = _parse_env_file(env_path)
     return (pairs.get(env_key) or (os.getenv(env_key) or "").strip() or fallback).strip()
+
+
+def _ollama_num_ctx(env_path: str = ".env") -> int:
+    """Context window to request from Ollama.
+
+    The thread-summary system prompt alone runs ~2.5k tokens before any thread text is
+    added, so Ollama's runtime default context (2048-4096 depending on version) leaves
+    little to no budget for the "4-8 bullet" summaries we ask for — the model truncates
+    input and/or output to fit, producing short summaries no matter how high max_tokens
+    or how insistent the prompt is. Request a large window explicitly; these models
+    support 128k+ context so this is cheap.
+    """
+    pairs = _parse_env_file(env_path)
+    raw = (pairs.get("OLLAMA_NUM_CTX") or os.getenv("OLLAMA_NUM_CTX") or "16384").strip()
+    try:
+        return max(2048, int(raw))
+    except ValueError:
+        return 16384
 
 
 def _resolve_ollama_image_description_model(env_path: str) -> str:
@@ -262,7 +302,7 @@ def describe_image_with_llava(
         "prompt": text_prompt,
         "images": [base64_data],
         "stream": False,
-        "options": {"num_predict": max_tokens},
+        "options": {"num_predict": max_tokens, "num_ctx": _ollama_num_ctx(env_path)},
     }
     request = urllib.request.Request(
         url,
@@ -328,7 +368,7 @@ def _ollama_generate_text(
         "model": model_name,
         "prompt": prompt,
         "stream": False,
-        "options": {"num_predict": max_tokens},
+        "options": {"num_predict": max_tokens, "num_ctx": _ollama_num_ctx(env_path)},
     }
     if (system or "").strip():
         payload["system"] = system.strip()
@@ -387,7 +427,7 @@ def iter_ollama_generate_text(
         "model": model_name,
         "prompt": prompt,
         "stream": True,
-        "options": {"num_predict": max_tokens},
+        "options": {"num_predict": max_tokens, "num_ctx": _ollama_num_ctx(env_path)},
     }
     if (system or "").strip():
         payload["system"] = system.strip()
@@ -627,13 +667,13 @@ def submit_summary_prompt(
     prompt: str | PromptMessages,
     *,
     model: Optional[str] = None,
-    max_tokens: int = 1200,
+    max_tokens: int = 2000,
     env_path: str = ".env",
 ) -> Dict[str, Any]:
     """Thread summaries: default model from ``OLLAMA_MODEL_SUMMARY``."""
     resolved = model or _resolve_ollama_model(env_path, "OLLAMA_MODEL_SUMMARY", MODEL_SUMMARY)
     return call_ollama_json(
-        prompt,
+        _with_verbosity_nudge(prompt),
         model=resolved,
         max_tokens=max_tokens,
         env_path=env_path,
@@ -645,13 +685,13 @@ def submit_incremental_summary_prompt(
     prompt: str | PromptMessages,
     *,
     model: Optional[str] = None,
-    max_tokens: int = 1200,
+    max_tokens: int = 2000,
     env_path: str = ".env",
 ) -> Dict[str, Any]:
     """Incremental thread summary updates."""
     resolved = model or _resolve_ollama_model(env_path, "OLLAMA_MODEL_SUMMARY", MODEL_SUMMARY)
     return call_ollama_json(
-        prompt,
+        _with_verbosity_nudge(prompt),
         model=resolved,
         max_tokens=max_tokens,
         env_path=env_path,
@@ -675,13 +715,13 @@ def submit_lane_summary_prompt(
     prompt: str | PromptMessages,
     *,
     model: Optional[str] = None,
-    max_tokens: int = 1500,
+    max_tokens: int = 2000,
     env_path: str = ".env",
 ) -> Dict[str, Any]:
     """Lane roll-up summaries across assigned threads."""
     resolved = model or _resolve_ollama_model(env_path, "OLLAMA_MODEL_SUMMARY", MODEL_SUMMARY)
     return call_ollama_json(
-        prompt,
+        _with_verbosity_nudge(prompt),
         model=resolved,
         max_tokens=max_tokens,
         env_path=env_path,

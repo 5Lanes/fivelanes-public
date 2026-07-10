@@ -10,7 +10,7 @@ const INTERVAL_OPTIONS = [
 let dialogEl = null;
 let controlsLocked = false;
 function backendDisplayName(backend) {
-    return backend === "claude" ? "Claude" : "Llama";
+    return backend === "claude" ? "Claude" : "Local";
 }
 function hourOptions() {
     return Array.from({ length: 24 }, (_, hour) => {
@@ -209,7 +209,7 @@ export function mountSettingsDialog() {
         <div class="backend-control">
           <span class="backend-label" id="backend-label">Backend: …</span>
           <div class="backend-switch" id="backend-switch" role="group" aria-labelledby="backend-label">
-            <button type="button" class="backend-switch-btn" data-backend="llama" aria-pressed="false">Llama</button>
+            <button type="button" class="backend-switch-btn" data-backend="llama" aria-pressed="false">Local</button>
             <button type="button" class="backend-switch-btn" data-backend="claude" aria-pressed="false">Claude</button>
           </div>
         </div>
