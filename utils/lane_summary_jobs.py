@@ -160,9 +160,15 @@ def _run_lane_summary_worker(
             _lane, summaries = load_lane_thread_summaries(db_path, lane_id=lane_id)
             if not summaries:
                 raise RuntimeError("no_thread_summaries")
-            prompt = format_lane_summary_prompt(lane_name, summaries, db_path=db_path)
-            result = llm.submit_lane_summary(prompt)
-            summary, err = _finalize_lane_summary_from_llm(result if isinstance(result, dict) else {})
+            from services.pipeline.summary import deterministic_calendar_only_lane_summary
+
+            deterministic = deterministic_calendar_only_lane_summary(summaries)
+            if deterministic is not None:
+                summary, err = deterministic, None
+            else:
+                prompt = format_lane_summary_prompt(lane_name, summaries, db_path=db_path)
+                result = llm.submit_lane_summary(prompt)
+                summary, err = _finalize_lane_summary_from_llm(result if isinstance(result, dict) else {})
             if err:
                 raise RuntimeError(err)
             summary["input_fingerprint"] = input_fingerprint

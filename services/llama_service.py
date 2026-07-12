@@ -30,10 +30,12 @@ from services.prompts import (
 
 
 _VERBOSITY_NUDGE = (
-    "Be thorough, not terse: write 4-8 substantive `latest_updates` bullets when the thread "
-    "supports it, each a full sentence with concrete specifics (dates, names, deliverables). "
-    "Local models tend to over-compress threads into one or two fragments — do not do that; "
-    "cover every material development, not just the last message."
+    "Be thorough, not terse: write substantive bullets covering every material development "
+    "across the threads, each a full sentence with concrete specifics (dates, names, "
+    "deliverables) grounded in the input. Local models tend to over-compress into one or two "
+    "fragments — do not do that. But never invent a detail (name, date, request) that isn't "
+    "present in the input just to hit a length target; a shorter, accurate bullet beats a "
+    "fabricated one."
 )
 
 
@@ -43,6 +45,12 @@ def _with_verbosity_nudge(prompt: str | PromptMessages) -> str | PromptMessages:
     Local Ollama models default to much terser summaries than Claude on the same shared
     prompt template, so the nudge is applied only on this backend rather than in the
     shared prompt (which would also lengthen Claude's already-adequate summaries).
+
+    Only used for the lane/track roll-up (``submit_lane_summary_prompt``), which synthesizes
+    across many already-summarized threads and has enough real material to fill it out. Applying
+    it to individual thread summaries caused the small local model to fabricate plausible-sounding
+    details (invented people, dates, requests) on threads with thin source content in order to
+    hit the bullet-count target — see the "Charlie" hallucination incident, 2026-07-11.
     """
     if not isinstance(prompt, PromptMessages):
         return f"{prompt}\n\n{_VERBOSITY_NUDGE}"
@@ -264,6 +272,41 @@ LANE_SUMMARY_RESPONSE_FORMAT: Dict[str, Any] = {
         "tone_overview": {"type": "string"},
     },
     "required": ["summary"],
+}
+DIGEST_RESPONSE_FORMAT: Dict[str, Any] = {
+    "type": "object",
+    "properties": {"narrative": {"type": "string"}},
+    "required": ["narrative"],
+}
+SCHEDULING_ASK_RESPONSE_FORMAT: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "is_scheduling_ask": {"type": "boolean"},
+        "proposed_windows": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string"},
+                    "start": {"type": "string"},
+                    "end": {"type": "string"},
+                },
+            },
+        },
+        "counterparty_offered_windows": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string"},
+                    "start": {"type": "string"},
+                    "end": {"type": "string"},
+                    "label": {"type": "string"},
+                },
+            },
+        },
+    },
+    "required": ["is_scheduling_ask"],
 }
 # Multimodal vision (Ollama): ``ollama pull llava`` (or another LLaVA-tagged model).
 MODEL_IMAGE_DESCRIPTION = "llava:latest"
@@ -673,7 +716,7 @@ def submit_summary_prompt(
     """Thread summaries: default model from ``OLLAMA_MODEL_SUMMARY``."""
     resolved = model or _resolve_ollama_model(env_path, "OLLAMA_MODEL_SUMMARY", MODEL_SUMMARY)
     return call_ollama_json(
-        _with_verbosity_nudge(prompt),
+        prompt,
         model=resolved,
         max_tokens=max_tokens,
         env_path=env_path,
@@ -691,7 +734,7 @@ def submit_incremental_summary_prompt(
     """Incremental thread summary updates."""
     resolved = model or _resolve_ollama_model(env_path, "OLLAMA_MODEL_SUMMARY", MODEL_SUMMARY)
     return call_ollama_json(
-        _with_verbosity_nudge(prompt),
+        prompt,
         model=resolved,
         max_tokens=max_tokens,
         env_path=env_path,
@@ -721,11 +764,31 @@ def submit_lane_summary_prompt(
     """Lane roll-up summaries across assigned threads."""
     resolved = model or _resolve_ollama_model(env_path, "OLLAMA_MODEL_SUMMARY", MODEL_SUMMARY)
     return call_ollama_json(
-        _with_verbosity_nudge(prompt),
+        # _with_verbosity_nudge(prompt),
+        prompt,
         model=resolved,
         max_tokens=max_tokens,
         env_path=env_path,
         response_format=LANE_SUMMARY_RESPONSE_FORMAT,
+    )
+
+
+def submit_scheduling_ask_prompt(
+    prompt: str | PromptMessages,
+    *,
+    model: Optional[str] = None,
+    max_tokens: int = 500,
+    env_path: str = ".env",
+) -> Dict[str, Any]:
+    """Small, focused classification: does the last message ask about availability, and
+    what window(s) does it name? Default model from ``OLLAMA_MODEL_SUMMARY``."""
+    resolved = model or _resolve_ollama_model(env_path, "OLLAMA_MODEL_SUMMARY", MODEL_SUMMARY)
+    return call_ollama_json(
+        prompt,
+        model=resolved,
+        max_tokens=max_tokens,
+        env_path=env_path,
+        response_format=SCHEDULING_ASK_RESPONSE_FORMAT,
     )
 
 
@@ -739,6 +802,24 @@ def submit_meeting_prep_prompt(
     """Meeting prep: default model from ``OLLAMA_MODEL_SUMMARY``."""
     resolved = model or _resolve_ollama_model(env_path, "OLLAMA_MODEL_SUMMARY", MODEL_SUMMARY)
     return call_ollama_json(prompt, model=resolved, max_tokens=max_tokens, env_path=env_path)
+
+
+def submit_digest_prompt(
+    prompt: str | PromptMessages,
+    *,
+    model: Optional[str] = None,
+    max_tokens: int = 2000,
+    env_path: str = ".env",
+) -> Dict[str, Any]:
+    """Cross-source briefing narrative: default model from ``OLLAMA_MODEL_SUMMARY``."""
+    resolved = model or _resolve_ollama_model(env_path, "OLLAMA_MODEL_SUMMARY", MODEL_SUMMARY)
+    return call_ollama_json(
+        prompt,
+        model=resolved,
+        max_tokens=max_tokens,
+        env_path=env_path,
+        response_format=DIGEST_RESPONSE_FORMAT,
+    )
 
 
 def submit_aifred_chat_prompt(

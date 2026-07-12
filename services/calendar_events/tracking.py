@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Set
@@ -51,13 +50,14 @@ def _format_event_body(meeting: Dict[str, Any]) -> str:
 def _timeline_row_from_meeting(meeting: Dict[str, Any], thread_id: str) -> Dict[str, Any]:
     title = str(meeting.get("summary") or "").strip() or "(No title)"
     attendees = meeting.get("attendees") or []
+    attendees_str = ", ".join(attendees)
     return {
         "source_id": thread_id,
         "type": "meeting",
         "datetime": meeting.get("start_iso") or "",
-        "sender": "",
-        "recipients": json.dumps(attendees, ensure_ascii=False),
-        "participants": ", ".join(attendees),
+        "sender": attendees_str,
+        "recipients": attendees_str,
+        "participants": attendees_str,
         "summary": title,
         "body": _format_event_body(meeting),
         "thread_id": thread_id,

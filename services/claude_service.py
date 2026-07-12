@@ -247,6 +247,17 @@ def submit_lane_summary_prompt(
     return call_claude_json(prompt, model=model, max_tokens=max_tokens)
 
 
+def submit_scheduling_ask_prompt(
+    prompt: str | PromptMessages,
+    *,
+    model: str = MODEL_SUMMARY,
+    max_tokens: int = 500,
+) -> Dict[str, Any]:
+    """Small, focused classification: does the last message ask about availability, and
+    what window(s) does it name?"""
+    return call_claude_json(prompt, model=model, max_tokens=max_tokens)
+
+
 def submit_meeting_prep_prompt(
     prompt: str | PromptMessages,
     *,
@@ -254,6 +265,16 @@ def submit_meeting_prep_prompt(
     max_tokens: int = 2000,
 ) -> Dict[str, Any]:
     """Meeting prep brief from calendar event + email thread context."""
+    return call_claude_json(prompt, model=model, max_tokens=max_tokens)
+
+
+def submit_digest_prompt(
+    prompt: str | PromptMessages,
+    *,
+    model: str = MODEL_SUMMARY,
+    max_tokens: int = 2000,
+) -> Dict[str, Any]:
+    """Cross-source briefing narrative across lanes, plans, and meetings."""
     return call_claude_json(prompt, model=model, max_tokens=max_tokens)
 
 

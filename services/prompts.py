@@ -334,8 +334,6 @@ def format_thread_summary_prompt(
     *,
     message_template: str | None = None,
     as_of: datetime | None = None,
-    db_path: str | None = None,
-    project_root: Path | None = None,
 ) -> PromptMessages:
     """
     Build the full thread-summary prompt from structured messages.
@@ -353,12 +351,6 @@ def format_thread_summary_prompt(
         chronological=True,
     )
     aliases = ", ".join(_summary_routing_aliases())
-    from services.scheduling_availability_step import calendar_context_for_summary_prompt
-
-    calendar_events_block, calendar_timezone = calendar_context_for_summary_prompt(
-        db_path=db_path,
-        project_root=project_root,
-    )
     return _with_summary_as_of(
         _format_prompt_pair(
             "email_thread_summary",
@@ -366,8 +358,30 @@ def format_thread_summary_prompt(
             last_message_anchor=build_last_message_anchor(messages),
             summary_routing_aliases=aliases,
             summary_datetime=summary_as_of_datetime(as_of=as_of),
-            calendar_events_block=calendar_events_block,
-            calendar_timezone=calendar_timezone,
+        ),
+        as_of=as_of,
+    )
+
+
+def format_scheduling_ask_prompt(
+    messages: Sequence[Dict[str, Any]],
+    *,
+    as_of: datetime | None = None,
+) -> PromptMessages:
+    """
+    Small, focused prompt: does the last message ask about Luisa's availability, and if so
+    what window(s) does it name?
+
+    Deliberately separate from ``format_thread_summary_prompt`` — a dedicated prompt
+    examining only the last message can't confuse this narrow yes/no + extraction task with
+    everything else the main summary prompt is asked to produce, and never sees the busy-
+    windows calendar block at all, so it has nothing to borrow a stray date from.
+    """
+    return _with_summary_as_of(
+        _format_prompt_pair(
+            "scheduling_ask_detection",
+            last_message_anchor=build_last_message_anchor(messages),
+            summary_datetime=summary_as_of_datetime(as_of=as_of),
         ),
         as_of=as_of,
     )
@@ -413,8 +427,6 @@ def format_incremental_thread_summary_prompt(
     *,
     message_template: str | None = None,
     as_of: datetime | None = None,
-    db_path: str | None = None,
-    project_root: Path | None = None,
 ) -> PromptMessages:
     """Build an incremental summary prompt from prior summary JSON and new message blocks."""
     new_thread_messages, _ = _build_thread_message_blocks(
@@ -425,12 +437,6 @@ def format_incremental_thread_summary_prompt(
         chronological=True,
     )
     aliases = ", ".join(_summary_routing_aliases())
-    from services.scheduling_availability_step import calendar_context_for_summary_prompt
-
-    calendar_events_block, calendar_timezone = calendar_context_for_summary_prompt(
-        db_path=db_path,
-        project_root=project_root,
-    )
     prior_json = json.dumps(_summary_for_llm_prompt(prior_summary), indent=2)
     return _with_summary_as_of(
         _format_prompt_pair(
@@ -439,8 +445,6 @@ def format_incremental_thread_summary_prompt(
             new_thread_messages=new_thread_messages,
             summary_routing_aliases=aliases,
             summary_datetime=summary_as_of_datetime(as_of=as_of),
-            calendar_events_block=calendar_events_block,
-            calendar_timezone=calendar_timezone,
         ),
         as_of=as_of,
     )
@@ -595,12 +599,33 @@ def _chronological_thread_messages_block(
     return f"\n\nEmails in this thread (chronological order, oldest first):\n{msg_text}"
 
 
+def _relative_time_note(dt_str: str, as_of_now: datetime) -> str:
+    """
+    Precomputed, unambiguous past/future annotation for a thread datetime relative to the
+    as-of date. The lane-summary model reliably mislabels clearly-past thread dates as
+    "upcoming" when left to compute the comparison itself (verified repeatedly even with an
+    explicit "past vs future" prompt rule) — doing the date arithmetic in code and stating
+    the answer removes the chance of that error rather than relying on the model to get it
+    right.
+    """
+    parsed = _parse_message_datetime(dt_str)
+    if parsed == datetime.min.replace(tzinfo=timezone.utc):
+        return ""
+    days = (as_of_now.date() - parsed.astimezone(as_of_now.tzinfo or timezone.utc).date()).days
+    if days > 0:
+        return f" [ALREADY IN THE PAST — {days} day(s) before the as-of date; never call this upcoming]"
+    if days < 0:
+        return f" [IN THE FUTURE — {-days} day(s) after the as-of date]"
+    return " [TODAY relative to the as-of date]"
+
+
 def _format_thread_summary_block(
     index: int,
     summary: Dict[str, Any],
     *,
     block_template: str | None = None,
     include_datetime: bool = False,
+    as_of_now: datetime | None = None,
 ) -> str:
     label = (
         str(summary.get("suggested_thread_label") or summary.get("subject") or summary.get("thread_id") or "")
@@ -610,7 +635,10 @@ def _format_thread_summary_block(
     block_tpl = block_template or (
         _lane_thread_summary_block_template() if include_datetime else _thread_summary_block_template()
     )
-    dt = _summary_datetime_key(summary) or "(unknown date)"
+    dt_raw = _summary_datetime_key(summary)
+    dt = dt_raw or "(unknown date)"
+    if dt_raw and as_of_now is not None:
+        dt += _relative_time_note(dt_raw, as_of_now)
     return block_tpl.format(
         index=index,
         label=label,
@@ -629,6 +657,7 @@ def _build_aggregate_thread_summary_blocks(
     block_template: str | None = None,
     db_path: str | None = None,
     include_thread_messages: bool = False,
+    as_of_now: datetime | None = None,
 ) -> str:
     """
     Format existing thread summaries for lane aggregate prompts.
@@ -658,7 +687,7 @@ def _build_aggregate_thread_summary_blocks(
     block_tpl = block_template or _lane_thread_summary_block_template()
     for i, summary in enumerate(summaries, start=1):
         block = _format_thread_summary_block(
-            i, summary, block_template=block_tpl, include_datetime=True
+            i, summary, block_template=block_tpl, include_datetime=True, as_of_now=as_of_now
         )
         if include_thread_messages:
             block += _chronological_thread_messages_block(
@@ -684,11 +713,13 @@ def format_lane_summary_prompt(
     """
     settings = _load_settings()
     max_threads = int(settings.get("lane_summary_max_threads") or 10)
+    as_of_now, _ = _summary_now(as_of=as_of)
     thread_summaries_text = _build_aggregate_thread_summary_blocks(
         thread_summaries,
         max_threads=max_threads,
         block_template=block_template,
         db_path=db_path,
+        as_of_now=as_of_now,
     )
     return _with_summary_as_of(
         _format_prompt_pair(

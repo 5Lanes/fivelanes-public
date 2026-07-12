@@ -23,6 +23,10 @@ class LlmBackend(Protocol):
 
     def submit_lane_summary(self, prompt: PromptMessages) -> Dict[str, Any]: ...
 
+    def submit_scheduling_ask(self, prompt: PromptMessages) -> Dict[str, Any]: ...
+
+    def submit_digest(self, prompt: PromptMessages) -> Dict[str, Any]: ...
+
 
 class _ClaudeBackend:
     name = "claude"
@@ -56,6 +60,16 @@ class _ClaudeBackend:
         from services import claude_service
 
         return claude_service.submit_lane_summary_prompt(prompt)
+
+    def submit_scheduling_ask(self, prompt: PromptMessages) -> Dict[str, Any]:
+        from services import claude_service
+
+        return claude_service.submit_scheduling_ask_prompt(prompt)
+
+    def submit_digest(self, prompt: PromptMessages) -> Dict[str, Any]:
+        from services import claude_service
+
+        return claude_service.submit_digest_prompt(prompt)
 
 
 class _LlamaBackend:
@@ -93,6 +107,16 @@ class _LlamaBackend:
         from services import llama_service
 
         return llama_service.submit_lane_summary_prompt(prompt, env_path=self._env_path)
+
+    def submit_scheduling_ask(self, prompt: PromptMessages) -> Dict[str, Any]:
+        from services import llama_service
+
+        return llama_service.submit_scheduling_ask_prompt(prompt, env_path=self._env_path)
+
+    def submit_digest(self, prompt: PromptMessages) -> Dict[str, Any]:
+        from services import llama_service
+
+        return llama_service.submit_digest_prompt(prompt, env_path=self._env_path)
 
 
 def get_llm_backend(*, backend: Optional[str] = None, env_path: str = ".env") -> LlmBackend:
