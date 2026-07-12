@@ -1,6 +1,7 @@
 const PAGE_HTML = `
 <div class="view-dashboard">
   <div class="dashboard-status-banner-wrap" id="dashboard-status-banner-wrap" hidden></div>
+  <div class="dashboard-briefing-wrap" id="dashboard-briefing-wrap" hidden></div>
   <div class="dashboard-grid">
     <section class="dashboard-lanes-section" id="dashboard-lanes" aria-labelledby="dashboard-lanes-heading">
       <h2 id="dashboard-lanes-heading" class="section-title">Lanes</h2>

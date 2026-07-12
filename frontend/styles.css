@@ -4709,6 +4709,48 @@ details.body-detail summary {
 .dashboard-status-banner-link { color: var(--accent); text-decoration: none; }
 .dashboard-status-banner-link:hover { text-decoration: underline; }
 .dashboard-status-banner-context { color: var(--muted); font-size: 0.78rem; }
+
+.dashboard-briefing-wrap { margin-bottom: 1rem; }
+.dashboard-briefing {
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.dashboard-briefing-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.dashboard-briefing-narrative {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--text);
+  line-height: 1.5;
+}
+.dashboard-briefing-dismiss {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.dashboard-briefing-group { margin-top: 0.65rem; }
+.dashboard-briefing-subhead {
+  margin: 0 0 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.dashboard-briefing-list { margin: 0; padding-left: 1.1rem; font-size: 0.84rem; }
 .threads-section {
   grid-area: threads;
   min-width: 0;

@@ -5,6 +5,7 @@ import { mountDashboardPage as mountShell } from "./dashboard_page_shell.js";
 import { renderLanesList, syncLaneSummaryJobsFromServer } from "./lanes_page.js";
 import { partitionThreadsBySnooze, threadLabel } from "../shared/thread_domain.js";
 import { refreshPlanNotifications } from "../shared/plan_notifications.js";
+import { refreshDigestBriefing } from "../shared/digest_briefing.js";
 import { getCurrentData, getCurrentThreads, } from "../shared/summaries_store.js";
 export function mountDashboardPage(root) {
     mountShell(root);
@@ -35,6 +36,7 @@ export async function renderDashboardPage() {
     const trackingThreads = [...active, ...snoozed];
     const meetingPreps = (data.meeting_preps || {});
     await refreshDashboardStatusBanner();
+    await refreshDigestBriefing();
     await refreshDashboardScheduleRail(trackingThreads, {
         threadLabel,
         meetingPreps,

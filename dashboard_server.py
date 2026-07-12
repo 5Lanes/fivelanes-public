@@ -119,6 +119,7 @@ from services.calendar_events import (
     set_tracked_meeting_keys,
     summarize_tracked_calendar_event_threads,
 )
+from services.digest import build_digest_payload
 from utils.run_fivelanes_scheduler import (
     pipeline_run_in_progress,
     run_fivelanes_cycle,
@@ -255,6 +256,9 @@ def _db_cache_etag(db_path: str) -> Tuple[str, str]:
 
 _summaries_bundle_cache: Optional[Dict[str, Any]] = None
 _summaries_bundle_epoch: int = 0
+
+DIGEST_CACHE_TTL_SEC = 300
+_digest_cache: Optional[Dict[str, Any]] = None
 
 
 def _get_cached_summaries_bundle(etag: str) -> Optional[Dict[str, Any]]:
@@ -1945,6 +1949,30 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     def _get_pipeline_status(self) -> None:
         self._json_response(HTTPStatus.OK, _pipeline_status_payload())
 
+    def _get_digest_latest(self) -> None:
+        db_file = Path(DB_PATH)
+        if not db_file.is_file():
+            self._json_response(
+                HTTPStatus.NOT_FOUND, {"ok": False, "error": "database_not_found"}
+            )
+            return
+        global _digest_cache
+        now = datetime.now(timezone.utc)
+        cached = _digest_cache
+        if cached and (now - cached["cached_at"]).total_seconds() < DIGEST_CACHE_TTL_SEC:
+            self._json_response(HTTPStatus.OK, cached["payload"])
+            return
+        try:
+            payload = build_digest_payload(DB_PATH, env_path=str(env_file()))
+        except Exception as exc:
+            log.exception("digest build failed")
+            self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": str(exc)}
+            )
+            return
+        _digest_cache = {"cached_at": now, "payload": payload}
+        self._json_response(HTTPStatus.OK, payload)
+
     def _post_config_backend(self, body: Dict[str, Any]) -> None:
         backend = str(body.get("backend") or "").strip().lower()
         if not backend:
@@ -2114,6 +2142,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
         if path == "/api/pipeline/status":
             self._get_pipeline_status()
+            return
+        if path == "/api/digest/latest":
+            self._get_digest_latest()
             return
         if path == "/api/texts/catalog":
             self._get_texts_catalog()
