@@ -252,19 +252,6 @@ def _apply_scheduling_ask_step(
                 }
             )
             finalized["next_steps"] = next_steps
-
-    counter = result.get("counterparty_offered_windows")
-    if isinstance(counter, list) and counter:
-        finalized["counterparty_availability"] = [
-            {
-                "date": str(w.get("date") or ""),
-                "start": str(w.get("start") or ""),
-                "end": str(w.get("end") or ""),
-                "label": str(w.get("label") or ""),
-            }
-            for w in counter
-            if isinstance(w, dict)
-        ]
     return finalized
 
 
