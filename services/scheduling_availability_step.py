@@ -1,8 +1,15 @@
 """
-Calendar context for the thread-summary prompt (scheduling availability next_step).
+Deterministic availability check for the scheduling-ask-detection step.
 
-The LLM extracts counterparty-proposed windows into ``counterparty_availability`` on the
-thread summary JSON; this module only loads and formats the owner's calendar for the prompt.
+``services.prompts.format_scheduling_ask_prompt`` asks a small, focused model call whether
+the last message in a thread proposes a specific day/time window and, if so, extracts it.
+This module takes that extracted window and checks it against the owner's real busy/free
+time — in code, not another model call, since interval overlap is exact arithmetic with one
+right answer, not a judgment call to leave to an LLM.
+
+Source is strictly the ``busy_with_buffers_iso`` list from the availability-pull JSON built
+by ``services.calendar_availability_export`` — start/end instants only, never event titles,
+locations, or attendees, so this never has anything to leak beyond "busy" or "free".
 """
 
 from __future__ import annotations
@@ -21,8 +28,6 @@ except ImportError:  # pragma: no cover
 
 log = logging.getLogger(__name__)
 
-_NONE_BLOCK = "(none — omit scheduling availability next_step)"
-
 
 def _scheduling_step_disabled() -> bool:
     return (os.getenv("SCHEDULING_AVAILABILITY_STEP_DISABLE") or "").strip().lower() in (
@@ -36,105 +41,121 @@ def _scheduler_tz_name() -> str:
     return (os.getenv("FIVELANES_SCHEDULER_TZ") or "America/New_York").strip() or "America/New_York"
 
 
-def _max_calendar_lines() -> int:
-    raw = (os.getenv("CALENDAR_SUMMARY_MAX_EVENTS") or "").strip()
-    if raw:
-        try:
-            return max(1, int(raw))
-        except ValueError:
-            pass
-    try:
-        from services.prompts import _load_settings
+def load_busy_windows(*, project_root: Optional[Path] = None) -> Tuple[List[Tuple[str, str]], str]:
+    """
+    Return ``(busy_windows, timezone name)``.
 
-        return int(_load_settings().get("calendar_summary_max_events") or 100)
-    except (FileNotFoundError, OSError, ValueError):
-        return 100
-
-
-def load_calendar_events(
-    *,
-    db_path: Optional[str] = None,
-    project_root: Optional[Path] = None,
-) -> Tuple[List[Dict[str, Any]], str]:
-    """Return (events, timezone name) for prompt injection."""
+    ``db_path``/the raw ``meetings`` table are deliberately never read here: that table
+    carries full event titles and locations (including sensitive personal events unrelated
+    to any given thread) and has no place in this check, whose only legitimate purpose is
+    "is the owner already busy then."
+    """
     tz_name = _scheduler_tz_name()
-    rows: List[Dict[str, Any]] = []
-    if db_path and Path(db_path).is_file():
-        try:
-            from utils.database import fetch_meetings_rows
+    from utils.runtime_paths import data_path
 
-            rows = fetch_meetings_rows(db_path, days=60)
-        except Exception:
-            log.warning("Failed to load meetings from %s", db_path, exc_info=True)
-    if not rows:
-        from utils.runtime_paths import data_path
-
-        avail_path = data_path("out", "availability_calendar_latest.json")
-        if avail_path.is_file():
-            try:
-                doc = json.loads(avail_path.read_text(encoding="utf-8"))
-                from utils.database import meetings_rows_from_availability_doc
-
-                rows = meetings_rows_from_availability_doc(doc)
-                meta = doc.get("meta") if isinstance(doc.get("meta"), dict) else {}
-                tz_name = str(meta.get("timezone") or "").strip() or tz_name
-            except Exception:
-                log.exception("Failed to load availability JSON at %s", avail_path)
-    if rows and rows[0].get("timezone"):
-        tz_name = str(rows[0]["timezone"]).strip() or tz_name
-    events = [
-        {
-            "summary": r.get("summary") or "",
-            "start_iso": r.get("start_iso") or "",
-            "end_iso": r.get("end_iso") or "",
-            "location": r.get("location") or "",
-            "kind": r.get("kind") or "",
-        }
-        for r in rows
-        if str(r.get("start_iso") or "").strip()
-    ]
-    events.sort(key=lambda e: str(e.get("start_iso") or ""))
-    return events, tz_name
+    avail_path = data_path("out", "availability_calendar_latest.json")
+    if not avail_path.is_file():
+        return [], tz_name
+    try:
+        doc = json.loads(avail_path.read_text(encoding="utf-8"))
+    except Exception:
+        log.exception("Failed to load availability JSON at %s", avail_path)
+        return [], tz_name
+    meta = doc.get("meta") if isinstance(doc.get("meta"), dict) else {}
+    tz_name = str(meta.get("timezone") or "").strip() or tz_name
+    busy_raw = doc.get("busy_with_buffers_iso")
+    windows: List[Tuple[str, str]] = []
+    if isinstance(busy_raw, list):
+        for item in busy_raw:
+            if not isinstance(item, dict):
+                continue
+            start = str(item.get("start") or "").strip()
+            end = str(item.get("end") or "").strip()
+            if start and end:
+                windows.append((start, end))
+    windows.sort(key=lambda w: w[0])
+    return windows, tz_name
 
 
-def format_calendar_events_block(
-    events: List[Dict[str, Any]],
+def _parse_local_datetime(date_s: str, time_s: str, tz: Any) -> Optional[datetime]:
+    try:
+        d = datetime.strptime(date_s.strip(), "%Y-%m-%d").date()
+        h, m = (int(p) for p in time_s.strip().split(":", 1))
+    except (ValueError, AttributeError):
+        return None
+    try:
+        return datetime(d.year, d.month, d.day, h, m, tzinfo=tz)
+    except ValueError:
+        return None
+
+
+def _parse_iso_utc(s: str) -> Optional[datetime]:
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _overlaps_any(
+    window_start_utc: datetime, window_end_utc: datetime, busy_windows: List[Tuple[str, str]]
+) -> bool:
+    for b_start_s, b_end_s in busy_windows:
+        b_start = _parse_iso_utc(b_start_s)
+        b_end = _parse_iso_utc(b_end_s)
+        if b_start is None or b_end is None:
+            continue
+        if window_start_utc < b_end and b_start < window_end_utc:
+            return True
+    return False
+
+
+def check_proposed_windows_availability(
+    proposed_windows: List[Dict[str, str]],
     *,
-    max_lines: Optional[int] = None,
-) -> str:
-    """One line per event for the summary prompt."""
-    if not events:
-        return _NONE_BLOCK
-    cap = max_lines if max_lines is not None else _max_calendar_lines()
-    lines: List[str] = []
-    for ev in events[:cap]:
-        start = str(ev.get("start_iso") or "").strip()
-        end = str(ev.get("end_iso") or "").strip() or "(no end)"
-        title = str(ev.get("summary") or "(No title)").strip()
-        loc = str(ev.get("location") or "").strip()
-        kind = str(ev.get("kind") or "").strip()
-        loc_part = f" | {loc}" if loc else ""
-        kind_part = f" | {kind}" if kind else ""
-        lines.append(f"- {start} → {end} | {title}{loc_part}{kind_part}")
-    omitted = len(events) - len(lines)
-    if omitted > 0:
-        lines.append(f"- … {omitted} more event(s) omitted")
-    return "\n".join(lines)
-
-
-def calendar_context_for_summary_prompt(
-    *,
-    db_path: Optional[str] = None,
     project_root: Optional[Path] = None,
-) -> Tuple[str, str]:
+) -> Optional[str]:
     """
-    Return ``(calendar_events_block, calendar_timezone)`` for ``format_thread_summary_prompt``.
+    Given windows extracted by the scheduling-ask-detection step (each a dict with
+    ``date``/``start``/``end`` in the scheduler's local timezone), return one
+    ``"Calendar for proposed time: ..."`` sentence, or ``None`` if there's nothing to check
+    (feature disabled, no windows given, or no usable date/time in the first window).
+
+    Only the first window is checked — the detection prompt may return several candidates
+    when a message names more than one option, but the next_steps item this feeds is a
+    single action.
     """
-    if _scheduling_step_disabled():
-        return _NONE_BLOCK, _scheduler_tz_name()
+    if _scheduling_step_disabled() or not proposed_windows:
+        return None
     from utils.features import is_enabled
 
     if not is_enabled("availability"):
-        return _NONE_BLOCK, _scheduler_tz_name()
-    events, tz_name = load_calendar_events(db_path=db_path, project_root=project_root)
-    return format_calendar_events_block(events), tz_name
+        return None
+
+    win = proposed_windows[0]
+    date_s = str(win.get("date") or "").strip()
+    start_s = str(win.get("start") or "").strip()
+    end_s = str(win.get("end") or "").strip()
+    if not date_s or not start_s:
+        return None
+    if not end_s:
+        end_s = start_s
+
+    busy_windows, tz_name = load_busy_windows(project_root=project_root)
+    tz = ZoneInfo(tz_name) if ZoneInfo is not None else timezone.utc
+
+    start_local = _parse_local_datetime(date_s, start_s, tz)
+    end_local = _parse_local_datetime(date_s, end_s, tz)
+    if start_local is None:
+        return None
+    if end_local is None or end_local <= start_local:
+        end_local = start_local
+        end_local = start_local.replace(hour=min(start_local.hour + 1, 23))
+
+    busy = _overlaps_any(start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc), busy_windows)
+    window_label = f"{date_s} {start_s}-{end_s}"
+    if busy:
+        return f"On {window_label} you already have a commitment then."
+    return f"On {window_label} you have no commitments in that window."

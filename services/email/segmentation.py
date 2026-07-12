@@ -106,13 +106,34 @@ def guard_segmentation_content(
     if not isinstance(seg, dict):
         return seg
     content = str(seg.get("content") or "").strip()
-    if not content or not (full_body or "").strip():
+    if not (full_body or "").strip():
         return seg
     idx = quoted_thread_start_index(full_body)
     if idx is None or idx <= 0:
         return seg
     head = full_body[:idx].strip()
     tail = full_body[idx:].strip()
+    if not content:
+        # The model claimed there's no new sender-written content at all — verify against
+        # the head slice (everything before the quoted-thread marker) rather than trusting
+        # that blindly. A short real reply (e.g. "Confirmed, thank you") immediately
+        # followed by a signature block and then a long quoted chain has been seen to get
+        # misclassified as pure signature/quote and dropped entirely.
+        if not head or len(head) < 3:
+            return seg
+        try:
+            retry = resubmit_segmentation(head)
+            if isinstance(retry, dict):
+                retry_content = str(retry.get("content") or "").strip()
+                if retry_content:
+                    out = dict(seg)
+                    out["content"] = retry_content
+                    return out
+        except Exception:
+            pass
+        out = dict(seg)
+        out["content"] = head
+        return out
     nc = _normalize_for_content_compare(content)
     if len(nc) < 24:
         return seg

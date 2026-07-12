@@ -34,12 +34,13 @@ def _cleaned_row_from_meeting(
 
     content = f"Meeting: {title}\n\n{_format_event_body(meeting)}".strip()
     attendees = meeting.get("attendees") or []
+    attendees_str = ", ".join(attendees)
     return {
         "thread_id": thread_id,
         "source_id": thread_id,
         "datetime": meeting.get("start_iso") or "",
-        "sender": "",
-        "recipients": ", ".join(attendees),
+        "sender": attendees_str,
+        "recipients": attendees_str,
         "subject": title,
         "raw_text": content,
         "forwarded_from": "",

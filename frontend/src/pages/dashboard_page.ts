@@ -5,6 +5,7 @@ import { mountDashboardPage as mountShell } from "./dashboard_page_shell.js";
 import { renderLanesList, syncLaneSummaryJobsFromServer } from "./lanes_page.js";
 import { partitionThreadsBySnooze, threadLabel } from "../shared/thread_domain.js";
 import { refreshPlanNotifications } from "../shared/plan_notifications.js";
+import { refreshDigestBriefing } from "../shared/digest_briefing.js";
 import {
   getCurrentData,
   getCurrentThreads,
@@ -44,6 +45,7 @@ export async function renderDashboardPage(): Promise<void> {
   const meetingPreps = (data.meeting_preps || {}) as LooseObj;
 
   await refreshDashboardStatusBanner();
+  await refreshDigestBriefing();
   await refreshDashboardScheduleRail(trackingThreads, {
     threadLabel,
     meetingPreps,
