@@ -113,7 +113,7 @@ export function routeFromPathname(pathname: string): AppRoute {
   if (path === "/linkedin-setup") return "linkedin-setup";
   if (path === "/meet-recordings-setup") return "meet-recordings-setup";
   if (path === "/threads" || path === "/" || path === "/summaries.html") return "threads";
-  return "dashboard";
+  return "onebox";
 }
 
 function setActiveNav(route: AppRoute): void {

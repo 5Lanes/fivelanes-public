@@ -8,7 +8,7 @@ enum DashboardConfig {
           let host = url.host,
           !host.isEmpty
     else {
-      return URL(string: "http://localhost:8000/dashboard")!
+      return URL(string: "http://localhost:8000/onebox")!
     }
     return url
   }

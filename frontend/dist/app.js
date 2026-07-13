@@ -90,7 +90,7 @@ export function routeFromPathname(pathname) {
         return "meet-recordings-setup";
     if (path === "/threads" || path === "/" || path === "/summaries.html")
         return "threads";
-    return "dashboard";
+    return "onebox";
 }
 function setActiveNav(route) {
     document.querySelectorAll(".app-nav-link[data-route]").forEach((link) => {
