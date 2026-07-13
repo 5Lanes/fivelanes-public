@@ -1687,6 +1687,27 @@ def delete_thread_plan(db_path: str, *, plan_id: int) -> bool:
         return deleted
 
 
+def dismiss_thread_plans_on_reply(db_path: str, *, inbox_thread_id: str) -> int:
+    """Delete all plans for a thread because the user sent a message in it. Returns count deleted."""
+    tid = _normalize_field(inbox_thread_id)
+    if not tid or is_todo_plan_thread_id(tid):
+        return 0
+    db_file = Path(db_path)
+    with connect_sqlite(db_file) as conn:
+        _ensure_thread_plans_schema(conn)
+        _ensure_thread_tracking_schema(conn)
+        rows = conn.execute(
+            "SELECT id FROM thread_plans WHERE inbox_thread_id = ?",
+            (tid,),
+        ).fetchall()
+        if not rows:
+            return 0
+        conn.execute("DELETE FROM thread_plans WHERE inbox_thread_id = ?", (tid,))
+        _sync_thread_tracking_has_plan(conn, tid)
+        conn.commit()
+        return len(rows)
+
+
 def untrack_todo_plan_inbox_thread(db_path: str, *, inbox_thread_id: str) -> bool:
     """
     Consume a Todo: inbox thread: drop timeline/summary rows and mark tracking removed.

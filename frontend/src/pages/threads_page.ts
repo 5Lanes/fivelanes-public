@@ -17,6 +17,7 @@ import {
   formatChatSenderLabel,
   latestUpdatesForThread,
   listSection,
+  messageDirectionClass,
   ownerNextStepsForThread,
   messageSourceDetailsHtml,
   nextStepsSectionHtml,
@@ -303,7 +304,8 @@ function buildThreadCard(thread: ThreadView): HTMLElement {
           const recLine = rec
             ? `<div class="meta"><strong>Recipients</strong> ${escapeHtml(rec)}</div>`
             : "";
-          return `<div class="message-block"><div class="card-top"><time datetime="${escapeHtml(msgDt)}">${formatDate(msgDt)}</time></div><h4 class="msg-subject">${escapeHtml(
+          const dirClass = messageDirectionClass(str(c.sender));
+          return `<div class="message-block${dirClass ? ` ${dirClass}` : ""}"><div class="card-top"><time datetime="${escapeHtml(msgDt)}">${formatDate(msgDt)}</time></div><h4 class="msg-subject">${escapeHtml(
             subj,
           )}</h4>${fromLine}${recLine}${messageSourceDetailsHtml(c)}</div>`;
         })

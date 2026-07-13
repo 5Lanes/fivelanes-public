@@ -66,6 +66,7 @@ from services.thread_snooze import (
 )
 from utils.database import (
     collapse_thread_tracking_duplicates_by_inner_rfc,
+    dismiss_thread_plans_on_reply,
     fetch_removed_inbox_thread_ids,
     fetch_thread_tracking_rows,
     prune_timeline_entries_for_thread,
@@ -1063,6 +1064,15 @@ def process_inbox_pipeline(
         )
         if maybe_unsnooze_email_thread(db, row, expanded):
             row["snoozed"] = 0
+
+        if new_sent_ids and db:
+            dismissed = dismiss_thread_plans_on_reply(db, inbox_thread_id=inbox_thread_id)
+            if dismissed:
+                log.info(
+                    "Dismissed %d plan(s) for inbox_thread_id=%r (user sent a reply)",
+                    dismissed,
+                    inbox_thread_id,
+                )
 
         if expanded and db:
             pruned = prune_timeline_entries_for_thread(db, inbox_thread_id, pulled_ids)

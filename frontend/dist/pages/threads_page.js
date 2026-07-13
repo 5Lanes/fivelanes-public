@@ -1,6 +1,6 @@
 import { applySavedThreadDraft, applyThreadSummary, clearSummariesBundleCache, getCurrentData, getCurrentSourceLabel, getCurrentThreads, setBundle, threadLaneIds, threadTrackPath, } from "../shared/summaries_store.js";
 import { syncLaneSummaryJobsFromServer } from "./lanes_page.js";
-import { counterpartyAvailabilityForSummary, counterpartyAvailabilitySectionHtml, formatDraftReplyMarkdown, formatChatSenderLabel, latestUpdatesForThread, listSection, ownerNextStepsForThread, messageSourceDetailsHtml, nextStepsSectionHtml, partitionThreadsBySnooze, pendingMessageCountForThread, pendingMessagePillHtml, shouldShowThreadMessageBlocks, threadIsCalendarEvent, threadIsEmail, threadIsLinkedin, threadIsMeetRecording, threadIsSlack, threadIsText, threadLabel, threadMessagesForDisplay, threadMessagesForReply, threadSummaryErrorHtml, threadSummaryForDisplay, } from "../shared/thread_domain.js";
+import { counterpartyAvailabilityForSummary, counterpartyAvailabilitySectionHtml, formatDraftReplyMarkdown, formatChatSenderLabel, latestUpdatesForThread, listSection, messageDirectionClass, ownerNextStepsForThread, messageSourceDetailsHtml, nextStepsSectionHtml, partitionThreadsBySnooze, pendingMessageCountForThread, pendingMessagePillHtml, shouldShowThreadMessageBlocks, threadIsCalendarEvent, threadIsEmail, threadIsLinkedin, threadIsMeetRecording, threadIsSlack, threadIsText, threadLabel, threadMessagesForDisplay, threadMessagesForReply, threadSummaryErrorHtml, threadSummaryForDisplay, } from "../shared/thread_domain.js";
 import { ensureAvailabilityDocLoaded } from "../shared/availability_windows.js";
 import { escapeHtml, formatDate, formatRecipients, str, toneClass } from "../shared/utils.js";
 import { applyNavFeatureVisibility, isFeatureEnabled } from "../shared/features.js";
@@ -261,7 +261,8 @@ function buildThreadCard(thread) {
             const recLine = rec
                 ? `<div class="meta"><strong>Recipients</strong> ${escapeHtml(rec)}</div>`
                 : "";
-            return `<div class="message-block"><div class="card-top"><time datetime="${escapeHtml(msgDt)}">${formatDate(msgDt)}</time></div><h4 class="msg-subject">${escapeHtml(subj)}</h4>${fromLine}${recLine}${messageSourceDetailsHtml(c)}</div>`;
+            const dirClass = messageDirectionClass(str(c.sender));
+            return `<div class="message-block${dirClass ? ` ${dirClass}` : ""}"><div class="card-top"><time datetime="${escapeHtml(msgDt)}">${formatDate(msgDt)}</time></div><h4 class="msg-subject">${escapeHtml(subj)}</h4>${fromLine}${recLine}${messageSourceDetailsHtml(c)}</div>`;
         })
             .join("")}</div>`
         : "";

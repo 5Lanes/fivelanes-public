@@ -1,4 +1,4 @@
-import { str } from "./utils.js";
+import { extractEmailsLower, str } from "./utils.js";
 let ownerName = "Owner";
 let ownerEmailHints = [];
 let configLoaded = false;
@@ -69,6 +69,14 @@ export function isLikelyOwnEmail(email) {
         if (e.includes(hint))
             return true;
         if (local === hint || local.startsWith(`${hint}.`))
+            return true;
+    }
+    return false;
+}
+/** True when a "From"/organizer header string resolves to one of the owner's own addresses. */
+export function isOwnSender(sender) {
+    for (const email of extractEmailsLower(sender)) {
+        if (isLikelyOwnEmail(email))
             return true;
     }
     return false;

@@ -2368,6 +2368,25 @@ header p.run-meta {
   flex: 0 0 auto;
 }
 
+.lane-thread-remove-btn {
+  flex: 0 0 auto;
+  margin-left: auto;
+  width: 1.4rem;
+  height: 1.4rem;
+  line-height: 1;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted-text, #888);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.lane-thread-remove-btn:hover {
+  background: rgba(220, 53, 69, 0.12);
+  color: #dc3545;
+}
+
 .lane-empty-threads {
   margin: 0 0 0.75rem;
   font-size: 0.88rem;
@@ -3168,7 +3187,7 @@ details.body-detail summary {
 .thread-refresh-summary-btn,
 .create-plan-btn,
 .add-to-lane-btn,
-.onebox-mark-unread-btn {
+.onebox-mark-toggle-btn {
   border: 1px solid var(--border);
   background: var(--elevated);
   border-radius: 999px;
@@ -3186,8 +3205,31 @@ details.body-detail summary {
 .thread-refresh-summary-btn:hover:not(:disabled),
 .create-plan-btn:hover,
 .add-to-lane-btn:hover,
-.onebox-mark-unread-btn:hover {
+.onebox-mark-toggle-btn:hover {
   background: var(--hover);
+}
+
+.onebox-remove-from-track-btn {
+  border: 1px solid var(--border);
+  background: var(--elevated);
+  border-radius: 999px;
+  padding: 0.1rem 0.4rem;
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-family: system-ui, sans-serif;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.onebox-remove-from-track-btn:hover:not(:disabled) {
+  background: rgba(220, 53, 69, 0.12);
+  border-color: #dc3545;
+  color: #dc3545;
+}
+
+.onebox-remove-from-track-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .thread-refresh-summary-btn:disabled {
@@ -3282,6 +3324,22 @@ details.body-detail summary {
   margin-top: 0;
   padding-top: 0;
   border-top: none;
+}
+
+/* Sent (or calendar invites the owner organized) vs. received (or invites accepted from someone else). */
+.message-block.is-sent,
+.message-block.is-received {
+  padding-inline: 0.85rem;
+  margin-inline: -0.85rem;
+  border-radius: 8px;
+}
+
+.message-block.is-sent {
+  background: color-mix(in srgb, var(--lane-blue) 6%, transparent);
+}
+
+.message-block.is-received {
+  background: color-mix(in srgb, var(--lane-orange) 6%, transparent);
 }
 
 .message-block h4.msg-subject {
@@ -5456,6 +5514,16 @@ details.body-detail summary {
   font-size: 0.9rem;
 }
 
+.onebox-track-filter {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.5rem;
+}
+
+.onebox-track-filter:empty {
+  display: none;
+}
+
 .onebox-area-tabs,
 .onebox-tabs {
   display: flex;
@@ -5497,6 +5565,15 @@ details.body-detail summary {
 .onebox-row.is-unread {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
   background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+}
+
+/* Sent (or calendar invites the owner organized) vs. received (or invites accepted from someone else). */
+.onebox-row.is-sent {
+  background: color-mix(in srgb, var(--lane-blue) 6%, var(--surface));
+}
+
+.onebox-row.is-received {
+  background: color-mix(in srgb, var(--lane-orange) 6%, var(--surface));
 }
 
 .onebox-row:hover {

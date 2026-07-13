@@ -258,10 +258,11 @@ function laneCardHtml(lane, threadIds, summary, expanded, opts = {}) {
         const planBtn = thread
             ? `<button type="button" class="create-plan-btn lane-thread-create-plan-btn" data-add-plan-thread-id="${escapeHtml(tid)}">Create a plan</button>`
             : "";
+        const removeBtn = `<button type="button" class="lane-thread-remove-btn" data-lane-id="${lane.id}" data-thread-id="${escapeHtml(tid)}" title="Remove from track" aria-label="Remove from track">&times;</button>`;
         if (opts.linkThreads && thread) {
-            return `<li><a class="lane-thread-link" href="${escapeHtml(threadPageHref(tid))}">${pill}${label}</a>${planBtn}</li>`;
+            return `<li><a class="lane-thread-link" href="${escapeHtml(threadPageHref(tid))}">${pill}${label}</a>${planBtn}${removeBtn}</li>`;
         }
-        return `<li>${pill}${label}${planBtn}</li>`;
+        return `<li>${pill}${label}${planBtn}${removeBtn}</li>`;
     })
         .filter(Boolean)
         .join("");
@@ -803,6 +804,29 @@ export function bindLanesInteractions() {
                 url.searchParams.set("thread", threadId);
                 url.hash = "schedule-plans";
                 history.pushState(null, "", `${url.pathname}${url.search}${url.hash}`);
+            })();
+            return;
+        }
+        const removeThreadBtn = target.closest(".lane-thread-remove-btn");
+        if (removeThreadBtn) {
+            const laneId = Number(removeThreadBtn.dataset.laneId) || 0;
+            const threadId = str(removeThreadBtn.dataset.threadId);
+            if (!laneId || !threadId)
+                return;
+            removeThreadBtn.disabled = true;
+            void (async () => {
+                applyLaneThreadMembership(laneId, threadId, false);
+                renderLanesList();
+                try {
+                    await persistLaneThread(laneId, threadId, false);
+                    await reloadLanesFromServer();
+                }
+                catch (err) {
+                    applyLaneThreadMembership(laneId, threadId, true);
+                    renderLanesList();
+                    console.error(err);
+                    window.alert(err instanceof Error ? err.message : String(err));
+                }
             })();
             return;
         }

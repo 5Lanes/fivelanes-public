@@ -1,6 +1,7 @@
 import { refreshDashboardScheduleRail } from "../dashboard_schedule_rail.js";
 import {
   formatDraftReplyMarkdown,
+  messageDirectionClass,
   partitionThreadsBySnooze,
   threadEmailSubject,
   threadLabel,
@@ -8,6 +9,7 @@ import {
   threadMessagesForReply,
 } from "../shared/thread_domain.js";
 import {
+  applyLaneThreadMembership,
   applySavedThreadDraft,
   clearSummariesBundleCache,
   getBundleMutationGeneration,
@@ -50,6 +52,7 @@ const PAGE_HTML = `
         </div>
         <button type="button" class="btn btn--default" id="onebox-pull-btn">Pull onebox</button>
       </header>
+      <div id="onebox-track-filter" class="onebox-track-filter"></div>
       <div id="onebox-area-tabs" class="onebox-area-tabs" role="tablist" aria-label="Lanes"></div>
       <div id="onebox-tabs" class="onebox-tabs" role="tablist" aria-label="Tracks"></div>
       <div id="onebox-track-toolbar" class="onebox-track-toolbar"></div>
@@ -84,6 +87,7 @@ function persistReadKeys(): void {
 let activeAreaId: number | null = null;
 let activeTrackId: number | null = null;
 let oneboxViewMode: "onebox" | "threads" = "onebox";
+let showArchivedTracks = false;
 let interactionsBound = false;
 const readKeys = loadReadKeys();
 const expandedKeys = new Set<string>();
@@ -216,7 +220,7 @@ function trackTabs(data: LooseObj): TrackTab[] {
   const threads = getCurrentThreads();
   const tabs: TrackTab[] = [];
   for (const lane of getLanes(data)) {
-    if (lane.archived) continue;
+    if (Boolean(lane.archived) !== showArchivedTracks) continue;
     const items = laneMessagesSorted(data, lane.id, threads);
     if (!items.length) continue;
     tabs.push({ lane, items });
@@ -342,8 +346,13 @@ function messageRowHtml(item: MessageItem): string {
     : "";
   const bodyHtml =
     !isCalendar && expanded ? `<pre class="onebox-row-body">${escapeHtml(messageBody(item.row))}</pre>` : "";
+  const dirClass = messageDirectionClass(sender);
+  const removeFromTrackBtn =
+    activeTrackId != null
+      ? `<button type="button" class="onebox-remove-from-track-btn" data-track-id="${activeTrackId}" data-thread-id="${escapeHtml(item.thread.id)}" title="Remove thread from this track">Remove</button>`
+      : "";
 
-  return `<div class="onebox-row${expanded ? " is-expanded" : ""}${read ? "" : " is-unread"}">
+  return `<div class="onebox-row${expanded ? " is-expanded" : ""}${read ? "" : " is-unread"}${dirClass ? ` ${dirClass}` : ""}">
     <button type="button" class="onebox-row-toggle" data-message-key="${escapeHtml(key)}" aria-expanded="${expanded ? "true" : "false"}">
       <div class="onebox-row-top">
         ${read ? "" : `<span class="onebox-row-unread-dot" aria-hidden="true"></span>`}
@@ -359,9 +368,22 @@ function messageRowHtml(item: MessageItem): string {
     <div class="onebox-row-actions">
       <button type="button" class="create-plan-btn" data-add-plan-thread-id="${escapeHtml(item.thread.id)}" data-plan-suggestion="${escapeHtml(planActionSuggestion(item))}">Create a plan</button>
       <button type="button" class="draft-reply-toggle" data-draft-thread-id="${escapeHtml(item.thread.id)}">Draft reply</button>
-      ${read ? `<button type="button" class="onebox-mark-unread-btn" data-message-key="${escapeHtml(key)}">Mark as unread</button>` : ""}
+      <button type="button" class="onebox-mark-toggle-btn" data-message-key="${escapeHtml(key)}">${read ? "Mark as unread" : "Mark as read"}</button>
+      ${removeFromTrackBtn}
     </div>
     ${draftPanelHtml(item)}
+  </div>`;
+}
+
+function renderOneboxTrackFilter(): void {
+  const el = document.getElementById("onebox-track-filter");
+  if (!el) return;
+  el.innerHTML = `<div class="thread-control-group">
+    <span class="thread-control-label" id="onebox-track-filter-label">Show</span>
+    <div class="thread-segmented" role="group" aria-labelledby="onebox-track-filter-label">
+      <button type="button" class="onebox-track-filter-btn${showArchivedTracks ? "" : " active"}" data-onebox-track-filter="active" aria-pressed="${showArchivedTracks ? "false" : "true"}">Active</button>
+      <button type="button" class="onebox-track-filter-btn${showArchivedTracks ? " active" : ""}" data-onebox-track-filter="archived" aria-pressed="${showArchivedTracks ? "true" : "false"}">Archived</button>
+    </div>
   </div>`;
 }
 
@@ -411,7 +433,7 @@ function renderOneboxToolbar(tabs: TrackTab[]): void {
   }
   const unread = unreadCount(active);
   el.innerHTML = `<button type="button" class="btn btn--default onebox-mark-read-btn" data-track-id="${active.lane.id}"${unread ? "" : " disabled"}>Mark all as read</button>
-    <button type="button" class="btn btn--ghost onebox-archive-btn" data-track-id="${active.lane.id}">Archive track</button>
+    <button type="button" class="btn btn--ghost onebox-archive-btn" data-track-id="${active.lane.id}" data-archived="${showArchivedTracks ? "true" : "false"}">${showArchivedTracks ? "Unarchive track" : "Archive track"}</button>
     <button type="button" class="btn btn--danger onebox-remove-btn" data-track-id="${active.lane.id}">Remove track</button>`;
 }
 
@@ -495,7 +517,7 @@ function renderOneboxViewToggle(): void {
 
 async function renderOneboxOrThreadsView(): Promise<void> {
   renderOneboxViewToggle();
-  const oneboxSectionIds = ["onebox-area-tabs", "onebox-tabs", "onebox-track-toolbar", "onebox-list"];
+  const oneboxSectionIds = ["onebox-track-filter", "onebox-area-tabs", "onebox-tabs", "onebox-track-toolbar", "onebox-list"];
   const threadsRoot = document.getElementById("dashboard-threads-root");
   if (oneboxViewMode === "threads") {
     for (const id of oneboxSectionIds) document.getElementById(id)?.setAttribute("hidden", "");
@@ -516,12 +538,14 @@ function renderOnebox(): void {
   const listEl = document.getElementById("onebox-list");
   if (!data || !areaTabsEl || !trackTabsEl || !toolbarEl || !listEl) return;
 
+  renderOneboxTrackFilter();
+
   const allTabs = trackTabs(data);
   if (!allTabs.length) {
     areaTabsEl.innerHTML = "";
     trackTabsEl.innerHTML = "";
     toolbarEl.innerHTML = "";
-    listEl.innerHTML = `<p class="onebox-empty">No tracks with messages yet.</p>`;
+    listEl.innerHTML = `<p class="onebox-empty">${showArchivedTracks ? "No archived tracks." : "No tracks with messages yet."}</p>`;
     activeAreaId = null;
     activeTrackId = null;
     return;
@@ -557,6 +581,15 @@ async function persistLaneArchive(laneId: number, archived: boolean): Promise<vo
     body: JSON.stringify({ lane_id: laneId, archived }),
   });
   if (!res.ok) throw new Error(`Archive failed (${res.status})`);
+}
+
+async function persistLaneThreadRemove(laneId: number, threadId: string): Promise<void> {
+  const res = await fetch("/api/lanes/remove-thread", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lane_id: laneId, thread_id: threadId }),
+  });
+  if (!res.ok) throw new Error(`Remove thread failed (${res.status})`);
 }
 
 async function persistLaneRemove(laneId: number): Promise<void> {
@@ -827,12 +860,16 @@ export function bindOneboxInteractions(): void {
       return;
     }
 
-    const markUnreadBtn = target.closest(".onebox-mark-unread-btn") as HTMLButtonElement | null;
-    if (markUnreadBtn) {
-      const key = str(markUnreadBtn.dataset.messageKey);
+    const markToggleBtn = target.closest(".onebox-mark-toggle-btn") as HTMLButtonElement | null;
+    if (markToggleBtn) {
+      const key = str(markToggleBtn.dataset.messageKey);
       if (!key) return;
-      readKeys.delete(key);
-      expandedKeys.delete(key);
+      if (readKeys.has(key)) {
+        readKeys.delete(key);
+        expandedKeys.delete(key);
+      } else {
+        readKeys.add(key);
+      }
       persistReadKeys();
       renderOnebox();
       return;
@@ -854,16 +891,50 @@ export function bindOneboxInteractions(): void {
     const archiveBtn = target.closest(".onebox-archive-btn") as HTMLButtonElement | null;
     if (archiveBtn) {
       const laneId = Number(archiveBtn.dataset.trackId) || 0;
+      const archived = archiveBtn.dataset.archived === "true";
       if (!laneId) return;
       archiveBtn.disabled = true;
       activeTrackId = null;
       void (async () => {
         try {
-          await persistLaneArchive(laneId, true);
+          await persistLaneArchive(laneId, !archived);
           await reloadOneboxFromServer();
         } catch (err) {
           console.error(err);
           archiveBtn.disabled = false;
+        }
+      })();
+      return;
+    }
+
+    const trackFilterBtn = target.closest(".onebox-track-filter-btn") as HTMLButtonElement | null;
+    if (trackFilterBtn) {
+      const archived = trackFilterBtn.dataset.oneboxTrackFilter === "archived";
+      if (archived === showArchivedTracks) return;
+      showArchivedTracks = archived;
+      activeAreaId = null;
+      activeTrackId = null;
+      renderOnebox();
+      return;
+    }
+
+    const removeFromTrackBtn = target.closest(".onebox-remove-from-track-btn") as HTMLButtonElement | null;
+    if (removeFromTrackBtn) {
+      const laneId = Number(removeFromTrackBtn.dataset.trackId) || 0;
+      const threadId = str(removeFromTrackBtn.dataset.threadId);
+      if (!laneId || !threadId) return;
+      removeFromTrackBtn.disabled = true;
+      void (async () => {
+        applyLaneThreadMembership(laneId, threadId, false);
+        renderOnebox();
+        try {
+          await persistLaneThreadRemove(laneId, threadId);
+          await reloadOneboxFromServer();
+        } catch (err) {
+          applyLaneThreadMembership(laneId, threadId, true);
+          renderOnebox();
+          console.error(err);
+          window.alert(err instanceof Error ? err.message : String(err));
         }
       })();
       return;

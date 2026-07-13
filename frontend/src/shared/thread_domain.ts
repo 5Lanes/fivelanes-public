@@ -1,6 +1,6 @@
 import type { LooseObj, ThreadView, CounterpartySlot } from "./types.js";
 import { arr, escapeHtml, str, toFieldContainsAddress } from "./utils.js";
-import { otherPartyOwesRe } from "./owner_config.js";
+import { isOwnSender, otherPartyOwesRe } from "./owner_config.js";
 import {
   counterpartySlotHighlightHtml,
   highlightMentionsHtml,
@@ -94,6 +94,21 @@ export function threadMessagesForReply(
       content,
     };
   });
+}
+
+/**
+ * CSS class for a message's direction: "is-sent" for messages/invites the owner
+ * originated, "is-received" for ones from someone else. Empty when sender is unknown.
+ *
+ * Chat-style channels (text/Slack/LinkedIn) don't carry a real email address in
+ * `sender` — the backend marks the owner's own messages with the literal sentinel
+ * "me" (see formatChatSenderLabel) instead, so check that before email matching.
+ */
+export function messageDirectionClass(sender: string): string {
+  const raw = sender.trim();
+  if (!raw) return "";
+  if (raw.toLowerCase() === "me") return "is-sent";
+  return isOwnSender(raw) ? "is-sent" : "is-received";
 }
 
 /** True when the message is a forward-to Fivelanes inbox shell (To: source account). */
