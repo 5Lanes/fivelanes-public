@@ -104,6 +104,7 @@ export function normalizeBundle(data: LooseObj): LooseObj {
   if (!data || typeof data !== "object") throw new Error("Invalid JSON: expected an object.");
   if (!data.thread_drafts || typeof data.thread_drafts !== "object") data.thread_drafts = {};
   if (!data.meeting_preps || typeof data.meeting_preps !== "object") data.meeting_preps = {};
+  if (!data.read_state || typeof data.read_state !== "object") data.read_state = {};
   if (!Array.isArray(data.lanes)) data.lanes = [];
   if (!Array.isArray(data.lane_areas)) data.lane_areas = [];
   if (!data.lane_threads || typeof data.lane_threads !== "object") data.lane_threads = {};

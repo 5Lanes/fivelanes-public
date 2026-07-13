@@ -69,6 +69,8 @@ from utils.database import (
     load_lane_thread_summaries,
     load_meeting_prep,
     load_thread_draft_reply,
+    mark_message_keys_read,
+    mark_message_keys_unread,
     normalize_meeting_prep_payload,
     remove_thread_from_lane,
     save_meeting_prep,
@@ -1386,6 +1388,26 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
         self._json_response(HTTPStatus.OK, {"ok": True, "lane_id": lane_id, "removed": True})
 
+    def _post_read_state_mark(self, body: Dict[str, Any]) -> None:
+        raw_keys = body.get("keys")
+        keys = [str(k).strip() for k in raw_keys if str(k).strip()] if isinstance(raw_keys, list) else []
+        if not keys:
+            self._json_response(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_keys"})
+            return
+        mark_message_keys_read(DB_PATH, keys)
+        _invalidate_summaries_bundle_cache()
+        self._json_response(HTTPStatus.OK, {"ok": True, "keys": keys})
+
+    def _post_read_state_unmark(self, body: Dict[str, Any]) -> None:
+        raw_keys = body.get("keys")
+        keys = [str(k).strip() for k in raw_keys if str(k).strip()] if isinstance(raw_keys, list) else []
+        if not keys:
+            self._json_response(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_keys"})
+            return
+        mark_message_keys_unread(DB_PATH, keys)
+        _invalidate_summaries_bundle_cache()
+        self._json_response(HTTPStatus.OK, {"ok": True, "keys": keys})
+
     def _get_lane_summary(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
@@ -2346,6 +2368,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._post_lane_archive(body)
         elif path == "/api/lanes/remove":
             self._post_lane_remove(body)
+        elif path == "/api/read-state/mark":
+            self._post_read_state_mark(body)
+        elif path == "/api/read-state/unmark":
+            self._post_read_state_unmark(body)
         elif path == "/api/lanes/summary":
             self._post_lane_summary(body)
         elif path == "/api/lane-areas":

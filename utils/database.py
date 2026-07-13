@@ -37,6 +37,9 @@ See README § "Thread identity: inbox tracking vs timeline messages".
 **``dismissed_todo_plans``** — todo email (thread, action) pairs the user deleted; inbox sync
 will not recreate them.
 
+**``read_state``** — Onebox message read markers keyed by the client's ``message_key``
+(``"{thread_id}::{source_id or datetime}"``), so read/unread state syncs across devices.
+
 Text threads use on-disk ``conversations/*.json`` plus ``thread_tracking`` rows with
 ``inbox_thread_id`` ``text:<key>`` (no separate text tables).
 """
@@ -100,6 +103,7 @@ def ensure_database_schema(db_path: str) -> None:
         _ensure_lane_summaries_schema(conn)
         _ensure_thread_plans_schema(conn)
         _ensure_dismissed_todo_plans_schema(conn)
+        _ensure_read_state_schema(conn)
         _ensure_message_outputs_schema(conn)
         _ensure_thread_summaries_schema(conn)
         _ensure_thread_draft_replies_schema(conn)
@@ -1509,6 +1513,56 @@ def todo_plan_is_dismissed(
             (tid, label),
         ).fetchone()
     return row is not None
+
+
+def _ensure_read_state_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS read_state (
+            message_key TEXT NOT NULL PRIMARY KEY,
+            read_at TEXT NOT NULL
+        )
+        """
+    )
+
+
+def mark_message_keys_read(db_path: str, message_keys: Sequence[str]) -> None:
+    """Record message keys as read (server-side, syncs across devices)."""
+    keys = [_normalize_field(k) for k in message_keys]
+    keys = [k for k in keys if k]
+    if not keys:
+        return
+    when = datetime.now(timezone.utc).isoformat()
+    db_file = Path(db_path)
+    with connect_sqlite(db_file) as conn:
+        _ensure_read_state_schema(conn)
+        conn.executemany(
+            "INSERT OR REPLACE INTO read_state (message_key, read_at) VALUES (?, ?)",
+            [(k, when) for k in keys],
+        )
+
+
+def mark_message_keys_unread(db_path: str, message_keys: Sequence[str]) -> None:
+    keys = [_normalize_field(k) for k in message_keys]
+    keys = [k for k in keys if k]
+    if not keys:
+        return
+    db_file = Path(db_path)
+    with connect_sqlite(db_file) as conn:
+        _ensure_read_state_schema(conn)
+        conn.executemany(
+            "DELETE FROM read_state WHERE message_key = ?",
+            [(k,) for k in keys],
+        )
+
+
+def load_all_read_message_keys(db_path: str) -> Dict[str, str]:
+    """Return ``{message_key: read_at}`` for every message marked read."""
+    db_file = Path(db_path)
+    with connect_sqlite(db_file) as conn:
+        _ensure_read_state_schema(conn)
+        rows = conn.execute("SELECT message_key, read_at FROM read_state").fetchall()
+    return {row[0]: row[1] for row in rows if row[0]}
 
 
 def _sync_thread_tracking_has_plan(conn: sqlite3.Connection, inbox_thread_id: str) -> None:
@@ -3594,6 +3648,7 @@ def build_summaries_bundle(db_path: str) -> Dict[str, Any]:
         "lane_threads": load_lane_thread_memberships(db_path),
         "lane_summaries": load_all_lane_summaries(db_path),
         "thread_plans": load_all_thread_plans(db_path),
+        "read_state": load_all_read_message_keys(db_path),
     }
     from services.email.bundle import append_unsynced_email_threads_to_bundle
     from services.linkedin.bundle import append_unsynced_linkedin_threads_to_bundle

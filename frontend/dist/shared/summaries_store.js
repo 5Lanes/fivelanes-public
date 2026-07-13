@@ -98,6 +98,8 @@ export function normalizeBundle(data) {
         data.thread_drafts = {};
     if (!data.meeting_preps || typeof data.meeting_preps !== "object")
         data.meeting_preps = {};
+    if (!data.read_state || typeof data.read_state !== "object")
+        data.read_state = {};
     if (!Array.isArray(data.lanes))
         data.lanes = [];
     if (!Array.isArray(data.lane_areas))

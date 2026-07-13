@@ -63,25 +63,41 @@ const PAGE_HTML = `
   </div>
 </div>`;
 
-const READ_KEYS_STORAGE_KEY = "fivelanes_inbox_read_keys_v1";
+/** Read state is stored server-side (read_state table) so it syncs across devices; `readKeys`
+ * is a local mirror of `data.read_state`, resynced whenever a fresh bundle is loaded. */
+function syncReadKeysFromData(data: LooseObj | null): void {
+  const stored = (data?.read_state || {}) as LooseObj;
+  readKeys.clear();
+  for (const key of Object.keys(stored)) readKeys.add(key);
+}
 
-function loadReadKeys(): Set<string> {
+async function persistReadStateChange(keys: string[], read: boolean): Promise<void> {
+  if (!keys.length) return;
   try {
-    const raw = localStorage.getItem(READ_KEYS_STORAGE_KEY);
-    if (!raw) return new Set();
-    const parsed: unknown = JSON.parse(raw);
-    return new Set(Array.isArray(parsed) ? parsed.map((x) => String(x)) : []);
-  } catch {
-    return new Set();
+    const res = await fetch(read ? "/api/read-state/mark" : "/api/read-state/unmark", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keys }),
+    });
+    if (!res.ok) throw new Error(`Read state update failed (${res.status})`);
+  } catch (err) {
+    console.error(err);
   }
 }
 
-function persistReadKeys(): void {
-  try {
-    localStorage.setItem(READ_KEYS_STORAGE_KEY, JSON.stringify([...readKeys]));
-  } catch {
-    /* ignore storage errors */
+function setKeysRead(keys: string[], read: boolean): void {
+  const data = getCurrentData();
+  const bucket = (data ? (data.read_state ||= {}) : {}) as LooseObj;
+  for (const key of keys) {
+    if (read) {
+      readKeys.add(key);
+      bucket[key] = new Date().toISOString();
+    } else {
+      readKeys.delete(key);
+      delete bucket[key];
+    }
   }
+  void persistReadStateChange(keys, read);
 }
 
 let activeAreaId: number | null = null;
@@ -89,7 +105,7 @@ let activeTrackId: number | null = null;
 let oneboxViewMode: "onebox" | "threads" = "onebox";
 let showArchivedTracks = false;
 let interactionsBound = false;
-const readKeys = loadReadKeys();
+const readKeys = new Set<string>();
 const expandedKeys = new Set<string>();
 const draftPanelOpenKeys = new Set<string>();
 
@@ -538,6 +554,7 @@ function renderOnebox(): void {
   const listEl = document.getElementById("onebox-list");
   if (!data || !areaTabsEl || !trackTabsEl || !toolbarEl || !listEl) return;
 
+  syncReadKeysFromData(data);
   renderOneboxTrackFilter();
 
   const allTabs = trackTabs(data);
@@ -852,8 +869,7 @@ export function bindOneboxInteractions(): void {
     if (rowToggle) {
       const key = str(rowToggle.dataset.messageKey);
       if (!key) return;
-      readKeys.add(key);
-      persistReadKeys();
+      setKeysRead([key], true);
       if (expandedKeys.has(key)) expandedKeys.delete(key);
       else expandedKeys.add(key);
       renderOnebox();
@@ -865,12 +881,11 @@ export function bindOneboxInteractions(): void {
       const key = str(markToggleBtn.dataset.messageKey);
       if (!key) return;
       if (readKeys.has(key)) {
-        readKeys.delete(key);
         expandedKeys.delete(key);
+        setKeysRead([key], false);
       } else {
-        readKeys.add(key);
+        setKeysRead([key], true);
       }
-      persistReadKeys();
       renderOnebox();
       return;
     }
@@ -882,8 +897,7 @@ export function bindOneboxInteractions(): void {
       if (!laneId || !data) return;
       const tab = trackTabs(data).find((t) => t.lane.id === laneId);
       if (!tab) return;
-      for (const item of tab.items) readKeys.add(messageKey(item));
-      persistReadKeys();
+      setKeysRead(tab.items.map((item) => messageKey(item)), true);
       renderOnebox();
       return;
     }
