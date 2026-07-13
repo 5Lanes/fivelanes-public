@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from routes.email_routes import pull_source_emails
-from routes.llm_routes import run_fivelanes_llm_pipeline
+from routes.llm_routes import run_fivelanes_content_only_pipeline, run_fivelanes_llm_pipeline
 from utils.database import ensure_database_schema
 from utils.lookback_config import get_lookback_days
 from utils.runtime_paths import database_path, load_env
@@ -25,19 +25,23 @@ def run_email_pipeline(
     db_path: Optional[str] = None,
     max_results: int = 500,
     source_account: Optional[str] = None,
+    after_date: Optional[str] = None,
 ) -> None:
     """
     Pull emails from the Fivelanes inbox.
 
     Inbox address defaults to ``SOURCE_ACCOUNT`` from ``.env`` (loaded in
     ``services.email``). Pass ``source_account`` only to override for this run.
-    Lookback defaults to ``FIVELANES_LOOKBACK_DAYS`` from ``.env``.
+    Lookback defaults to ``FIVELANES_LOOKBACK_DAYS`` from ``.env``. Pass ``after_date``
+    (``YYYY-MM-DD``-prefixed) for a precise cutoff instead, e.g. the last successful
+    pull's timestamp, so a re-pull only fetches net-new mail.
     """
     pull_source_emails(
         lookback_days=get_lookback_days() if lookback_days is None else lookback_days,
         source_account=source_account,
         max_results=max_results,
         db_path=db_path or DATABASE_NAME,
+        after_date=after_date,
     )
 
 def run_llm_pipeline(
@@ -48,6 +52,20 @@ def run_llm_pipeline(
 ) -> None:
     """Segment messages in ``timeline_entries`` (grouped by thread) and summarize threads."""
     run_fivelanes_llm_pipeline(
+        lookback_days=get_lookback_days() if lookback_days is None else lookback_days,
+        db_path=db_path or DATABASE_NAME,
+        backend=backend or FIVELANES_BACKEND,
+    )
+
+
+def run_content_cleanup_pipeline(
+    lookback_days: Optional[int] = None,
+    *,
+    db_path: Optional[str] = None,
+    backend: Optional[str] = None,
+) -> None:
+    """Clean/segment new messages only (no thread re-summarization) — cheap, safe to run often."""
+    run_fivelanes_content_only_pipeline(
         lookback_days=get_lookback_days() if lookback_days is None else lookback_days,
         db_path=db_path or DATABASE_NAME,
         backend=backend or FIVELANES_BACKEND,
@@ -85,7 +103,9 @@ def main(
             dry_run=dry_run,
         )
         return
-    run_email_pipeline(lookback_days=days, max_results=500)
+    from utils.inbox_pull_log import last_successful_email_pull_at
+
+    run_email_pipeline(lookback_days=days, max_results=500, after_date=last_successful_email_pull_at())
     run_llm_pipeline(lookback_days=days)
     try:
         from utils.features import is_enabled

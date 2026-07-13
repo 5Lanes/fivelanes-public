@@ -46,7 +46,9 @@ def _lane_summary_is_fresh(payload: Dict[str, Any]) -> bool:
     return lane_summary_has_content(payload) and not lane_summary_is_stale(payload)
 
 
-def _finalize_lane_summary_from_llm(result: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[str]]:
+def _finalize_lane_summary_from_llm(
+    result: Dict[str, Any], *, summaries: List[Dict[str, Any]] | None = None
+) -> tuple[Dict[str, Any], Optional[str]]:
     from utils.database import normalize_lane_summary_payload
 
     api_error = str(result.get("api_error") or "").strip()
@@ -58,9 +60,11 @@ def _finalize_lane_summary_from_llm(result: Dict[str, Any]) -> tuple[Dict[str, A
         elif api_error:
             return {}, api_error
         return {}, "Lane summary model returned no usable content"
-    from utils.summary_timeliness import reframe_summary_temporal_fields
+    from utils.summary_timeliness import drop_ungrounded_dates, reframe_summary_temporal_fields
 
-    return reframe_summary_temporal_fields(summary), None
+    summary = reframe_summary_temporal_fields(summary)
+    summary = drop_ungrounded_dates(summary, summaries or [])
+    return summary, None
 
 
 def lane_summary_job_snapshot(lane_id: int) -> Optional[Dict[str, Any]]:
@@ -168,7 +172,9 @@ def _run_lane_summary_worker(
             else:
                 prompt = format_lane_summary_prompt(lane_name, summaries, db_path=db_path)
                 result = llm.submit_lane_summary(prompt)
-                summary, err = _finalize_lane_summary_from_llm(result if isinstance(result, dict) else {})
+                summary, err = _finalize_lane_summary_from_llm(
+                    result if isinstance(result, dict) else {}, summaries=summaries
+                )
             if err:
                 raise RuntimeError(err)
             summary["input_fingerprint"] = input_fingerprint

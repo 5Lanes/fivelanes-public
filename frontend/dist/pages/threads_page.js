@@ -43,6 +43,7 @@ function openMobileThreadDetail(threadId) {
     layout.classList.add("thread-detail-open");
 }
 let threadViewMode = "active";
+const expandedThreadCardIds = new Set();
 let threadChannelFilter = "all";
 const SOURCE_FILTER_DEFS = [
     { id: "email", label: "Email" },
@@ -270,11 +271,16 @@ function buildThreadCard(thread) {
     const savedMd = savedDraft ? str(savedDraft.markdown) : "";
     const showSavedOut = Boolean(savedMd);
     const channelPill = sourcePillHtml(threadChannelForThread(thread));
+    const expanded = expandedThreadCardIds.has(thread.id);
     const art = document.createElement("article");
-    art.className = "card";
+    art.className = "card is-compact";
     art.id = `thread-${thread.id}`;
     art.innerHTML =
-        `<div class="card-top"><time datetime="${escapeHtml(dt)}">${formatDate(dt)}</time>${tone ? `<span class="tone ${toneClass(tone)}">${escapeHtml(tone)}</span>` : ""}<span class="count-pill">${nMsg} msg${nMsg > 1 ? " (thread)" : ""}</span>${pendingMessagePillHtml(pendingCount)}${channelPill}` +
+        `<div class="card-top">` +
+            `<button type="button" class="card-toggle-btn" data-toggle-thread-id="${escapeHtml(thread.id)}" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? "Collapse" : "Expand"} thread details">` +
+            `<span class="card-toggle-icon" aria-hidden="true"></span>` +
+            `</button>` +
+            `<time datetime="${escapeHtml(dt)}">${formatDate(dt)}</time>${tone ? `<span class="tone ${toneClass(tone)}">${escapeHtml(tone)}</span>` : ""}<span class="count-pill">${nMsg} msg${nMsg > 1 ? " (thread)" : ""}</span>${pendingMessagePillHtml(pendingCount)}${channelPill}` +
             `<div class="card-actions">` +
             `<button type="button" class="create-plan-btn" data-add-plan-thread-id="${escapeHtml(thread.id)}">Create a plan</button>` +
             `<button type="button" class="add-to-lane-btn" data-add-to-lane-thread-id="${escapeHtml(thread.id)}">Add to Lane</button>` +
@@ -294,6 +300,7 @@ function buildThreadCard(thread) {
             `<label class="draft-output-label">Markdown — copy below</label>` +
             `<textarea class="draft-markdown-output" readonly ${showSavedOut ? "" : "hidden"} rows="12" spellcheck="false">${escapeHtml(savedMd)}</textarea>` +
             `</div>` +
+            `<div class="card-detail"${expanded ? "" : " hidden"}>` +
             (str(cLatest.sender)
                 ? `<div class="meta"><strong>${nMsg > 1 ? "Latest from" : "From"}</strong> ${escapeHtml(isText || isSlack || isLinkedin ? formatChatSenderLabel(str(cLatest.sender)) : str(cLatest.sender))}</div>`
                 : "") +
@@ -301,7 +308,8 @@ function buildThreadCard(thread) {
             listSection("Latest updates", updates.length ? updates : s.latest_updates, counterpartySlots) +
             counterpartyAvailabilitySectionHtml(counterpartySlots) +
             nextStepsSectionHtml(nextSteps, counterpartySlots) +
-            messagesHtml;
+            messagesHtml +
+            `</div>`;
     return art;
 }
 function renderCards(threads) {
@@ -804,6 +812,24 @@ export function bindThreadsInteractions() {
             return;
         if (!document.getElementById("page-root")?.contains(target))
             return;
+        const toggleBtn = target.closest("button.card-toggle-btn");
+        if (toggleBtn) {
+            const threadId = str(toggleBtn.dataset.toggleThreadId);
+            const card = toggleBtn.closest("article.card");
+            const detail = card?.querySelector(".card-detail");
+            if (!threadId || !detail)
+                return;
+            const expanding = detail.hidden;
+            detail.hidden = !expanding;
+            toggleBtn.setAttribute("aria-expanded", expanding ? "true" : "false");
+            toggleBtn.setAttribute("aria-label", `${expanding ? "Collapse" : "Expand"} thread details`);
+            toggleBtn.classList.toggle("is-expanded", expanding);
+            if (expanding)
+                expandedThreadCardIds.add(threadId);
+            else
+                expandedThreadCardIds.delete(threadId);
+            return;
+        }
         const addPlanBtn = target.closest("button.create-plan-btn");
         if (addPlanBtn) {
             const threadId = str(addPlanBtn.dataset.addPlanThreadId);

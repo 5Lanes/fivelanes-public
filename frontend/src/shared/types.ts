@@ -11,6 +11,7 @@ export type AppRoute =
   | "meetings"
   | "lanes"
   | "plans"
+  | "onebox"
   | "sources"
   | "texts-setup"
   | "slack-setup"
@@ -32,6 +33,8 @@ export type LaneView = {
   created_at: string;
   updated_at: string;
   archived?: boolean;
+  removed?: boolean;
+  archived_at?: string;
   area_id?: number | null;
 };
 

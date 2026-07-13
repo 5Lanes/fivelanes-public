@@ -45,7 +45,7 @@ export async function renderDashboardPage(): Promise<void> {
   const meetingPreps = (data.meeting_preps || {}) as LooseObj;
 
   await refreshDashboardStatusBanner();
-  await refreshDigestBriefing();
+  void refreshDigestBriefing();
   await refreshDashboardScheduleRail(trackingThreads, {
     threadLabel,
     meetingPreps,

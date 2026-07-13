@@ -36,7 +36,7 @@ export async function renderDashboardPage() {
     const trackingThreads = [...active, ...snoozed];
     const meetingPreps = (data.meeting_preps || {});
     await refreshDashboardStatusBanner();
-    await refreshDigestBriefing();
+    void refreshDigestBriefing();
     await refreshDashboardScheduleRail(trackingThreads, {
         threadLabel,
         meetingPreps,

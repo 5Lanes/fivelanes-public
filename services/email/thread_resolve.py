@@ -621,6 +621,7 @@ def populate_timeline(
     lookback_days: int,
     max_results: int = 500,
     source_account: Optional[str] = None,
+    after_date: Optional[str] = None,
 ) -> None:
     """Delegate to ``inbox_process.process_inbox_pipeline``."""
     from services.email.inbox_process import process_inbox_pipeline
@@ -630,4 +631,5 @@ def populate_timeline(
         lookback_days=lookback_days,
         max_results=max_results,
         source_account=source_account,
+        after_date=after_date,
     )

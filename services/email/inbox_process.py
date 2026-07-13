@@ -868,8 +868,14 @@ def process_inbox_pipeline(
     lookback_days: int,
     max_results: int = 500,
     source_account: Optional[str] = None,
+    after_date: Optional[str] = None,
 ) -> None:
-    """Pull inbox mail, route, track, and expand into timeline_entries."""
+    """Pull inbox mail, route, track, and expand into timeline_entries.
+
+    ``after_date`` (``YYYY-MM-DD``-prefixed) overrides ``lookback_days`` with a precise
+    cutoff, e.g. the last successful pull's timestamp, so a manual re-pull only asks
+    Gmail for mail since then instead of rescanning the whole lookback window.
+    """
     db = db_path or DATABASE_NAME
     now = datetime.now(timezone.utc).isoformat()
     inbox_eff = (source_account or SOURCE_ACCOUNT or "").strip().lower()
@@ -892,6 +898,7 @@ def process_inbox_pipeline(
     messages = pull_fivelanes_inbox_messages(
         max_results=max_results,
         lookback_days=lookback_days,
+        after_date=after_date,
         source_account=source_account,
         include_body=True,
     )

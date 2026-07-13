@@ -30,6 +30,7 @@ def pull_source_emails(
     source_account: Optional[str] = None,
     db_path: Optional[str] = None,
     max_results: int = 500,
+    after_date: Optional[str] = None,
 ) -> None:
     """Route entrypoint: sync Gmail → ``thread_tracking`` + ``timeline_entries``."""
     db = db_path or DATABASE_NAME
@@ -38,6 +39,7 @@ def pull_source_emails(
         lookback_days=lookback_days,
         source_account=source_account,
         max_results=max_results,
+        after_date=after_date,
     )
 
 

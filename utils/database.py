@@ -560,6 +560,8 @@ def _ensure_lanes_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE lanes ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"
         )
+    if "archived_at" not in columns:
+        conn.execute("ALTER TABLE lanes ADD COLUMN archived_at TEXT")
     _ensure_lane_areas_schema(conn)
     columns = {row[1] for row in conn.execute("PRAGMA table_info(lanes)").fetchall()}
     if "area_id" not in columns:
@@ -901,7 +903,11 @@ def remove_thread_from_lane(db_path: str, *, lane_id: int, inbox_thread_id: str)
 
 
 def archive_lane(db_path: str, *, lane_id: int, archived: bool = True) -> bool:
-    """Mark a lane archived or active. Returns False if lane missing."""
+    """Mark a lane archived or active. Returns False if lane missing.
+
+    Archived lanes (state 1) are re-checked for new messages and auto-restored;
+    see :func:`remove_lane` (state 2) for the non-auto-restoring variant.
+    """
     if lane_id <= 0:
         return False
     now = datetime.now(timezone.utc).isoformat()
@@ -912,8 +918,30 @@ def archive_lane(db_path: str, *, lane_id: int, archived: bool = True) -> bool:
         if not row:
             return False
         conn.execute(
-            "UPDATE lanes SET archived = ?, updated_at = ? WHERE id = ?",
-            (1 if archived else 0, now, lane_id),
+            "UPDATE lanes SET archived = ?, archived_at = ?, updated_at = ? WHERE id = ?",
+            (1 if archived else 0, now if archived else None, now, lane_id),
+        )
+        conn.commit()
+    return True
+
+
+def remove_lane(db_path: str, *, lane_id: int) -> bool:
+    """Mark a lane removed (state 2): hidden from the inbox and never auto-restored on new
+    messages, unlike :func:`archive_lane`. Only ``archive_lane(..., archived=False)`` reverses it
+    (the Sources page "Restore" action). Returns False if lane missing.
+    """
+    if lane_id <= 0:
+        return False
+    now = datetime.now(timezone.utc).isoformat()
+    db_file = Path(db_path)
+    with connect_sqlite(db_file) as conn:
+        _ensure_lanes_schema(conn)
+        row = conn.execute("SELECT id FROM lanes WHERE id = ?", (lane_id,)).fetchone()
+        if not row:
+            return False
+        conn.execute(
+            "UPDATE lanes SET archived = 2, archived_at = ?, updated_at = ? WHERE id = ?",
+            (now, now, lane_id),
         )
         conn.commit()
     return True
@@ -943,7 +971,7 @@ def load_all_lanes(db_path: str) -> List[Dict[str, Any]]:
     with connect_sqlite(db_file) as conn:
         _ensure_lanes_schema(conn)
         rows = conn.execute(
-            "SELECT id, name, created_at, updated_at, archived, area_id "
+            "SELECT id, name, created_at, updated_at, archived, area_id, archived_at "
             "FROM lanes ORDER BY name COLLATE NOCASE"
         ).fetchall()
     return [
@@ -953,7 +981,9 @@ def load_all_lanes(db_path: str) -> List[Dict[str, Any]]:
             "created_at": _normalize_field(r[2]),
             "updated_at": _normalize_field(r[3]),
             "archived": bool(int(r[4] or 0)),
+            "removed": int(r[4] or 0) == 2,
             "area_id": int(r[5]) if r[5] is not None else None,
+            "archived_at": _normalize_field(r[6]),
         }
         for r in rows
     ]
@@ -1754,6 +1784,7 @@ def load_all_thread_plans(db_path: str) -> List[Dict[str, Any]]:
         }
         for r in rows
     ]
+
 
 
 def _parse_meeting_iso_utc(iso: str) -> Optional[datetime]:

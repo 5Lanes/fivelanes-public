@@ -59,6 +59,7 @@ from utils.database import (
     create_thread_plan,
     delete_lane,
     delete_thread_plan,
+    remove_lane,
     update_thread_plan,
     load_all_lane_areas,
     assign_lane_to_area,
@@ -119,7 +120,7 @@ from services.calendar_events import (
     set_tracked_meeting_keys,
     summarize_tracked_calendar_event_threads,
 )
-from services.digest import build_digest_payload
+from services.digest import build_digest_payload, dismiss_item
 from utils.run_fivelanes_scheduler import (
     pipeline_run_in_progress,
     run_fivelanes_cycle,
@@ -216,6 +217,66 @@ def _start_pipeline_run() -> tuple[bool, Optional[str]]:
     return True, None
 
 
+_inbox_pull_state: Dict[str, Any] = {
+    "running": False,
+    "error": None,
+    "started_at": None,
+    "finished_at": None,
+}
+
+
+def _start_inbox_pull_run() -> tuple[bool, Optional[str]]:
+    """Pull new emails only (no LLM cleaning/summarization) for the Onebox view.
+
+    Only fetches mail since the last successful pull (scheduled, full-cycle, or a
+    prior manual pull), rather than rescanning the whole lookback window every time.
+    Shares the pipeline run lock with the scheduler and the full "Run fivelanes"
+    cycle, so none of the three ever run concurrently.
+    """
+    with _pipeline_lock:
+        if _inbox_pull_state["running"] or _pipeline_state["running"] or pipeline_run_in_progress():
+            return False, "already_running"
+        _inbox_pull_state["running"] = True
+        _inbox_pull_state["error"] = None
+        _inbox_pull_state["started_at"] = _utc_now_iso()
+        _inbox_pull_state["finished_at"] = None
+
+    def _worker() -> None:
+        from utils.run_fivelanes_scheduler import run_inbox_pull_cycle
+
+        try:
+            if not run_inbox_pull_cycle(trigger="manual", blocking=False):
+                with _pipeline_lock:
+                    _inbox_pull_state["error"] = "already_running"
+        except Exception as exc:
+            log.exception("Manual inbox-only pull failed")
+            with _pipeline_lock:
+                _inbox_pull_state["error"] = str(exc)
+        finally:
+            with _pipeline_lock:
+                _inbox_pull_state["running"] = False
+                _inbox_pull_state["finished_at"] = _utc_now_iso()
+
+    threading.Thread(
+        target=_worker,
+        name="fivelanes-inbox-pull",
+        daemon=True,
+    ).start()
+    return True, None
+
+
+def _inbox_pull_status_payload() -> Dict[str, Any]:
+    with _pipeline_lock:
+        state = dict(_inbox_pull_state)
+    return {
+        "ok": True,
+        "running": state["running"],
+        "error": state.get("error"),
+        "started_at": state.get("started_at"),
+        "finished_at": state.get("finished_at"),
+    }
+
+
 def _pipeline_status_payload() -> Dict[str, Any]:
     from utils.pipeline_run_log import load_last_pipeline_run
 
@@ -256,9 +317,6 @@ def _db_cache_etag(db_path: str) -> Tuple[str, str]:
 
 _summaries_bundle_cache: Optional[Dict[str, Any]] = None
 _summaries_bundle_epoch: int = 0
-
-DIGEST_CACHE_TTL_SEC = 300
-_digest_cache: Optional[Dict[str, Any]] = None
 
 
 def _get_cached_summaries_bundle(etag: str) -> Optional[Dict[str, Any]]:
@@ -1310,6 +1368,24 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             HTTPStatus.OK, {"ok": True, "lane_id": lane_id, "archived": archived}
         )
 
+    def _post_lane_remove(self, body: Dict[str, Any]) -> None:
+        try:
+            lane_id = int(body.get("lane_id") or 0)
+        except (TypeError, ValueError):
+            lane_id = 0
+        if lane_id <= 0:
+            self._json_response(
+                HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_lane_id"}
+            )
+            return
+        ok = remove_lane(DB_PATH, lane_id=lane_id)
+        if not ok:
+            self._json_response(
+                HTTPStatus.NOT_FOUND, {"ok": False, "error": "lane_not_found"}
+            )
+            return
+        self._json_response(HTTPStatus.OK, {"ok": True, "lane_id": lane_id, "removed": True})
+
     def _get_lane_summary(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
@@ -1550,7 +1626,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_plan_id"}
             )
             return
-        ok = delete_thread_plan(DB_PATH, plan_id=plan_id)
+        try:
+            ok = delete_thread_plan(DB_PATH, plan_id=plan_id)
+        except Exception as exc:
+            # Unlike _post_plan_create/_post_plan_update, this call was previously unguarded —
+            # an exception here (e.g. a SQLite busy-timeout while the background pipeline holds
+            # a write lock) killed the response before any access-log line was written, so a
+            # real failed delete looked from the outside like the click never happened at all.
+            log.exception("plan delete failed")
+            self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": str(exc)}
+            )
+            return
         if not ok:
             self._json_response(
                 HTTPStatus.NOT_FOUND, {"ok": False, "error": "plan_not_found"}
@@ -1956,12 +2043,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.NOT_FOUND, {"ok": False, "error": "database_not_found"}
             )
             return
-        global _digest_cache
-        now = datetime.now(timezone.utc)
-        cached = _digest_cache
-        if cached and (now - cached["cached_at"]).total_seconds() < DIGEST_CACHE_TTL_SEC:
-            self._json_response(HTTPStatus.OK, cached["payload"])
-            return
+        # build_digest_payload persists one batch per calendar day itself (services/digest/
+        # store.py) and filters out dismissed items on every call — no in-memory cache layer
+        # here, since a dismiss needs to be reflected immediately, not up to
+        # DIGEST_CACHE_TTL_SEC stale.
         try:
             payload = build_digest_payload(DB_PATH, env_path=str(env_file()))
         except Exception as exc:
@@ -1970,8 +2055,20 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": str(exc)}
             )
             return
-        _digest_cache = {"cached_at": now, "payload": payload}
         self._json_response(HTTPStatus.OK, payload)
+
+    def _post_digest_dismiss(self, body: Dict[str, Any]) -> None:
+        item_id_value = str(body.get("id") or "").strip()
+        if not item_id_value:
+            self._json_response(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "missing_id"})
+            return
+        try:
+            dismissed = dismiss_item(item_id_value)
+        except Exception as exc:
+            log.exception("digest dismiss failed")
+            self._json_response(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": str(exc)})
+            return
+        self._json_response(HTTPStatus.OK, {"ok": True, "dismissed": dismissed})
 
     def _post_config_backend(self, body: Dict[str, Any]) -> None:
         backend = str(body.get("backend") or "").strip().lower()
@@ -2089,6 +2186,21 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         payload["status"] = "running"
         self._json_response(HTTPStatus.ACCEPTED, payload)
 
+    def _post_inbox_pull_run(self) -> None:
+        started, err = _start_inbox_pull_run()
+        if not started:
+            payload = _inbox_pull_status_payload()
+            payload["ok"] = False
+            payload["error"] = err or "already_running"
+            self._json_response(HTTPStatus.CONFLICT, payload)
+            return
+        payload = _inbox_pull_status_payload()
+        payload["status"] = "running"
+        self._json_response(HTTPStatus.ACCEPTED, payload)
+
+    def _get_inbox_pull_status(self) -> None:
+        self._json_response(HTTPStatus.OK, _inbox_pull_status_payload())
+
     def _request_path(self) -> str:
         return urllib.parse.urlparse(self.path).path.rstrip("/") or "/"
 
@@ -2143,6 +2255,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if path == "/api/pipeline/status":
             self._get_pipeline_status()
             return
+        if path == "/api/pipeline/inbox-pull-status":
+            self._get_inbox_pull_status()
+            return
         if path == "/api/digest/latest":
             self._get_digest_latest()
             return
@@ -2175,6 +2290,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "/meetings",
             "/lanes",
             "/plans",
+            "/onebox",
             "/texts-setup",
             "/slack-setup",
             "/linkedin-setup",
@@ -2185,7 +2301,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
         if path == "/summaries.html":
             self.send_response(HTTPStatus.MOVED_PERMANENTLY)
-            self.send_header("Location", "/dashboard")
+            self.send_header("Location", "/onebox")
             self.end_headers()
             return
         if path == "/people":
@@ -2228,6 +2344,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._post_lane_delete(body)
         elif path == "/api/lanes/archive":
             self._post_lane_archive(body)
+        elif path == "/api/lanes/remove":
+            self._post_lane_remove(body)
         elif path == "/api/lanes/summary":
             self._post_lane_summary(body)
         elif path == "/api/lane-areas":
@@ -2242,6 +2360,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._post_plan_update(body)
         elif path == "/api/plans/delete":
             self._post_plan_delete(body)
+        elif path == "/api/digest/dismiss":
+            self._post_digest_dismiss(body)
         elif path == "/api/config/backend":
             self._post_config_backend(body)
         elif path == "/api/config/schedule":
@@ -2252,6 +2372,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._post_config_email_capture(body)
         elif path == "/api/pipeline/run":
             self._post_pipeline_run()
+        elif path == "/api/pipeline/run-inbox-pull":
+            self._post_inbox_pull_run()
         elif path == "/api/texts/track":
             self._post_texts_track(body)
         elif path == "/api/texts/summarize":

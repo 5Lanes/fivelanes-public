@@ -40,6 +40,7 @@ from utils.database import (
     _ensure_timeline_schema,
     apply_thread_resummary_to_db,
     connect_sqlite,
+    load_cached_thread_summary,
     load_prior_cleaned_content_by_pair,
     load_processed_cleaned_for_thread,
     load_processed_thread_source_pairs,
@@ -591,6 +592,95 @@ def run_threads_llm_pipeline(
         threads_updated,
         total_threads,
         threads_skipped,
+        len(cleaned_all),
+    )
+    return cleaned_all, per_message
+
+
+def run_threads_content_only_pipeline(
+    lookback_days: int | None = None,
+    db_path: str | None = None,
+    *,
+    backend: str | None = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Segment (clean) new timeline messages only — no thread-summary LLM call.
+
+    Cheap counterpart to ``run_threads_llm_pipeline``: extracts ``cleaned_content`` for
+    newly-pulled messages so the Inbox view shows cleaned text instead of raw email
+    bodies, without paying for a full/incremental re-summarization pass. Existing
+    thread summaries are reused as-is for the persisted per-message rows; they catch up
+    to the new content on the next full LLM pipeline run.
+    """
+    from utils.lookback_config import get_lookback_days
+
+    days = get_lookback_days() if lookback_days is None else lookback_days
+    db = db_path or database_path()
+    llm = get_llm_backend(backend=backend)
+    run_stamp = run_stamp_utc()
+    run_started = time.monotonic()
+    log.info(
+        "Content-only pipeline run_stamp=%s backend=%s lookback_days=%s", run_stamp, llm.name, days
+    )
+
+    grouped = load_timeline_entries_by_thread(db, lookback_days=days)
+    if not grouped:
+        return [], []
+
+    processed_since = (datetime.now(timezone.utc) - timedelta(days=days + 14)).isoformat()
+    processed_pairs = load_processed_thread_source_pairs(db, since=processed_since)
+    prior_cleaned_by_pair = load_prior_cleaned_content_by_pair(db, since=processed_since)
+    seg_cache: SegmentationCache = {}
+    cleaned_all: List[Dict[str, Any]] = []
+    per_message: List[Dict[str, Any]] = []
+    generated_at = datetime.now(timezone.utc).isoformat()
+
+    max_workers = max(1, min(len(grouped), inference_capacity()))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                segment_new_timeline_rows,
+                thread_id,
+                rows,
+                processed_pairs=processed_pairs,
+                prior_cleaned_by_pair=prior_cleaned_by_pair,
+                seg_cache=seg_cache,
+                segment_fn=lambda body, cache: segment_body_deduped(body, cache, llm=llm),
+            ): thread_id
+            for thread_id, rows in grouped.items()
+        }
+        threads_updated = 0
+        for future in as_completed(futures):
+            thread_id = futures[future]
+            cleaned_thread = future.result()
+            if not cleaned_thread:
+                continue
+            threads_updated += 1
+            for c in cleaned_thread:
+                sid = str(c.get("source_id") or "").strip()
+                if sid and not str(c.get("api_error") or "").strip():
+                    processed_pairs.add((str(thread_id or "").strip(), sid))
+            cached = load_cached_thread_summary(db, thread_id)
+            prior_summary = cached["thread_summary"] if cached and isinstance(cached.get("thread_summary"), dict) else {}
+            thread_per_message = per_message_rows(cleaned_thread, prior_summary)
+            cleaned_all.extend(cleaned_thread)
+            per_message.extend(thread_per_message)
+            save_message_outputs(
+                db,
+                run_stamp=run_stamp,
+                generated_at=generated_at,
+                cleaned=cleaned_thread,
+                per_message=thread_per_message,
+                replace_run_stamp=False,
+            )
+
+    log.info(
+        "Content-only pipeline run_stamp=%s done in %.2fs: %d/%d thread(s) with new content, "
+        "%d message(s) cleaned",
+        run_stamp,
+        time.monotonic() - run_started,
+        threads_updated,
+        len(grouped),
         len(cleaned_all),
     )
     return cleaned_all, per_message

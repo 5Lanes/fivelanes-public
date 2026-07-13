@@ -25,9 +25,14 @@ import {
   mountTextsSetupPage,
   renderTextsSetupPage,
 } from "./texts_setup_page.js";
+import {
+  bindRemovedTracksInteractions,
+  mountRemovedTracksPanel,
+  renderRemovedTracksPanel,
+} from "./removed_tracks_panel.js";
 
 const SOURCES_TAB_KEY = "fivelanes_sources_tab";
-const VALID_SOURCES = ["email", "texts", "slack", "linkedin", "meet", "calendar"] as const;
+const VALID_SOURCES = ["email", "texts", "slack", "linkedin", "meet", "calendar", "removed"] as const;
 type SourceTab = (typeof VALID_SOURCES)[number];
 
 const PAGE_HTML = `
@@ -39,6 +44,7 @@ const PAGE_HTML = `
     <button type="button" class="source-tab" role="tab" data-source="linkedin" data-feature="linkedin" aria-controls="source-panel-linkedin">LinkedIn</button>
     <button type="button" class="source-tab" role="tab" data-source="meet" data-feature="meet_recordings" aria-controls="source-panel-meet">Meet notes</button>
     <button type="button" class="source-tab" role="tab" data-source="calendar" data-feature="calendar_events" aria-controls="source-panel-calendar">Calendar</button>
+    <button type="button" class="source-tab" role="tab" data-source="removed" aria-controls="source-panel-removed">Removed tracks</button>
   </div>
   <div class="source-tab-panel is-active" role="tabpanel" id="source-panel-email" data-source="email"></div>
   <div class="source-tab-panel" role="tabpanel" id="source-panel-texts" data-source="texts" hidden></div>
@@ -46,6 +52,7 @@ const PAGE_HTML = `
   <div class="source-tab-panel" role="tabpanel" id="source-panel-linkedin" data-source="linkedin" hidden></div>
   <div class="source-tab-panel" role="tabpanel" id="source-panel-meet" data-source="meet" hidden></div>
   <div class="source-tab-panel" role="tabpanel" id="source-panel-calendar" data-source="calendar" hidden></div>
+  <div class="source-tab-panel" role="tabpanel" id="source-panel-removed" data-source="removed" hidden></div>
 </div>`;
 
 let panelsInitialized = false;
@@ -69,6 +76,7 @@ function sourceTabEnabled(source: SourceTab): boolean {
   if (source === "slack") return isFeatureEnabled("slack");
   if (source === "linkedin") return isFeatureEnabled("linkedin");
   if (source === "meet") return isFeatureEnabled("meet_recordings");
+  if (source === "removed") return true;
   return isFeatureEnabled("calendar_events");
 }
 
@@ -135,6 +143,12 @@ async function ensureSourcePanels(): Promise<void> {
     mountCalendarSetupPage(calendarPanel);
     bindCalendarSetupInteractions();
   }
+
+  const removedPanel = document.getElementById("source-panel-removed");
+  if (removedPanel) {
+    mountRemovedTracksPanel(removedPanel);
+    bindRemovedTracksInteractions();
+  }
 }
 
 async function refreshSourcePanel(source: SourceTab): Promise<void> {
@@ -161,6 +175,10 @@ async function refreshSourcePanel(source: SourceTab): Promise<void> {
   }
   if (source === "calendar" && isFeatureEnabled("calendar_events")) {
     await renderCalendarSetupPage();
+    return;
+  }
+  if (source === "removed") {
+    await renderRemovedTracksPanel();
   }
 }
 

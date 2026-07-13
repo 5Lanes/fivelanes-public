@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from services.pipeline.process import (
     load_timeline_entries_by_thread,
+    run_threads_content_only_pipeline,
     run_threads_llm_pipeline,
     segment_body_deduped,
 )
@@ -37,4 +38,26 @@ def run_fivelanes_llm_pipeline(
 
         llm = get_llm_backend(backend=backend)
         print(f"Thread LLM pipeline finished (backend={llm.name}, messages={len(cleaned)})")
+    return cleaned, per_message
+
+
+def run_fivelanes_content_only_pipeline(
+    lookback_days: Optional[int] = None,
+    db_path: Optional[str] = None,
+    *,
+    backend: Optional[str] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Clean/segment new messages only — skips thread re-summarization."""
+    from utils.lookback_config import get_lookback_days
+
+    cleaned, per_message = run_threads_content_only_pipeline(
+        lookback_days=get_lookback_days() if lookback_days is None else lookback_days,
+        db_path=db_path,
+        backend=backend,
+    )
+    if cleaned:
+        from services.llm_service import get_llm_backend
+
+        llm = get_llm_backend(backend=backend)
+        print(f"Content-only pipeline finished (backend={llm.name}, messages={len(cleaned)})")
     return cleaned, per_message

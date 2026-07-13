@@ -84,6 +84,7 @@ function openMobileThreadDetail(threadId: string): void {
 }
 
 let threadViewMode: "active" | "snoozed" | "removed" = "active";
+const expandedThreadCardIds = new Set<string>();
 let threadChannelFilter: "all" | "text" | "slack" | "linkedin" | "meet" | "calendar" | "email" = "all";
 const SOURCE_FILTER_DEFS: Array<{ id: SourceChannel; label: string; feature?: string }> = [
   { id: "email", label: "Email" },
@@ -314,11 +315,16 @@ function buildThreadCard(thread: ThreadView): HTMLElement {
   const savedMd = savedDraft ? str(savedDraft.markdown) : "";
   const showSavedOut = Boolean(savedMd);
   const channelPill = sourcePillHtml(threadChannelForThread(thread));
+  const expanded = expandedThreadCardIds.has(thread.id);
   const art = document.createElement("article");
-  art.className = "card";
+  art.className = "card is-compact";
   art.id = `thread-${thread.id}`;
   art.innerHTML =
-    `<div class="card-top"><time datetime="${escapeHtml(dt)}">${formatDate(dt)}</time>${
+    `<div class="card-top">` +
+    `<button type="button" class="card-toggle-btn" data-toggle-thread-id="${escapeHtml(thread.id)}" aria-expanded="${expanded ? "true" : "false"}" aria-label="${expanded ? "Collapse" : "Expand"} thread details">` +
+    `<span class="card-toggle-icon" aria-hidden="true"></span>` +
+    `</button>` +
+    `<time datetime="${escapeHtml(dt)}">${formatDate(dt)}</time>${
       tone ? `<span class="tone ${toneClass(tone)}">${escapeHtml(tone)}</span>` : ""
     }<span class="count-pill">${nMsg} msg${nMsg > 1 ? " (thread)" : ""}</span>${pendingMessagePillHtml(pendingCount)}${channelPill}` +
     `<div class="card-actions">` +
@@ -344,6 +350,7 @@ function buildThreadCard(thread: ThreadView): HTMLElement {
     `<label class="draft-output-label">Markdown — copy below</label>` +
     `<textarea class="draft-markdown-output" readonly ${showSavedOut ? "" : "hidden"} rows="12" spellcheck="false">${escapeHtml(savedMd)}</textarea>` +
     `</div>` +
+    `<div class="card-detail"${expanded ? "" : " hidden"}>` +
     (str(cLatest.sender)
       ? `<div class="meta"><strong>${nMsg > 1 ? "Latest from" : "From"}</strong> ${escapeHtml(
           isText || isSlack || isLinkedin ? formatChatSenderLabel(str(cLatest.sender)) : str(cLatest.sender),
@@ -353,7 +360,8 @@ function buildThreadCard(thread: ThreadView): HTMLElement {
     listSection("Latest updates", updates.length ? updates : s.latest_updates, counterpartySlots) +
     counterpartyAvailabilitySectionHtml(counterpartySlots) +
     nextStepsSectionHtml(nextSteps, counterpartySlots) +
-    messagesHtml;
+    messagesHtml +
+    `</div>`;
   return art;
 }
 
@@ -898,6 +906,22 @@ export function bindThreadsInteractions(): void {
     const target = ev.target as HTMLElement | null;
     if (!target) return;
     if (!document.getElementById("page-root")?.contains(target)) return;
+
+    const toggleBtn = target.closest("button.card-toggle-btn") as HTMLButtonElement | null;
+    if (toggleBtn) {
+      const threadId = str(toggleBtn.dataset.toggleThreadId);
+      const card = toggleBtn.closest("article.card");
+      const detail = card?.querySelector(".card-detail") as HTMLElement | null;
+      if (!threadId || !detail) return;
+      const expanding = detail.hidden;
+      detail.hidden = !expanding;
+      toggleBtn.setAttribute("aria-expanded", expanding ? "true" : "false");
+      toggleBtn.setAttribute("aria-label", `${expanding ? "Collapse" : "Expand"} thread details`);
+      toggleBtn.classList.toggle("is-expanded", expanding);
+      if (expanding) expandedThreadCardIds.add(threadId);
+      else expandedThreadCardIds.delete(threadId);
+      return;
+    }
 
     const addPlanBtn = target.closest("button.create-plan-btn") as HTMLButtonElement | null;
     if (addPlanBtn) {

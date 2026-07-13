@@ -272,7 +272,7 @@ def submit_digest_prompt(
     prompt: str | PromptMessages,
     *,
     model: str = MODEL_SUMMARY,
-    max_tokens: int = 2000,
+    max_tokens: int = 3000,
 ) -> Dict[str, Any]:
     """Cross-source briefing narrative across lanes, plans, and meetings."""
     return call_claude_json(prompt, model=model, max_tokens=max_tokens)

@@ -120,7 +120,7 @@ function planRailCardHtml(plan: PlanView, data: LooseObj): string {
   </li>`;
 }
 
-function renderPlansRail(): void {
+export function renderPlansRail(): void {
   const list = document.getElementById("schedule-plans-list");
   const data = getCurrentData();
   if (!list || !data) return;
@@ -156,12 +156,13 @@ export function showScheduleAddPlanForm(selectedThreadId = ""): void {
   document.getElementById("schedule-plan-action-input")?.focus();
 }
 
-function bindScheduleRailInteractions(rail: HTMLElement): void {
+function bindScheduleRailInteractions(_rail: HTMLElement): void {
   if (scheduleBound) return;
   scheduleBound = true;
 
-  rail.addEventListener("click", (ev) => {
+  document.addEventListener("click", (ev) => {
     const target = ev.target as HTMLElement;
+    if (!target.closest("#dashboard-schedule-rail")) return;
     const tab = target.closest("[data-schedule-view]") as HTMLElement | null;
     if (tab?.closest(".schedule-tabs")) {
       const view = tab.dataset.scheduleView as "calendar" | "plans";

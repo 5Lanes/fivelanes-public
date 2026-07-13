@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """
-Run the fivelanes email + LLM pipeline on a fixed interval, with nightly quiet hours.
+Run an inbox-only email pull (no calendar export, no thread re-summarization) on a fixed
+interval, with nightly quiet hours. Only fetches mail since the last successful pull
+(this scheduled loop or a manual "Pull inbox"/"Run fivelanes" click) instead of
+rescanning the whole lookback window every time — see ``utils.inbox_pull_log``.
+
+Every inbox pull (scheduled or manual) also runs a cheap "content-only" LLM pass right
+after the email pull — segmentation/cleaning only, no thread summarization — so newly
+pulled messages show cleaned content immediately instead of raw text. The heavier full
+thread re-summarization only happens on the manual "Run fivelanes" full-cycle button.
+
+The full LLM + calendar-export cycle (``run_fivelanes_cycle``) no longer runs on this
+timer; it's manual-only now (the dashboard's "Run fivelanes" button). Both share
+``_pipeline_run_lock`` so they never overlap.
 
 Active window defaults to 06:00–19:00 local time (no runs from 19:00 through 05:59).
 The scheduler waits ``FIVELANES_INTERVAL_SEC`` after each run **finishes** (manual or
@@ -15,14 +27,16 @@ One shot (respects quiet hours; exits without running if currently quiet):
 Environment (same names as dashboard_server where applicable):
 
   FIVELANES_INTERVAL_SEC       seconds after a run ends until the next (default 900)
-  FIVELANES_LOOKBACK_DAYS      passed to fivelanes.main (default 180)
+  FIVELANES_LOOKBACK_DAYS      fallback window when there's no prior successful pull
+                                to compute a cutoff from (default 180)
   FIVELANES_QUIET_START_HOUR   inclusive start of quiet period, 0–23 (default 19)
   FIVELANES_QUIET_END_HOUR     exclusive end of quiet period, 0–24 (default 6)
   FIVELANES_SCHEDULER_TZ       IANA timezone for quiet hours (default: system local)
   FIVELANES_SCHEDULER_WEEKDAYS run on Mon–Fri when 1/true (default: true)
   FIVELANES_SCHEDULER_WEEKENDS run on Sat–Sun when 1/true (default: true)
-  CALENDAR_AVAILABILITY_DISABLE, CALENDAR_AVAILABILITY_WEEKS,
-  CALENDAR_AVAILABILITY_LOOKBACK_DAYS — same as dashboard_server
+
+  CALENDAR_AVAILABILITY_* env vars only apply to the manual full-cycle run now, not
+  this scheduled loop.
 
 Also used by ``dashboard_server.py`` (background thread).
 """
@@ -34,7 +48,7 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -198,6 +212,47 @@ def run_fivelanes_cycle(*, trigger: str = "scheduler", blocking: bool = True) ->
     return True
 
 
+def run_inbox_pull_cycle(*, trigger: str = "scheduler", blocking: bool = True) -> bool:
+    """
+    One inbox-only pull: net-new email since the last successful pull (full cycle or
+    inbox-only), no calendar export. Shares ``_pipeline_run_lock`` with
+    ``run_fivelanes_cycle`` so the two never overlap.
+
+    Every pull (scheduled or manual) also runs a cheap content-only LLM pass right after
+    the email pull — segmentation/cleaning of newly-pulled messages only, no thread
+    re-summarization — so the Inbox view shows cleaned content instead of raw text
+    without waiting for a full cycle. The heavier full LLM pipeline (thread summaries)
+    still only runs on the manual "Run fivelanes" full-cycle button.
+
+    Returns False when ``blocking`` is False and another run is already in progress.
+    """
+    if not _pipeline_run_lock.acquire(blocking=blocking):
+        return False
+
+    import fivelanes as fl
+    from utils.inbox_pull_log import last_successful_email_pull_at, record_inbox_pull_finish
+
+    os.chdir(infra_root())
+    started_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    err: Optional[str] = None
+    try:
+        after_date = last_successful_email_pull_at()
+        fl.run_email_pipeline(after_date=after_date)
+        try:
+            fl.run_content_cleanup_pipeline(lookback_days=get_lookback_days())
+        except Exception:
+            log.exception("Inbox pull (%s): content cleanup step failed", trigger)
+    except Exception as exc:
+        err = str(exc)
+        log.exception("Inbox-only pull cycle failed")
+        raise
+    finally:
+        record_inbox_pull_finish(started_at=started_at, ok=err is None, error=err)
+        _pipeline_run_lock.release()
+        _mark_run_finished()
+    return True
+
+
 def sleep_until_active_day(tz: ZoneInfo) -> None:
     now = _now_local(tz)
     cfg = get_schedule_config()
@@ -308,14 +363,14 @@ def scheduler_loop(*, run_immediately: bool = True) -> None:
         try:
             _wait_until_ready_for_scheduled_run(tz)
             started = time.monotonic()
-            log.info("Starting fivelanes run")
-            if not run_fivelanes_cycle(trigger="scheduler", blocking=False):
+            log.info("Starting scheduled inbox pull")
+            if not run_inbox_pull_cycle(trigger="scheduler", blocking=False):
                 continue
             elapsed = time.monotonic() - started
-            log.info("Fivelanes run finished in %.1fs", elapsed)
+            log.info("Scheduled inbox pull finished in %.1fs", elapsed)
             _warm_gai_chat_cache()
         except Exception:
-            log.exception("Scheduled fivelanes run failed")
+            log.exception("Scheduled inbox pull failed")
 
 
 def main() -> int:
@@ -346,9 +401,9 @@ def main() -> int:
 
     if args.once:
         try:
-            run_fivelanes_cycle()
+            run_inbox_pull_cycle()
         except Exception:
-            log.exception("Fivelanes run failed")
+            log.exception("Inbox pull failed")
             return 1
         return 0
 

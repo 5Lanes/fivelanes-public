@@ -262,8 +262,21 @@ LANE_SUMMARY_RESPONSE_FORMAT: Dict[str, Any] = {
 }
 DIGEST_RESPONSE_FORMAT: Dict[str, Any] = {
     "type": "object",
-    "properties": {"narrative": {"type": "string"}},
-    "required": ["narrative"],
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "lane_id": {"type": "integer"},
+                    "person": {"type": "string"},
+                    "text": {"type": "string"},
+                },
+                "required": ["lane_id", "text"],
+            },
+        }
+    },
+    "required": ["items"],
 }
 SCHEDULING_ASK_RESPONSE_FORMAT: Dict[str, Any] = {
     "type": "object",
@@ -783,7 +796,7 @@ def submit_digest_prompt(
     prompt: str | PromptMessages,
     *,
     model: Optional[str] = None,
-    max_tokens: int = 2000,
+    max_tokens: int = 3000,
     env_path: str = ".env",
 ) -> Dict[str, Any]:
     """Cross-source briefing narrative: default model from ``OLLAMA_MODEL_SUMMARY``."""

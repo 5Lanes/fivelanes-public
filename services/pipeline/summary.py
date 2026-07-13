@@ -348,13 +348,7 @@ def resolve_thread_summary(
 
     from utils.database import load_cached_thread_summary, load_processed_cleaned_for_thread
 
-    cal_block, cal_tz = _calendar_context(db_path)
-    fp = summary_input_fingerprint(
-        merged_cleaned,
-        calendar_events_block=cal_block,
-        calendar_timezone=cal_tz,
-        backend=active_backend,
-    )
+    fp = summary_input_fingerprint(merged_cleaned, backend=active_backend)
 
     if not thread_needs_summary(db_path, thread_id, merged_cleaned, backend=active_backend):
         cached = load_cached_thread_summary(db_path, thread_id)

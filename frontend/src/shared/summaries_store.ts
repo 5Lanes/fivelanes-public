@@ -143,6 +143,8 @@ export function getLanes(data: LooseObj | null): LaneView[] {
       created_at: str(row.created_at),
       updated_at: str(row.updated_at),
       archived: Boolean(row.archived),
+      removed: Boolean(row.removed),
+      archived_at: str(row.archived_at),
       area_id: row.area_id == null || row.area_id === "" ? null : Number(row.area_id) || null,
     }))
     .filter((lane) => lane.id > 0 && lane.name);

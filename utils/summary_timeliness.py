@@ -180,6 +180,32 @@ def text_frames_past_event_as_future(text: str, *, as_of: date | None = None) ->
     return any(d < today for d in dates_in_text(body, as_of=today))
 
 
+# The lane_summary prompt (fivelanes-data/prompts.json) explicitly tells the model to "name
+# the actual date or day instead of 'today'/'yesterday'/'tomorrow'" — but a violation phrased
+# this way has no literal date in the sentence for dates_in_text()/
+# text_frames_past_event_as_future() to compare against an as-of date, so it sails through
+# undetected (observed: a lane summary said "scheduled for tomorrow at 2 PM" about a meeting
+# that was actually 5 days in the past). Since the prompt bans these words outright, this is a
+# categorical check, not a past-vs-future comparison — any sentence using one gets dropped
+# rather than rewritten, because unlike an explicit stale date there's no date in the text to
+# correct it to.
+_RELATIVE_DAY_WORD_RE = re.compile(r"\b(?:today|tomorrow|yesterday)\b", re.IGNORECASE)
+
+# A second, related gap: every thread block fed into the lane-summary prompt is annotated with
+# an explicit "[ALREADY IN THE PAST — N day(s)...; never call this upcoming]" tag next to its
+# date (see services/prompts.py::_relative_time_note) — so the model always has the real date
+# available when it calls something "upcoming." Observed anyway: a lane summary said "focus on
+# preparing for your upcoming meeting with Jennifer Chan" with the date dropped entirely,
+# describing a calendar entry that was actually 26 days in the past. Because the sentence cites
+# no date at all, dates_in_text() has nothing to compare and the past-date reframing above can't
+# catch it either. Since the model had a real date available and chose to omit it, an "upcoming
+# meeting/call" claim with zero date anywhere in the sentence is unverifiable and dropped
+# outright, rather than trusted.
+_UNDATED_UPCOMING_MEETING_RE = re.compile(
+    r"\bupcoming\s+(?:meeting|call|sync|catch-?up|session)\b", re.IGNORECASE
+)
+
+
 def _sentence_references_past_date(sentence: str, *, as_of: date) -> bool:
     return any(d < as_of for d in dates_in_text(sentence, as_of=as_of))
 
@@ -197,7 +223,8 @@ def _reframe_sentence_to_past(sentence: str) -> str:
 
 
 def reframe_past_events_in_text(text: str, *, as_of: date | None = None) -> str:
-    """Rewrite present-tense scheduling language when the sentence cites a past date."""
+    """Rewrite present-tense scheduling language when the sentence cites a past date, and drop
+    any sentence that uses a banned relative-day word (see _RELATIVE_DAY_WORD_RE)."""
     body = str(text or "").strip()
     if not body:
         return body
@@ -207,6 +234,10 @@ def reframe_past_events_in_text(text: str, *, as_of: date | None = None) -> str:
     for part in parts:
         sent = part.strip()
         if not sent:
+            continue
+        if _RELATIVE_DAY_WORD_RE.search(sent):
+            continue
+        if _UNDATED_UPCOMING_MEETING_RE.search(sent) and not dates_in_text(sent, as_of=today):
             continue
         if _sentence_references_past_date(sent, as_of=today) and _SCHEDULING_PRESENT.search(sent):
             sent = _reframe_sentence_to_past(sent)
@@ -297,6 +328,87 @@ def summary_is_temporally_stale(summary: Dict[str, Any], *, as_of: date | None =
         text_frames_past_event_as_future(text, as_of=today)
         for text in _iter_summary_strings(summary)
     )
+
+
+def _thread_summaries_source_text(summaries: Sequence[Dict[str, Any]]) -> str:
+    """Flatten the same thread-summary fields ``format_lane_summary_prompt`` sends the model
+    (see services/prompts.py), for checking whether a date the lane summary states actually
+    appeared in what it was given."""
+    parts: List[str] = []
+    for item in summaries:
+        if not isinstance(item, dict):
+            continue
+        for key in ("suggested_thread_label", "tone"):
+            val = item.get(key)
+            if isinstance(val, str):
+                parts.append(val)
+        updates = item.get("latest_updates")
+        if isinstance(updates, list):
+            parts.extend(str(u) for u in updates if u)
+        steps = item.get("next_steps")
+        if isinstance(steps, list):
+            for step in steps:
+                if isinstance(step, dict):
+                    parts.append(str(step.get("action") or ""))
+                    parts.append(str(step.get("by_when") or ""))
+    return "\n".join(p for p in parts if p)
+
+
+def _sentence_has_ungrounded_date(sentence: str, *, source_dates: set, as_of: date) -> bool:
+    return any(d not in source_dates for d in dates_in_text(sentence, as_of=as_of))
+
+
+def drop_ungrounded_dates(
+    summary: Dict[str, Any],
+    summaries: Sequence[Dict[str, Any]],
+    *,
+    as_of: date | None = None,
+) -> Dict[str, Any]:
+    """
+    Drop lane-summary sentences that cite a calendar date absent from every thread summary the
+    prompt was actually given. The lane_summary prompt already says "do not invent people,
+    dates, or commitments," but has been observed doing it anyway — restating a real per-thread
+    deadline as a different date, or attaching a deadline with no basis in any source thread at
+    all (e.g. inventing "by July 18" for a follow-up whose only real date, June 30, carries no
+    stated deadline). Whether a date appears anywhere in the source text is a fixed lookup, not
+    a judgment call, so it's enforced here rather than re-relied on the model.
+    """
+    if not isinstance(summary, dict):
+        return summary
+    today = as_of or _scheduler_today()
+    source_dates = set(dates_in_text(_thread_summaries_source_text(summaries), as_of=today))
+    out = dict(summary)
+    body = str(out.get("summary") or "").strip()
+    if body:
+        sentences = [s for s in re.split(r"(?<=[.!?])\s+", body) if s.strip()]
+        kept = [
+            s
+            for s in sentences
+            if not _sentence_has_ungrounded_date(s, source_dates=source_dates, as_of=today)
+        ]
+        out["summary"] = " ".join(kept)
+    for key in ("highlights", "current_priorities", "waiting_on_others"):
+        val = out.get(key)
+        if isinstance(val, list):
+            out[key] = [
+                item
+                for item in val
+                if not _sentence_has_ungrounded_date(str(item), source_dates=source_dates, as_of=today)
+            ]
+    steps = out.get("next_steps")
+    if isinstance(steps, list):
+        new_steps: List[Any] = []
+        for step in steps:
+            if isinstance(step, dict):
+                row = dict(step)
+                by_when = str(row.get("by_when") or "")
+                if by_when and _sentence_has_ungrounded_date(by_when, source_dates=source_dates, as_of=today):
+                    row["by_when"] = ""
+                new_steps.append(row)
+            else:
+                new_steps.append(step)
+        out["next_steps"] = new_steps
+    return out
 
 
 def lane_summary_is_stale(summary: Dict[str, Any], *, as_of: date | None = None) -> bool:

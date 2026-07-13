@@ -9,6 +9,7 @@ import {
   renderDashboardPage,
 } from "./pages/dashboard_page.js";
 import { bindLanesInteractions, mountLanesPage, renderLanesPage } from "./pages/lanes_page.js";
+import { bindOneboxInteractions, mountOneboxPage, renderOneboxPage } from "./pages/onebox_page.js";
 import { mountMeetingsPage, renderMeetingsPage } from "./pages/meetings_page.js";
 import { bindPlansInteractions, mountPlansPage, renderPlansPage } from "./pages/plans_page.js";
 import { bindThreadsInteractions, mountThreadsPage, renderThreadsPage } from "./pages/threads_page.js";
@@ -63,7 +64,7 @@ export function applyLegacyRouteRedirect(pathname: string, search = location.sea
   const params = new URLSearchParams(search);
 
   if (path === "/" || path === "/summaries.html") {
-    location.replace("/dashboard");
+    location.replace("/onebox");
     return true;
   }
   if (path === "/threads") {
@@ -106,6 +107,7 @@ export function routeFromPathname(pathname: string): AppRoute {
   if (path === "/meetings") return "meetings";
   if (path === "/lanes") return "lanes";
   if (path === "/plans") return "plans";
+  if (path === "/onebox") return "onebox";
   if (path === "/texts-setup") return "texts-setup";
   if (path === "/slack-setup") return "slack-setup";
   if (path === "/linkedin-setup") return "linkedin-setup";
@@ -177,6 +179,14 @@ async function renderPage(route: AppRoute): Promise<void> {
     mountPlansPage(pageRoot);
     bindPlansInteractions();
     await renderPlansPage();
+    return;
+  }
+
+  if (route === "onebox") {
+    mountOneboxPage(pageRoot);
+    bindOneboxInteractions();
+    bindThreadsInteractions();
+    await renderOneboxPage();
     return;
   }
 

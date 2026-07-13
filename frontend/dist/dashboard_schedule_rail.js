@@ -85,7 +85,7 @@ function planRailCardHtml(plan, data) {
     </article>
   </li>`;
 }
-function renderPlansRail() {
+export function renderPlansRail() {
     const list = document.getElementById("schedule-plans-list");
     const data = getCurrentData();
     if (!list || !data)
@@ -118,12 +118,14 @@ export function showScheduleAddPlanForm(selectedThreadId = "") {
     populateSchedulePlanThreadSelect(selectedThreadId);
     document.getElementById("schedule-plan-action-input")?.focus();
 }
-function bindScheduleRailInteractions(rail) {
+function bindScheduleRailInteractions(_rail) {
     if (scheduleBound)
         return;
     scheduleBound = true;
-    rail.addEventListener("click", (ev) => {
+    document.addEventListener("click", (ev) => {
         const target = ev.target;
+        if (!target.closest("#dashboard-schedule-rail"))
+            return;
         const tab = target.closest("[data-schedule-view]");
         if (tab?.closest(".schedule-tabs")) {
             const view = tab.dataset.scheduleView;
