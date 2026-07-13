@@ -60,7 +60,7 @@ const PAGE_HTML = `
   </div>
 </div>`;
 
-const READ_KEYS_STORAGE_KEY = "fivelanes_onebox_read_keys_v1";
+const READ_KEYS_STORAGE_KEY = "fivelanes_inbox_read_keys_v1";
 
 function loadReadKeys(): Set<string> {
   try {

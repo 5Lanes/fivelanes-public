@@ -37,7 +37,7 @@ const PAGE_HTML = `
     <aside class="schedule-panel meetings-panel" id="dashboard-schedule-rail" aria-label="Schedule"></aside>
   </div>
 </div>`;
-const READ_KEYS_STORAGE_KEY = "fivelanes_onebox_read_keys_v1";
+const READ_KEYS_STORAGE_KEY = "fivelanes_inbox_read_keys_v1";
 function loadReadKeys() {
     try {
         const raw = localStorage.getItem(READ_KEYS_STORAGE_KEY);
