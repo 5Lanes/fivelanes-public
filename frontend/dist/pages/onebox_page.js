@@ -1,4 +1,6 @@
 import { refreshDashboardScheduleRail } from "../dashboard_schedule_rail.js";
+import { DASHBOARD_MEETINGS_LOOKAHEAD_DAYS } from "../dashboard_panel.js";
+import { loadMeetings, meetingsTodayTomorrowHtml } from "../meetings_panel.js";
 import { formatDraftReplyMarkdown, messageDirectionClass, partitionThreadsBySnooze, threadEmailSubject, threadLabel, threadMessagesForDisplay, threadMessagesForReply, } from "../shared/thread_domain.js";
 import { applyLaneThreadMembership, applySavedThreadDraft, clearSummariesBundleCache, getBundleMutationGeneration, getCurrentData, getCurrentThreads, getLaneAreas, getLaneThreadIds, getLanes, loadLatestBundle, normalizeBundle, setBundleFromNetwork, } from "../shared/summaries_store.js";
 import { laneAreaColorVar, sourcePillHtml, threadChannelForThread } from "../shared/source_ui.js";
@@ -29,6 +31,7 @@ const PAGE_HTML = `
         </div>
         <button type="button" class="btn btn--default" id="onebox-pull-btn">Pull onebox</button>
       </header>
+      <div id="onebox-meetings-summary" class="onebox-meetings-summary" hidden></div>
       <div id="onebox-track-filter" class="onebox-track-filter"></div>
       <div id="onebox-area-tabs" class="onebox-area-tabs" role="tablist" aria-label="Lanes"></div>
       <div id="onebox-tabs" class="onebox-tabs" role="tablist" aria-label="Tracks"></div>
@@ -573,6 +576,28 @@ async function autoUnarchiveNewActivity(data) {
     await Promise.all(laneIds.map((laneId) => persistLaneArchive(laneId, false).catch((err) => console.error(err))));
     return true;
 }
+async function refreshOneboxMeetingsSummary() {
+    const el = document.getElementById("onebox-meetings-summary");
+    if (!el)
+        return;
+    try {
+        const result = await loadMeetings(DASHBOARD_MEETINGS_LOOKAHEAD_DAYS);
+        if ("error" in result) {
+            el.setAttribute("hidden", "");
+            return;
+        }
+        const html = meetingsTodayTomorrowHtml(result.meetings, result.timezone);
+        if (!html) {
+            el.setAttribute("hidden", "");
+            return;
+        }
+        el.innerHTML = html;
+        el.removeAttribute("hidden");
+    }
+    catch {
+        el.setAttribute("hidden", "");
+    }
+}
 async function refreshOneboxScheduleRail() {
     const data = getCurrentData();
     if (!data)
@@ -605,6 +630,12 @@ export async function renderOneboxPage() {
     }
     try {
         await refreshOneboxScheduleRail();
+    }
+    catch (err) {
+        console.error(err);
+    }
+    try {
+        await refreshOneboxMeetingsSummary();
     }
     catch (err) {
         console.error(err);

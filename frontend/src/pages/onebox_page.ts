@@ -1,4 +1,6 @@
 import { refreshDashboardScheduleRail } from "../dashboard_schedule_rail.js";
+import { DASHBOARD_MEETINGS_LOOKAHEAD_DAYS } from "../dashboard_panel.js";
+import { loadMeetings, meetingsTodayTomorrowHtml } from "../meetings_panel.js";
 import {
   formatDraftReplyMarkdown,
   messageDirectionClass,
@@ -53,6 +55,7 @@ const PAGE_HTML = `
         </div>
         <button type="button" class="btn btn--default" id="onebox-pull-btn">Pull onebox</button>
       </header>
+      <div id="onebox-meetings-summary" class="onebox-meetings-summary" hidden></div>
       <div id="onebox-track-filter" class="onebox-track-filter"></div>
       <div id="onebox-area-tabs" class="onebox-area-tabs" role="tablist" aria-label="Lanes"></div>
       <div id="onebox-tabs" class="onebox-tabs" role="tablist" aria-label="Tracks"></div>
@@ -642,6 +645,27 @@ async function autoUnarchiveNewActivity(data: LooseObj): Promise<boolean> {
   return true;
 }
 
+async function refreshOneboxMeetingsSummary(): Promise<void> {
+  const el = document.getElementById("onebox-meetings-summary");
+  if (!el) return;
+  try {
+    const result = await loadMeetings(DASHBOARD_MEETINGS_LOOKAHEAD_DAYS);
+    if ("error" in result) {
+      el.setAttribute("hidden", "");
+      return;
+    }
+    const html = meetingsTodayTomorrowHtml(result.meetings, result.timezone);
+    if (!html) {
+      el.setAttribute("hidden", "");
+      return;
+    }
+    el.innerHTML = html;
+    el.removeAttribute("hidden");
+  } catch {
+    el.setAttribute("hidden", "");
+  }
+}
+
 async function refreshOneboxScheduleRail(): Promise<void> {
   const data = getCurrentData();
   if (!data) return;
@@ -673,6 +697,11 @@ export async function renderOneboxPage(): Promise<void> {
   }
   try {
     await refreshOneboxScheduleRail();
+  } catch (err) {
+    console.error(err);
+  }
+  try {
+    await refreshOneboxMeetingsSummary();
   } catch (err) {
     console.error(err);
   }

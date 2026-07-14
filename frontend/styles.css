@@ -5514,6 +5514,49 @@ details.body-detail summary {
   font-size: 0.9rem;
 }
 
+.onebox-meetings-summary {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  padding: 0.65rem 0.85rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.onebox-meetings-summary[hidden] {
+  display: none;
+}
+
+.onebox-meetings-group-label {
+  font-family: system-ui, sans-serif;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.onebox-meetings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.onebox-meetings-item {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.onebox-meetings-time {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .onebox-track-filter {
   display: flex;
   justify-content: flex-end;

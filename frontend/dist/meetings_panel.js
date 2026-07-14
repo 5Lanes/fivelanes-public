@@ -2,7 +2,7 @@
  * Meetings view: deduplicated calendar events for the next N days.
  * Source: ``/api/meetings`` (timeline.db meetings table), else out/availability_calendar_latest.json.
  */
-import { dayHeadingLabelLong, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdLocal } from "./shared/time_ui.js";
+import { addDaysToYmd, dayHeadingLabelLong, formatTimeRangeInTz, isoToYmdInZone, nextNDaysFromYmd, todayYmdLocal } from "./shared/time_ui.js";
 import { ensureFeaturesLoaded, isFeatureEnabled } from "./shared/features.js";
 import { escapeHtml } from "./shared/utils.js";
 export const MEETINGS_LOOKAHEAD_DAYS = 14;
@@ -234,7 +234,7 @@ export async function loadMeetings(days) {
         };
     }
 }
-function meetingsByDate(meetings, tz) {
+export function meetingsByDate(meetings, tz) {
     const byDate = new Map();
     for (const m of meetings) {
         if (!m.start_iso)
@@ -296,6 +296,28 @@ function renderAgendaHtml(meetings, tz, days) {
         return `<p class="dash-avail-error">No meetings in the next ${days} days.</p>`;
     }
     return `<div class="dash-avail-agenda">${sections.join("")}</div>`;
+}
+/** Compact "today/tomorrow" strip — used at the top of the onebox view. Empty string if nothing on either day. */
+export function meetingsTodayTomorrowHtml(meetings, tz) {
+    const byDate = meetingsByDate(meetings, tz);
+    const today = todayYmdLocal();
+    const tomorrow = addDaysToYmd(today, 1) || today;
+    const todayRows = byDate.get(today) || [];
+    const tomorrowRows = byDate.get(tomorrow) || [];
+    if (!todayRows.length && !tomorrowRows.length)
+        return "";
+    const renderGroup = (label, rows) => {
+        if (!rows.length)
+            return "";
+        const items = rows
+            .map((m) => `<li class="onebox-meetings-item"><span class="onebox-meetings-time">${escapeHtml(formatTimeRangeInTz(m.start_iso, m.end_iso, tz))}</span><span class="onebox-meetings-title">${escapeHtml(m.summary)}</span></li>`)
+            .join("");
+        return `<div class="onebox-meetings-group">
+      <div class="onebox-meetings-group-label">${label} · ${rows.length} meeting${rows.length === 1 ? "" : "s"}</div>
+      <ul class="onebox-meetings-list">${items}</ul>
+    </div>`;
+    };
+    return `<div class="onebox-meetings-summary-inner">${renderGroup("Today", todayRows)}${renderGroup("Tomorrow", tomorrowRows)}</div>`;
 }
 function applyMeetingsPanel(metaEl, agendaEl, result) {
     const { meetings, timezone: tz, days, sourceNote } = result;
