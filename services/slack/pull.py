@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from datetime import datetime, timezone
@@ -15,6 +16,8 @@ from services.slack.config import INDEX_FILENAME, SLACK_DMS_DIR
 
 SLACK_API = "https://slack.com/api"
 DEFAULT_SLEEP_SEC = 1.2
+
+log = logging.getLogger(__name__)
 
 
 def _ts_to_iso(ts: str) -> str:
@@ -154,15 +157,23 @@ def pull_slack_dms(
         if not channel_id or not other_user_id:
             continue
 
-        if other_user_id not in user_cache:
-            info = client.user_info(other_user_id)
-            user_cache[other_user_id] = info.get("user") or {}
+        try:
+            if other_user_id not in user_cache:
+                info = client.user_info(other_user_id)
+                user_cache[other_user_id] = info.get("user") or {}
 
-        profile = user_cache[other_user_id]
-        label = _user_label(profile)
-        raw_messages = client.channel_history(
-            channel_id, limit=min(limit_per_channel, 200)
-        )
+            profile = user_cache[other_user_id]
+            label = _user_label(profile)
+            raw_messages = client.channel_history(
+                channel_id, limit=min(limit_per_channel, 200)
+            )
+        except Exception:
+            log.exception(
+                "Slack pull: skipping channel_id=%s (user_id=%s) after fetch failure",
+                channel_id,
+                other_user_id,
+            )
+            continue
         normalized = [
             row
             for row in (_normalize_message(m, my_user_id=my_user_id) for m in raw_messages)

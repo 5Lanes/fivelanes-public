@@ -2,11 +2,7 @@ import { bindGaiChatPanel, mountGaiChatDialog } from "./gai_chat_ui.js";
 import { bindPipelineControls } from "./pipeline_controls.js";
 import { bindSettingsPanel, mountSettingsDialog } from "./settings_panel.js";
 import { MEETINGS_LOOKAHEAD_DAYS, prefetchMeetings } from "./meetings_panel.js";
-import { applyDashboardLocationHash, bindDashboardInteractions, mountDashboardPage, renderDashboardPage, } from "./pages/dashboard_page.js";
-import { bindLanesInteractions, mountLanesPage, renderLanesPage } from "./pages/lanes_page.js";
-import { bindOneboxInteractions, mountOneboxPage, renderOneboxPage } from "./pages/onebox_page.js";
-import { mountMeetingsPage, renderMeetingsPage } from "./pages/meetings_page.js";
-import { bindPlansInteractions, mountPlansPage, renderPlansPage } from "./pages/plans_page.js";
+import { applyOneboxLocationHash, bindOneboxInteractions, mountOneboxPage, renderOneboxPage, } from "./pages/onebox_page.js";
 import { bindThreadsInteractions, mountThreadsPage, renderThreadsPage } from "./pages/threads_page.js";
 import { bindSourcesInteractions, mountSourcesPage, renderSourcesPage, } from "./pages/sources_page.js";
 import { bindLinkedinSetupInteractions, mountLinkedinSetupPage, renderLinkedinSetupPage, } from "./pages/linkedin_setup_page.js";
@@ -39,20 +35,25 @@ export function applyLegacyRouteRedirect(pathname, search = location.search) {
     }
     if (path === "/threads") {
         const thread = params.get("thread")?.trim();
-        location.replace(thread ? `/dashboard?thread=${encodeURIComponent(thread)}` : "/dashboard");
+        location.replace(thread ? `/onebox?thread=${encodeURIComponent(thread)}` : "/onebox");
         return true;
     }
     if (path === "/meetings") {
-        location.replace("/dashboard#schedule");
+        location.replace("/onebox#schedule");
         return true;
     }
     if (path === "/lanes") {
-        location.replace("/dashboard#lanes");
+        location.replace("/onebox#lanes");
         return true;
     }
     if (path === "/plans") {
         const thread = params.get("thread")?.trim();
-        location.replace(thread ? `/dashboard?thread=${encodeURIComponent(thread)}#schedule-plans` : "/dashboard#schedule-plans");
+        location.replace(thread ? `/onebox?thread=${encodeURIComponent(thread)}#schedule-plans` : "/onebox#schedule-plans");
+        return true;
+    }
+    if (path === "/dashboard") {
+        const thread = params.get("thread")?.trim();
+        location.replace(thread ? `/onebox?thread=${encodeURIComponent(thread)}` : "/onebox");
         return true;
     }
     const setupTarget = LEGACY_SETUP_REDIRECTS[path];
@@ -68,16 +69,8 @@ async function rerenderCurrentPage() {
 }
 export function routeFromPathname(pathname) {
     const path = pathname.replace(/\/+$/, "") || "/";
-    if (path === "/dashboard")
-        return "dashboard";
     if (path === "/sources")
         return "sources";
-    if (path === "/meetings")
-        return "meetings";
-    if (path === "/lanes")
-        return "lanes";
-    if (path === "/plans")
-        return "plans";
     if (path === "/onebox")
         return "onebox";
     if (path === "/texts-setup")
@@ -88,8 +81,6 @@ export function routeFromPathname(pathname) {
         return "linkedin-setup";
     if (path === "/meet-recordings-setup")
         return "meet-recordings-setup";
-    if (path === "/threads" || path === "/" || path === "/summaries.html")
-        return "threads";
     return "onebox";
 }
 function setActiveNav(route) {
@@ -97,7 +88,7 @@ function setActiveNav(route) {
         link.classList.toggle("active", link.dataset.route === route);
     });
     document.getElementById("sources-nav-btn")?.toggleAttribute("hidden", route === "sources");
-    document.getElementById("dashboard-return-btn")?.toggleAttribute("hidden", route !== "sources");
+    document.getElementById("onebox-return-btn")?.toggleAttribute("hidden", route !== "sources");
 }
 function showBootstrapError(message) {
     pageRoot.innerHTML = `<div class="view-empty"><p class="empty-state">${escapeHtml(message)}</p></div>`;
@@ -117,35 +108,10 @@ async function renderPage(route) {
             '<div class="view-empty"><p class="empty-state">This feature requires Fivelanes Premium.</p></div>';
         return;
     }
-    if (route === "dashboard") {
-        mountDashboardPage(pageRoot);
-        bindDashboardInteractions();
-        bindLanesInteractions();
-        bindThreadsInteractions();
-        await renderDashboardPage();
-        return;
-    }
     if (route === "sources") {
         mountSourcesPage(pageRoot);
         bindSourcesInteractions();
         await renderSourcesPage();
-        return;
-    }
-    if (route === "meetings") {
-        mountMeetingsPage(pageRoot);
-        await renderMeetingsPage(runMetaEl);
-        return;
-    }
-    if (route === "lanes") {
-        mountLanesPage(pageRoot);
-        bindLanesInteractions();
-        await renderLanesPage();
-        return;
-    }
-    if (route === "plans") {
-        mountPlansPage(pageRoot);
-        bindPlansInteractions();
-        await renderPlansPage();
         return;
     }
     if (route === "onebox") {
@@ -193,7 +159,7 @@ function applyConfig(config) {
 }
 async function bootstrap() {
     if (location.protocol === "file:") {
-        showBootstrapError("This view loads data from the server; open it via the dashboard (not as a file:// URL).");
+        showBootstrapError("This view loads data from the server; open it via the app server (not as a file:// URL).");
         return;
     }
     if (applyLegacyRouteRedirect(location.pathname, location.search))
@@ -240,8 +206,8 @@ async function bootstrap() {
         refreshPlanNotifications();
         void refreshPipelineRunMeta(runMetaEl);
         window.addEventListener("hashchange", () => {
-            if (routeFromPathname(location.pathname) === "dashboard") {
-                void applyDashboardLocationHash();
+            if (routeFromPathname(location.pathname) === "onebox") {
+                void applyOneboxLocationHash();
             }
         });
     }

@@ -28,15 +28,6 @@ export function pendingMessageCountForThread(thread: ThreadView, data: LooseObj 
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
-export function newSinceRefreshCountForThread(thread: ThreadView, data: LooseObj | null): number {
-  if (!data || !data.new_since_refresh_counts || typeof data.new_since_refresh_counts !== "object") {
-    return 0;
-  }
-  const counts = data.new_since_refresh_counts as LooseObj;
-  const n = Number(counts[thread.id] || 0);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
-}
-
 export function pendingMessagePillHtml(count: number): string {
   if (count <= 0) return "";
   const label = count === 1 ? "1 pending" : `${count} pending`;

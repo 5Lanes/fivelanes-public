@@ -33,7 +33,7 @@ function planListHtml(plans: PlanView[], heading: string): string {
     .map((plan) => {
       const thread = escapeHtml(labelForPlanThread(plan.inbox_thread_id));
       const action = escapeHtml(plan.action);
-      return `<li><a href="/plans" class="plan-notification-link">${action}</a> <span class="plan-notification-thread">${thread}</span></li>`;
+      return `<li><a href="/onebox#schedule-plans" class="plan-notification-link">${action}</a> <span class="plan-notification-thread">${thread}</span></li>`;
     })
     .join("");
   return `<div class="plan-notifications-group">
@@ -43,9 +43,9 @@ function planListHtml(plans: PlanView[], heading: string): string {
 }
 
 function renderBanner(overdue: PlanView[], dueToday: PlanView[]): void {
-  const onDashboard = location.pathname.replace(/\/+$/, "") === "/dashboard";
+  const onOnebox = location.pathname.replace(/\/+$/, "") === "/onebox";
   const existing = document.getElementById(BANNER_ID);
-  if (onDashboard) {
+  if (onOnebox) {
     existing?.remove();
     return;
   }
@@ -94,7 +94,7 @@ function renderBanner(overdue: PlanView[], dueToday: PlanView[]): void {
     <p class="plan-notifications-title">${escapeHtml(bannerSummary(overdue, dueToday))}</p>
     <div class="plan-notifications-actions">
       ${enableBtn}
-      <a href="/dashboard#schedule-plans" class="plan-notifications-view-link">View plans</a>
+      <a href="/onebox#schedule-plans" class="plan-notifications-view-link">View plans</a>
       <button type="button" class="plan-notifications-dismiss" aria-label="Dismiss">×</button>
     </div>
   </div>

@@ -797,10 +797,10 @@ export function bindLanesInteractions() {
             if (!threadId)
                 return;
             void (async () => {
-                const { openDashboardAddPlanForThread } = await import("./dashboard_page.js");
+                const { openDashboardAddPlanForThread } = await import("../dashboard_schedule_rail.js");
                 await openDashboardAddPlanForThread(threadId);
                 const url = new URL(location.href);
-                url.pathname = "/dashboard";
+                url.pathname = "/onebox";
                 url.searchParams.set("thread", threadId);
                 url.hash = "schedule-plans";
                 history.pushState(null, "", `${url.pathname}${url.search}${url.hash}`);

@@ -6,7 +6,7 @@ const PAGE_HTML = `
     <h2>LinkedIn threads</h2>
     <p class="texts-setup-lead">
       Pull fresh messages for selected conversations, then choose which threads to track on the
-      <a href="/dashboard">dashboard</a>.
+      <a href="/onebox">onebox</a>.
     </p>
   </header>
 

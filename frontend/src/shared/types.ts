@@ -6,11 +6,6 @@ export type ThreadView = {
 };
 
 export type AppRoute =
-  | "dashboard"
-  | "threads"
-  | "meetings"
-  | "lanes"
-  | "plans"
   | "onebox"
   | "sources"
   | "texts-setup"

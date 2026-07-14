@@ -4760,70 +4760,6 @@ details.body-detail summary {
 }
 .thread-segmented button + button { border-left: 1px solid var(--border); }
 .thread-segmented button:disabled { opacity: 0.45; cursor: default; }
-.dashboard-status-banner-wrap { margin-bottom: 1rem; }
-.dashboard-status-banner {
-  padding: 0.85rem 1rem;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: var(--surface);
-}
-.dashboard-status-banner--due-today {
-  border-color: color-mix(in srgb, var(--warn) 35%, var(--border));
-  background: color-mix(in srgb, var(--warn) 8%, var(--surface));
-}
-.dashboard-status-banner-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-.dashboard-status-banner-summary {
-  margin: 0;
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: var(--text);
-  line-height: 1.45;
-}
-.dashboard-status-banner-sep {
-  margin: 0 0.35rem;
-  color: var(--muted);
-  font-weight: 400;
-}
-.dashboard-status-banner-messages {
-  font-weight: 400;
-}
-.dashboard-status-banner-messages strong {
-  font-weight: 600;
-  color: var(--text);
-}
-.dashboard-status-banner-actions { display: flex; gap: 0.35rem; flex-shrink: 0; }
-.dashboard-status-banner-btn,
-.dashboard-status-banner-dismiss {
-  font: inherit;
-  font-size: 0.78rem;
-  padding: 0.3rem 0.55rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface-raised);
-  color: var(--text);
-  cursor: pointer;
-}
-.dashboard-status-banner-dismiss { background: transparent; color: var(--muted); }
-.dashboard-status-banner-group { margin-top: 0.65rem; }
-.dashboard-status-banner-subhead {
-  margin: 0 0 0.35rem;
-  font-size: 0.68rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
-}
-.dashboard-status-banner-list { margin: 0; padding-left: 1.1rem; font-size: 0.84rem; }
-.dashboard-status-banner-link { color: var(--accent); text-decoration: none; }
-.dashboard-status-banner-link:hover { text-decoration: underline; }
-.dashboard-status-banner-context { color: var(--muted); font-size: 0.78rem; }
-
 .dashboard-briefing-wrap { margin-bottom: 1rem; }
 .dashboard-briefing {
   padding: 0.85rem 1rem;
@@ -5499,8 +5435,15 @@ details.body-detail summary {
   gap: 0.75rem;
 }
 
-.onebox-view-toggle { margin-left: auto; }
-.onebox-header #onebox-pull-btn { margin-left: 0.75rem; }
+.onebox-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
 .dashboard-threads-embed[hidden] { display: none; }
 
 .onebox-header h2 {
@@ -5560,7 +5503,6 @@ details.body-detail summary {
 .onebox-track-filter {
   display: flex;
   justify-content: flex-end;
-  margin-bottom: 0.5rem;
 }
 
 .onebox-track-filter:empty {
@@ -5795,6 +5737,76 @@ details.body-detail summary {
   grid-template-areas: "main schedule";
   gap: 1.25rem;
   align-items: start;
+}
+
+.onebox-grid.onebox-grid--single {
+  grid-template-columns: 1fr;
+  grid-template-areas: "main";
+}
+
+.onebox-dashboard-tab {
+  font-weight: 600;
+}
+
+.dashboard-panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.dashboard-unread-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dashboard-unread-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: 10px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dashboard-unread-row:hover {
+  border-color: var(--accent);
+}
+
+.dashboard-plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dashboard-plan-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dashboard-plan-row:hover {
+  border-color: var(--accent);
+}
+
+.dashboard-plan-row:disabled {
+  cursor: default;
+  opacity: 0.7;
 }
 
 .onebox-main {

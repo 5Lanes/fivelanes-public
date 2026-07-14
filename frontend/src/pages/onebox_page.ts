@@ -1,4 +1,8 @@
-import { refreshDashboardScheduleRail } from "../dashboard_schedule_rail.js";
+import {
+  openDashboardAddPlanForThread,
+  refreshDashboardScheduleRail,
+  showScheduleTab,
+} from "../dashboard_schedule_rail.js";
 import { DASHBOARD_MEETINGS_LOOKAHEAD_DAYS } from "../dashboard_panel.js";
 import { loadMeetings, meetingsTodayTomorrowHtml } from "../meetings_panel.js";
 import {
@@ -11,6 +15,13 @@ import {
   threadMessagesForReply,
 } from "../shared/thread_domain.js";
 import {
+  formatPlanByWhen,
+  planDueBadgeHtml,
+  planDueStatus,
+  planDueStatusClass,
+  sortPlansByDueDate,
+} from "../shared/plan_helpers.js";
+import {
   applyLaneThreadMembership,
   applySavedThreadDraft,
   clearSummariesBundleCache,
@@ -20,14 +31,17 @@ import {
   getLaneAreas,
   getLaneThreadIds,
   getLanes,
+  getThreadPlans,
   loadLatestBundle,
   normalizeBundle,
   setBundleFromNetwork,
+  threadLaneIds,
+  threadTrackPath,
 } from "../shared/summaries_store.js";
 import { laneAreaColorVar, sourcePillHtml, threadChannelForThread } from "../shared/source_ui.js";
 import { isLikelyOwnEmail } from "../shared/owner_config.js";
 import { escapeHtml, formatDate, formatRecipients, formatRelativeShort, str } from "../shared/utils.js";
-import type { LaneView, LooseObj, ThreadView } from "../shared/types.js";
+import type { LaneView, LooseObj, PlanView, ThreadView } from "../shared/types.js";
 import { renderDashboardThreadsInline } from "./threads_page.js";
 import { setUnreadBadgeCount } from "../shared/native_bridge.js";
 
@@ -49,14 +63,14 @@ const PAGE_HTML = `
     <div class="onebox-main">
       <header class="onebox-header">
         <h2>Onebox</h2>
+      </header>
+      <div class="onebox-controls-row">
         <div class="onebox-view-toggle thread-segmented" role="group" aria-label="Onebox view">
           <button type="button" class="nav-mode-btn active" id="onebox-view-mode-onebox" data-onebox-view-mode="onebox">Onebox</button>
           <button type="button" class="nav-mode-btn" id="onebox-view-mode-threads" data-onebox-view-mode="threads">All threads</button>
         </div>
-        <button type="button" class="btn btn--default" id="onebox-pull-btn">Pull onebox</button>
-      </header>
-      <div id="onebox-meetings-summary" class="onebox-meetings-summary" hidden></div>
-      <div id="onebox-track-filter" class="onebox-track-filter"></div>
+        <div id="onebox-track-filter" class="onebox-track-filter"></div>
+      </div>
       <div id="onebox-area-tabs" class="onebox-area-tabs" role="tablist" aria-label="Lanes"></div>
       <div id="onebox-tabs" class="onebox-tabs" role="tablist" aria-label="Tracks"></div>
       <div id="onebox-track-toolbar" class="onebox-track-toolbar"></div>
@@ -104,7 +118,7 @@ function setKeysRead(keys: string[], read: boolean): void {
   void persistReadStateChange(keys, read);
 }
 
-let activeAreaId: number | null = null;
+let activeAreaId: number | "dashboard" | null = "dashboard";
 let activeTrackId: number | null = null;
 let oneboxViewMode: "onebox" | "threads" = "onebox";
 let showArchivedTracks = false;
@@ -407,25 +421,31 @@ function renderOneboxTrackFilter(): void {
   </div>`;
 }
 
-function renderOneboxAreaTabs(groups: AreaGroup[]): void {
+function renderOneboxAreaTabs(groups: AreaGroup[], allTabs: TrackTab[]): void {
   const tabsEl = document.getElementById("onebox-area-tabs");
   if (!tabsEl) return;
-  if (groups.length <= 1) {
-    tabsEl.innerHTML = "";
-    return;
-  }
-  tabsEl.innerHTML = groups
-    .map((group) => {
-      const active = group.id === activeAreaId;
-      const unread = group.tabs.reduce((sum, tab) => sum + unreadCount(tab), 0);
-      const color = laneAreaColorVar(group.colorIndex);
-      return `<button type="button" class="lane-tab onebox-area-tab${active ? " is-active" : ""}" role="tab" aria-selected="${active ? "true" : "false"}" id="onebox-area-tab-${group.id}" data-area-id="${group.id}">
+  const dashboardActive = activeAreaId === "dashboard";
+  const dashboardUnread = allTabs.reduce((sum, tab) => sum + unreadCount(tab), 0);
+  const dashboardTabHtml = `<button type="button" class="lane-tab onebox-area-tab onebox-dashboard-tab${dashboardActive ? " is-active" : ""}" role="tab" aria-selected="${dashboardActive ? "true" : "false"}" id="onebox-area-tab-dashboard" data-area-id="dashboard">
+        <span class="lane-tab-label">Dashboard</span>
+        ${dashboardUnread ? `<span class="lane-tab-count">${dashboardUnread}</span>` : ""}
+      </button>`;
+  const groupTabsHtml =
+    groups.length > 1
+      ? groups
+          .map((group) => {
+            const active = group.id === activeAreaId;
+            const unread = group.tabs.reduce((sum, tab) => sum + unreadCount(tab), 0);
+            const color = laneAreaColorVar(group.colorIndex);
+            return `<button type="button" class="lane-tab onebox-area-tab${active ? " is-active" : ""}" role="tab" aria-selected="${active ? "true" : "false"}" id="onebox-area-tab-${group.id}" data-area-id="${group.id}">
         <span class="lane-tab-color" style="background: ${color};"></span>
         <span class="lane-tab-label">${escapeHtml(group.name)}</span>
         ${unread ? `<span class="lane-tab-count">${unread}</span>` : ""}
       </button>`;
-    })
-    .join("");
+          })
+          .join("")
+      : "";
+  tabsEl.innerHTML = dashboardTabHtml + groupTabsHtml;
 }
 
 function renderOneboxTrackTabs(tabs: TrackTab[]): void {
@@ -530,6 +550,101 @@ function renderOneboxList(tabs: TrackTab[]): void {
   listEl.innerHTML = upcomingHtml + timelineHtml;
 }
 
+type UnreadEntry = { item: MessageItem; laneId: number; laneName: string; areaId: number };
+
+const DASHBOARD_UNREAD_LIMIT = 20;
+
+function dashboardUnreadEntries(allTabs: TrackTab[]): UnreadEntry[] {
+  const out: UnreadEntry[] = [];
+  for (const tab of allTabs) {
+    for (const item of tab.items) {
+      if (readKeys.has(messageKey(item))) continue;
+      out.push({
+        item,
+        laneId: tab.lane.id,
+        laneName: tab.lane.name,
+        areaId: tab.lane.area_id != null ? tab.lane.area_id : 0,
+      });
+    }
+  }
+  return out.sort((a, b) => b.item.datetime.localeCompare(a.item.datetime));
+}
+
+function dashboardUnreadRowHtml(entry: UnreadEntry): string {
+  const { item, laneId, laneName, areaId } = entry;
+  const subject = messageSubject(item);
+  const sender = messageSender(item.row);
+  const relative = isUpcomingCalendarItem(item)
+    ? formatUpcomingRelative(item.datetime)
+    : formatRelativeShort(item.datetime);
+  return `<button type="button" class="dashboard-unread-row" data-track-id="${laneId}" data-area-id="${areaId}">
+    <span class="onebox-row-top">
+      <span class="onebox-row-unread-dot" aria-hidden="true"></span>
+      <span class="lane-tab-label">${escapeHtml(laneName)}</span>
+      ${relative ? `<span class="onebox-row-time">${escapeHtml(relative)}</span>` : ""}
+    </span>
+    <span class="onebox-row-subject">${escapeHtml(subject)}</span>
+    ${sender ? `<span class="onebox-row-participants">From ${escapeHtml(sender)}</span>` : ""}
+  </button>`;
+}
+
+function dashboardPlanRowHtml(data: LooseObj, plan: PlanView): string {
+  const laneId = threadLaneIds(data, plan.inbox_thread_id)[0] ?? 0;
+  const lane = laneId ? getLanes(data).find((l) => l.id === laneId) : undefined;
+  const areaId = lane?.area_id != null ? lane.area_id : 0;
+  const dueStatus = planDueStatus(plan.by_when);
+  const badge = planDueBadgeHtml(dueStatus);
+  const when = formatPlanByWhen(plan.by_when);
+  const trackPath = threadTrackPath(data, plan.inbox_thread_id);
+  const thread = getCurrentThreads().find((t) => t.id === plan.inbox_thread_id);
+  const pathLabel = trackPath || (thread ? threadLabel(thread) : plan.inbox_thread_id);
+  return `<button type="button" class="dashboard-plan-row ${planDueStatusClass(dueStatus)}"${laneId ? ` data-track-id="${laneId}" data-area-id="${areaId}"` : " disabled"}>
+    <span class="onebox-row-top">
+      ${badge}
+      <span class="onebox-row-subject">${escapeHtml(plan.action)}</span>
+      ${when ? `<span class="onebox-row-time">${escapeHtml(when)}</span>` : ""}
+    </span>
+    <span class="onebox-row-participants">${escapeHtml(pathLabel)}${plan.step_type ? ` · ${escapeHtml(plan.step_type)}` : ""}</span>
+  </button>`;
+}
+
+function renderDashboardPanel(allTabs: TrackTab[]): void {
+  const listEl = document.getElementById("onebox-list");
+  const data = getCurrentData();
+  if (!listEl || !data) return;
+  listEl.removeAttribute("aria-labelledby");
+
+  const unread = dashboardUnreadEntries(allTabs).slice(0, DASHBOARD_UNREAD_LIMIT);
+  const unreadSectionHtml = unread.length
+    ? `<section class="dashboard-panel-section" aria-labelledby="dashboard-unread-heading">
+    <h3 id="dashboard-unread-heading" class="section-title">Unread</h3>
+    <div class="dashboard-unread-list">${unread.map(dashboardUnreadRowHtml).join("")}</div>
+  </section>`
+    : "";
+
+  const plans = sortPlansByDueDate(getThreadPlans(data), (p) => p.by_when, (p) => p.action);
+  const plansHtml = plans.length
+    ? `<div class="dashboard-plan-list">${plans.map((plan) => dashboardPlanRowHtml(data, plan)).join("")}</div>`
+    : `<p class="onebox-empty">No action plans yet.</p>`;
+  const plansSectionHtml = `<section class="dashboard-panel-section" aria-labelledby="dashboard-plans-heading">
+    <h3 id="dashboard-plans-heading" class="section-title">Plans</h3>
+    ${plansHtml}
+  </section>`;
+
+  listEl.innerHTML = `<div id="onebox-meetings-summary" class="onebox-meetings-summary" hidden></div>
+  ${unreadSectionHtml}
+  ${plansSectionHtml}`;
+  void refreshOneboxMeetingsSummary();
+}
+
+/** Calendar (and plans) now only render inside the Dashboard tab, so anything that used to
+ * scroll to the always-visible schedule rail must first switch onto that tab. */
+function switchToDashboardTab(): void {
+  if (activeAreaId === "dashboard") return;
+  activeAreaId = "dashboard";
+  if (oneboxViewMode === "onebox") renderOnebox();
+}
+
 function renderOneboxViewToggle(): void {
   document.getElementById("onebox-view-mode-onebox")?.classList.toggle("active", oneboxViewMode === "onebox");
   document.getElementById("onebox-view-mode-threads")?.classList.toggle("active", oneboxViewMode === "threads");
@@ -563,27 +678,39 @@ function renderOnebox(): void {
 
   const allTabs = trackTabs(data);
   setUnreadBadgeCount(allTabs.reduce((sum, tab) => sum + unreadCount(tab), 0));
+
+  const usesAreas = allTabs.length > 0 && usesAreaGrouping(data);
+  const groups = usesAreas ? areaGroups(data, allTabs) : [];
+  renderOneboxAreaTabs(groups, allTabs);
+
+  document.getElementById("dashboard-schedule-rail")?.toggleAttribute("hidden", activeAreaId !== "dashboard");
+  document
+    .querySelector(".onebox-grid")
+    ?.classList.toggle("onebox-grid--single", activeAreaId !== "dashboard");
+
+  if (activeAreaId === "dashboard") {
+    trackTabsEl.innerHTML = "";
+    toolbarEl.innerHTML = "";
+    renderDashboardPanel(allTabs);
+    return;
+  }
+
   if (!allTabs.length) {
-    areaTabsEl.innerHTML = "";
     trackTabsEl.innerHTML = "";
     toolbarEl.innerHTML = "";
     listEl.innerHTML = `<p class="onebox-empty">${showArchivedTracks ? "No archived tracks." : "No tracks with messages yet."}</p>`;
-    activeAreaId = null;
     activeTrackId = null;
     return;
   }
 
   let tracksInScope = allTabs;
-  if (usesAreaGrouping(data)) {
-    const groups = areaGroups(data, allTabs);
+  if (usesAreas) {
     const groupIds = new Set(groups.map((g) => g.id));
     if (activeAreaId == null || !groupIds.has(activeAreaId)) {
       activeAreaId = groups[0].id;
     }
-    renderOneboxAreaTabs(groups);
     tracksInScope = groups.find((g) => g.id === activeAreaId)?.tabs ?? [];
   } else {
-    areaTabsEl.innerHTML = "";
     activeAreaId = null;
   }
 
@@ -700,10 +827,37 @@ export async function renderOneboxPage(): Promise<void> {
   } catch (err) {
     console.error(err);
   }
-  try {
-    await refreshOneboxMeetingsSummary();
-  } catch (err) {
-    console.error(err);
+  focusOneboxThreadFromQuery();
+  await applyOneboxLocationHash();
+}
+
+function focusOneboxThreadFromQuery(): void {
+  const params = new URLSearchParams(location.search);
+  const threadId = params.get("thread")?.trim();
+  if (!threadId) return;
+  const el = document.getElementById(`thread-${threadId}`);
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+  el.classList.add("is-focused");
+  setTimeout(() => el.classList.remove("is-focused"), 2000);
+}
+
+export async function applyOneboxLocationHash(): Promise<void> {
+  const hash = location.hash.replace(/^#/, "").trim();
+  if (!hash) return;
+  if (hash === "schedule" || hash === "schedule-calendar") {
+    switchToDashboardTab();
+    showScheduleTab("calendar");
+    document.getElementById("dashboard-schedule-rail")?.scrollIntoView({ behavior: "smooth" });
+    return;
+  }
+  if (hash === "schedule-plans") {
+    switchToDashboardTab();
+    await openDashboardAddPlanForThread(new URLSearchParams(location.search).get("thread")?.trim() ?? "");
+    return;
+  }
+  if (hash === "lanes") {
+    document.getElementById("onebox-area-tabs")?.scrollIntoView({ behavior: "smooth" });
   }
 }
 
@@ -732,57 +886,11 @@ async function requestEmailReplyDraft(
   return data;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function fetchOneboxPullStatus(): Promise<LooseObj> {
-  const res = await fetch("/api/pipeline/inbox-pull-status", { credentials: "same-origin" });
-  return (await res.json().catch(() => ({}))) as LooseObj;
-}
-
-async function runOneboxPull(): Promise<void> {
-  const btn = document.getElementById("onebox-pull-btn") as HTMLButtonElement | null;
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "Pulling…";
-  }
-  try {
-    const res = await fetch("/api/pipeline/run-inbox-pull", { method: "POST" });
-    const body = (await res.json().catch(() => ({}))) as LooseObj;
-    if (!res.ok && res.status !== 409) {
-      throw new Error(str(body.error) || `Pull failed (${res.status})`);
-    }
-    for (let i = 0; i < 120; i++) {
-      await sleep(2000);
-      const status = await fetchOneboxPullStatus();
-      if (!status.running) {
-        if (status.error) throw new Error(str(status.error));
-        break;
-      }
-    }
-    await reloadOneboxFromServer();
-  } catch (err) {
-    console.error(err);
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "Pull onebox";
-    }
-  }
-}
-
 export function bindOneboxInteractions(): void {
   if (interactionsBound) return;
   interactionsBound = true;
 
   document.addEventListener("click", (ev) => {
-    const pullBtn = (ev.target as HTMLElement | null)?.closest("#onebox-pull-btn") as HTMLButtonElement | null;
-    if (pullBtn && !pullBtn.disabled) {
-      void runOneboxPull();
-      return;
-    }
-
     const target = ev.target as HTMLElement | null;
     if (!target || !target.closest(".view-onebox")) return;
 
@@ -797,7 +905,14 @@ export function bindOneboxInteractions(): void {
 
     const areaTab = target.closest(".onebox-area-tab") as HTMLButtonElement | null;
     if (areaTab) {
-      const areaId = Number(areaTab.dataset.areaId);
+      const rawAreaId = areaTab.dataset.areaId;
+      if (rawAreaId === "dashboard") {
+        if (activeAreaId === "dashboard") return;
+        activeAreaId = "dashboard";
+        renderOnebox();
+        return;
+      }
+      const areaId = Number(rawAreaId);
       if (Number.isNaN(areaId) || areaId === activeAreaId) return;
       activeAreaId = areaId;
       activeTrackId = null;
@@ -814,13 +929,24 @@ export function bindOneboxInteractions(): void {
       return;
     }
 
+    const unreadRow = target.closest(".dashboard-unread-row, .dashboard-plan-row") as HTMLButtonElement | null;
+    if (unreadRow) {
+      const laneId = Number(unreadRow.dataset.trackId) || 0;
+      if (!laneId) return;
+      const rawAreaId = unreadRow.dataset.areaId;
+      activeAreaId = rawAreaId ? Number(rawAreaId) : null;
+      activeTrackId = laneId;
+      renderOnebox();
+      return;
+    }
+
     const addPlanBtn = target.closest("button.create-plan-btn") as HTMLButtonElement | null;
     if (addPlanBtn) {
       const threadId = str(addPlanBtn.dataset.addPlanThreadId);
       const suggestion = str(addPlanBtn.dataset.planSuggestion);
       if (!threadId) return;
       void (async () => {
-        const { openDashboardAddPlanForThread } = await import("./dashboard_page.js");
+        switchToDashboardTab();
         await openDashboardAddPlanForThread(threadId);
         const actionInput = document.getElementById(
           "schedule-plan-action-input",

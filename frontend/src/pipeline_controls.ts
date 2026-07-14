@@ -32,15 +32,15 @@ function setRunButtonRunning(running: boolean): void {
   runBtn.disabled = running;
   const label = runBtn.querySelector(".run-fivelanes-btn-label");
   if (label) {
-    label.textContent = running ? "Running…" : "Run fivelanes";
+    label.textContent = running ? "Pulling…" : "Pull onebox";
   } else {
-    runBtn.textContent = running ? "Running…" : "Run fivelanes";
+    runBtn.textContent = running ? "Pulling…" : "Pull onebox";
   }
   runBtn.setAttribute("aria-busy", running ? "true" : "false");
 }
 
 async function fetchPipelineStatus(): Promise<LooseObj> {
-  const res = await fetch("/api/pipeline/status", { credentials: "same-origin" });
+  const res = await fetch("/api/pipeline/inbox-pull-status", { credentials: "same-origin" });
   if (!res.ok) throw new Error(`Pipeline status failed (${res.status})`);
   return (await res.json()) as LooseObj;
 }
@@ -75,11 +75,11 @@ async function pollPipelineStatus(): Promise<void> {
       if (status.stalled) {
         const idleMin = Math.round(Number(status.idle_sec ?? 0) / 60);
         setStatus(
-          `Fivelanes appears stuck${detailBit} — no progress for ${idleMin}m.`,
+          `Inbox pull appears stuck${detailBit} — no progress for ${idleMin}m.`,
           "warn",
         );
       } else {
-        setStatus(`Fivelanes is running…${detailBit}`);
+        setStatus(`Pulling inbox…${detailBit}`);
       }
       return;
     }
@@ -87,17 +87,17 @@ async function pollPipelineStatus(): Promise<void> {
     stopPolling();
     const err = str(status.error);
     if (err) {
-      setStatus(`Run failed: ${err}`, "error");
+      setStatus(`Pull failed: ${err}`, "error");
       return;
     }
 
-    setStatus("Run finished. Refreshing data…");
+    setStatus("Pull finished. Refreshing data…");
     try {
       await refreshAfterRun();
-      setStatus("Run finished.");
+      setStatus("Pull finished.");
     } catch (refreshErr) {
       const msg = refreshErr instanceof Error ? refreshErr.message : String(refreshErr);
-      setStatus(`Run finished, but refresh failed: ${msg}`, "error");
+      setStatus(`Pull finished, but refresh failed: ${msg}`, "error");
     }
   } catch (err) {
     stopPolling();
@@ -119,9 +119,9 @@ function startPolling(): void {
 async function startPipelineRun(): Promise<void> {
   setRunButtonRunning(true);
   setSettingsControlsLocked(true);
-  setStatus("Starting fivelanes…");
+  setStatus("Starting inbox pull…");
 
-  const res = await fetch("/api/pipeline/run", {
+  const res = await fetch("/api/pipeline/run-inbox-pull", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "same-origin",
@@ -130,14 +130,14 @@ async function startPipelineRun(): Promise<void> {
   const data = (await res.json().catch(() => ({}))) as LooseObj;
 
   if (res.status === 409) {
-    setStatus("A run is already in progress.");
+    setStatus("A pull is already in progress.");
     startPolling();
     return;
   }
   if (!res.ok) {
     setRunButtonRunning(false);
     setSettingsControlsLocked(false);
-    setStatus(str(data.error) || `Run failed (${res.status})`, "error");
+    setStatus(str(data.error) || `Pull failed (${res.status})`, "error");
     return;
   }
 

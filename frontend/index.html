@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#101216" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="description" content="Fivelanes onebox dashboard — threads, meetings, lanes, and plans" />
+  <meta name="description" content="Fivelanes onebox — threads, meetings, lanes, and plans" />
   <title>Fivelanes</title>
   <link rel="icon" href="/square5.jpg" type="image/jpeg" />
   <link rel="apple-touch-icon" href="/square5.jpg" />
@@ -25,17 +25,8 @@
       <p class="pipeline-status" id="pipeline-status" hidden></p>
     </div>
     <div class="app-top-bar-actions">
-      <a href="/onebox" class="header-icon-btn app-nav-link" data-route="dashboard-return" id="dashboard-return-btn" hidden>
+      <a href="/onebox" class="header-icon-btn app-nav-link" data-route="onebox-return" id="onebox-return-btn" hidden>
         ← Onebox
-      </a>
-      <a href="/dashboard" class="header-icon-btn app-nav-link" data-route="dashboard" id="dashboard-nav-btn">
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M4 4h7v7H4V4Z" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/>
-          <path d="M13 4h7v7h-7V4Z" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/>
-          <path d="M4 13h7v7H4v-7Z" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/>
-          <path d="M13 13h7v7h-7v-7Z" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/>
-        </svg>
-        Dashboard
       </a>
       <a href="/sources" class="header-icon-btn app-nav-link" data-route="sources" id="sources-nav-btn">
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -74,8 +65,8 @@
         </svg>
         Settings
       </button>
-      <button type="button" id="run-fivelanes-btn" class="run-fivelanes-btn" aria-label="Run fivelanes">
-        <span class="run-fivelanes-btn-label">Run fivelanes</span>
+      <button type="button" id="run-fivelanes-btn" class="run-fivelanes-btn" aria-label="Pull onebox">
+        <span class="run-fivelanes-btn-label">Pull onebox</span>
       </button>
     </div>
   </header>

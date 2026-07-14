@@ -689,7 +689,13 @@ def expand_thread(
     if not inbox_tid:
         return [], None
 
-    gmail_inbox_tid = gmail_inbox_thread_id_for_tracking(row) or inbox_tid
+    gmail_inbox_tid = gmail_inbox_thread_id_for_tracking(row)
+    if not gmail_inbox_tid and not inner_rfc:
+        # Non-email-sourced tracked item (calendar/Slack/text/LinkedIn, etc.) with no linked
+        # Gmail message — there's no Gmail thread to expand; its content comes from its own
+        # channel's pull/summarize step instead.
+        log.info("Thread expand skip (no Gmail thread): inbox_thread_id=%s", inbox_tid)
+        return [], None
 
     effective_inner = inner_rfc
     if not effective_inner and route == InboxRoute.CC_BCC and inbox_lower:

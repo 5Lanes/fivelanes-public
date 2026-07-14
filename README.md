@@ -76,7 +76,7 @@ Fivelanes does not sync texts from a phone automatically. Export conversations e
 
 ### Slack DMs
 
-**Premium.** Set `SLACK_USER_TOKEN` in your data `.env`, then open **Slack setup** (`/slack-setup`) to pull DMs into `$FIVELANES_DATA_ROOT/slack-dms/` and choose which conversations to track. Tracked threads use `inbox_thread_id` `slack:<conversation_id>` and appear on Threads. Summaries run via `/api/slack/summarize` or `fivelanes.main`.
+**Premium.** Set `SLACK_USER_TOKEN` in your data `.env`, then open **Slack setup** (`/slack-setup`) to pull DMs into `$FIVELANES_DATA_ROOT/slack-dms/` and choose which conversations to track. Tracked threads use `inbox_thread_id` `slack:<conversation_id>` and appear on Threads. Once a conversation is tracked, the background scheduler also pulls fresh DMs and re-summarizes it on every scheduled inbox pull; you can still trigger it manually via `/api/slack/pull` + `/api/slack/summarize` or `fivelanes.main`.
 
 ### LinkedIn DMs
 

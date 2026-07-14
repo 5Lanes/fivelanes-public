@@ -6,7 +6,7 @@ const PAGE_HTML = `
     <h2>Calendar events</h2>
     <p class="texts-setup-lead">
       Choose which calendar events to track as threads. Tracked events appear on the
-      <a href="/dashboard">dashboard</a> as their own thread — tracking an event here never
+      <a href="/onebox">onebox</a> as their own thread — tracking an event here never
       links or tags it into a lane on its own; adding it to a lane is always a separate,
       explicit action.
     </p>

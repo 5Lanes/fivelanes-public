@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
 """
-Run an inbox-only email pull (no calendar export, no thread re-summarization) on a fixed
-interval, with nightly quiet hours. Only fetches mail since the last successful pull
-(this scheduled loop or a manual "Pull inbox"/"Run fivelanes" click) instead of
-rescanning the whole lookback window every time — see ``utils.inbox_pull_log``.
+Run an inbox-only email pull (no thread re-summarization) on a fixed interval, with
+nightly quiet hours. Only fetches mail since the last successful pull (this scheduled
+loop or a manual "Pull inbox"/"Run fivelanes" click) instead of rescanning the whole
+lookback window every time — see ``utils.inbox_pull_log``.
 
 Every inbox pull (scheduled or manual) also runs a cheap "content-only" LLM pass right
 after the email pull — segmentation/cleaning only, no thread summarization — so newly
 pulled messages show cleaned content immediately instead of raw text. The heavier full
 thread re-summarization only happens on the manual "Run fivelanes" full-cycle button.
 
-The full LLM + calendar-export cycle (``run_fivelanes_cycle``) no longer runs on this
-timer; it's manual-only now (the dashboard's "Run fivelanes" button). Both share
+When the "slack" feature is enabled, each inbox pull also pulls fresh 1:1 Slack DMs and
+re-summarizes already-tracked Slack threads (cheap no-op for threads with no new
+messages), so tracked Slack conversations stay current without a manual "Run fivelanes".
+
+When the "availability" feature is enabled, each inbox pull also re-runs the calendar
+availability export (see ``CALENDAR_AVAILABILITY_*`` below), so moved/updated/new
+calendar events show up without a manual "Run fivelanes".
+
+The full LLM re-summarization cycle (``run_fivelanes_cycle``) still doesn't run on this
+timer; it's manual-only (the dashboard's "Run fivelanes" button). Both share
 ``_pipeline_run_lock`` so they never overlap.
 
 Active window defaults to 06:00–19:00 local time (no runs from 19:00 through 05:59).
@@ -35,8 +43,8 @@ Environment (same names as dashboard_server where applicable):
   FIVELANES_SCHEDULER_WEEKDAYS run on Mon–Fri when 1/true (default: true)
   FIVELANES_SCHEDULER_WEEKENDS run on Sat–Sun when 1/true (default: true)
 
-  CALENDAR_AVAILABILITY_* env vars only apply to the manual full-cycle run now, not
-  this scheduled loop.
+  CALENDAR_AVAILABILITY_* env vars apply to both the manual full-cycle run and this
+  scheduled loop's calendar export step.
 
 Also used by ``dashboard_server.py`` (background thread).
 """
@@ -215,14 +223,15 @@ def run_fivelanes_cycle(*, trigger: str = "scheduler", blocking: bool = True) ->
 def run_inbox_pull_cycle(*, trigger: str = "scheduler", blocking: bool = True) -> bool:
     """
     One inbox-only pull: net-new email since the last successful pull (full cycle or
-    inbox-only), no calendar export. Shares ``_pipeline_run_lock`` with
-    ``run_fivelanes_cycle`` so the two never overlap.
+    inbox-only). Shares ``_pipeline_run_lock`` with ``run_fivelanes_cycle`` so the two
+    never overlap.
 
     Every pull (scheduled or manual) also runs a cheap content-only LLM pass right after
     the email pull — segmentation/cleaning of newly-pulled messages only, no thread
     re-summarization — so the Inbox view shows cleaned content instead of raw text
     without waiting for a full cycle. The heavier full LLM pipeline (thread summaries)
-    still only runs on the manual "Run fivelanes" full-cycle button.
+    still only runs on the manual "Run fivelanes" full-cycle button. When enabled, Slack
+    DMs and the calendar availability export are also refreshed on every pull.
 
     Returns False when ``blocking`` is False and another run is already in progress.
     """
@@ -242,12 +251,37 @@ def run_inbox_pull_cycle(*, trigger: str = "scheduler", blocking: bool = True) -
             fl.run_content_cleanup_pipeline(lookback_days=get_lookback_days())
         except Exception:
             log.exception("Inbox pull (%s): content cleanup step failed", trigger)
+        try:
+            from utils.features import is_enabled
+
+            if is_enabled("slack"):
+                from services.slack.pull import pull_slack_dms
+                from services.slack.summarize import summarize_tracked_slack_threads
+
+                pull_slack_dms()
+                summarize_tracked_slack_threads(fl.DATABASE_NAME)
+        except Exception:
+            log.exception("Inbox pull (%s): Slack pull/summarize step failed", trigger)
+        try:
+            from utils.features import is_enabled
+
+            if is_enabled("availability") and not CALENDAR_AVAILABILITY_DISABLE:
+                from services.calendar_availability_export import run_calendar_availability_pull
+
+                run_calendar_availability_pull(
+                    data_path(),
+                    weeks=CALENDAR_AVAILABILITY_WEEKS,
+                    lookback_days=CALENDAR_AVAILABILITY_LOOKBACK_DAYS,
+                    out_path=data_path("out", "availability_calendar_latest.json"),
+                )
+        except Exception:
+            log.exception("Inbox pull (%s): calendar availability export failed", trigger)
     except Exception as exc:
         err = str(exc)
         log.exception("Inbox-only pull cycle failed")
         raise
     finally:
-        record_inbox_pull_finish(started_at=started_at, ok=err is None, error=err)
+        record_inbox_pull_finish(started_at=started_at, ok=err is None, error=err, trigger=trigger)
         _pipeline_run_lock.release()
         _mark_run_finished()
     return True

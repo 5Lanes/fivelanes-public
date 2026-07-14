@@ -110,7 +110,7 @@ function planRailCardHtml(plan: PlanView, data: LooseObj): string {
   return `<li>
     <article class="plan-card-rail ${planDueStatusClass(dueStatus)}" data-plan-id="${plan.id}">
       <h3>${badge}${escapeHtml(plan.action)}</h3>
-      <a class="plan-thread-link" href="/dashboard?thread=${encodeURIComponent(plan.inbox_thread_id)}">${pathHtml}</a>
+      <a class="plan-thread-link" href="/onebox?thread=${encodeURIComponent(plan.inbox_thread_id)}">${pathHtml}</a>
       <p class="plan-meta">${escapeHtml(plan.step_type)}${when ? ` · by ${escapeHtml(when)}` : ""}</p>
       <div class="plan-card-actions">
         <button type="button" class="plan-edit-btn" data-plan-id="${plan.id}">Edit</button>
@@ -154,6 +154,12 @@ export function showScheduleAddPlanForm(selectedThreadId = ""): void {
   document.getElementById("schedule-add-plan-form")?.removeAttribute("hidden");
   populateSchedulePlanThreadSelect(selectedThreadId);
   document.getElementById("schedule-plan-action-input")?.focus();
+}
+
+export async function openDashboardAddPlanForThread(threadId = ""): Promise<void> {
+  showScheduleTab("plans");
+  if (threadId) showScheduleAddPlanForm(threadId);
+  document.getElementById("dashboard-schedule-rail")?.scrollIntoView({ behavior: "smooth" });
 }
 
 function bindScheduleRailInteractions(_rail: HTMLElement): void {

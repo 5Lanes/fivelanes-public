@@ -31,13 +31,16 @@ def _write(payload: Dict[str, Any]) -> None:
     tmp.replace(path)
 
 
-def record_inbox_pull_finish(*, started_at: str, ok: bool, error: Optional[str] = None) -> None:
+def record_inbox_pull_finish(
+    *, started_at: str, ok: bool, error: Optional[str] = None, trigger: Optional[str] = None
+) -> None:
     _write(
         {
             "started_at": started_at,
             "finished_at": _utc_now_iso(),
             "ok": ok,
             "error": error,
+            "trigger": trigger,
         }
     )
 

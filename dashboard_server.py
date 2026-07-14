@@ -268,14 +268,20 @@ def _start_inbox_pull_run() -> tuple[bool, Optional[str]]:
 
 
 def _inbox_pull_status_payload() -> Dict[str, Any]:
+    from utils.inbox_pull_log import load_last_inbox_pull
+
     with _pipeline_lock:
         state = dict(_inbox_pull_state)
     return {
         "ok": True,
-        "running": state["running"],
+        # A scheduled pull runs on its own timer thread and never touches
+        # ``_inbox_pull_state`` (that dict only tracks manually-triggered runs), so fall
+        # back to the shared run lock to reflect scheduled pulls too.
+        "running": bool(state["running"] or pipeline_run_in_progress()),
         "error": state.get("error"),
         "started_at": state.get("started_at"),
         "finished_at": state.get("finished_at"),
+        "last_run": load_last_inbox_pull(),
     }
 
 
@@ -2306,7 +2312,6 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
         if path in (
             "/",
-            "/dashboard",
             "/sources",
             "/threads",
             "/meetings",
@@ -2326,9 +2331,14 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_header("Location", "/onebox")
             self.end_headers()
             return
+        if path == "/dashboard":
+            self.send_response(HTTPStatus.MOVED_PERMANENTLY)
+            self.send_header("Location", "/onebox")
+            self.end_headers()
+            return
         if path == "/people":
             self.send_response(HTTPStatus.MOVED_PERMANENTLY)
-            self.send_header("Location", "/dashboard#lanes")
+            self.send_header("Location", "/onebox#lanes")
             self.end_headers()
             return
         super().do_GET()
@@ -2454,10 +2464,8 @@ def _lan_ipv4_addresses() -> List[str]:
 
 def _print_dashboard_urls(host: str, port: int) -> None:
     base = f"http://127.0.0.1:{port}"
-    print(f"Serving dashboard + API on {host}:{port}")
-    print(f"  Local:   {base}/threads")
-    print(f"           {base}/dashboard")
-    print(f"           {base}/meetings")
+    print(f"Serving onebox + API on {host}:{port}")
+    print(f"  Local:   {base}/onebox")
     if host in ("0.0.0.0", ""):
         for ip in _lan_ipv4_addresses():
             lan = f"http://{ip}:{port}"

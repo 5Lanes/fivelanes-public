@@ -7,7 +7,7 @@ const PAGE_HTML = `
     <p class="texts-setup-lead">
       Pull Google Docs for Meet / Gemini notes (names and dates), then choose which to import.
       Only the conversation-summary tab is imported — not the full transcript.
-      Tracked notes appear on the <a href="/dashboard">dashboard</a>.
+      Tracked notes appear on the <a href="/onebox">onebox</a>.
     </p>
   </header>
 
