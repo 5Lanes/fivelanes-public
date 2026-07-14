@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import subprocess
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Set, Tuple
@@ -216,6 +217,67 @@ def _clean_scraper_error(detail: str) -> str:
     return first_line or "linkedin_scraper_failed"
 
 
+# auth.ts gives the user up to 600s to complete login in the headed browser;
+# add slack for browser launch and session save on top of that.
+_LOGIN_MAX_WAIT_SEC = 630
+_LOGIN_POLL_INTERVAL_SEC = 2
+
+
+def _run_login(scraper_dir: Path, tsx_cli: Path) -> bool:
+    """Spawn `npm run login` headed and poll until the user finishes (or times out).
+
+    Returns True once the login process exits successfully (session saved to
+    disk), so the caller knows a retry is actually worth attempting.
+    """
+    cmd = ["node", str(tsx_cli), "src/index.ts", "--login", "--headed"]
+    log.info("LinkedIn session refresh: %s (cwd=%s)", " ".join(cmd), scraper_dir)
+    try:
+        proc = subprocess.Popen(cmd, cwd=scraper_dir)
+    except OSError:
+        log.exception("Failed to launch `npm run login` for LinkedIn session refresh")
+        return False
+
+    waited = 0.0
+    while proc.poll() is None and waited < _LOGIN_MAX_WAIT_SEC:
+        time.sleep(_LOGIN_POLL_INTERVAL_SEC)
+        waited += _LOGIN_POLL_INTERVAL_SEC
+
+    if proc.poll() is None:
+        log.warning("LinkedIn login timed out after %ss; closing browser", _LOGIN_MAX_WAIT_SEC)
+        proc.kill()
+        proc.wait()
+        return False
+
+    return proc.returncode == 0
+
+
+def _attempt_scrape(
+    *, cmd: List[str], scraper_dir: Path, output_path: Path, env: Dict[str, str]
+) -> None:
+    log.info("Running LinkedIn scraper: %s (cwd=%s)", " ".join(cmd), scraper_dir)
+    try:
+        completed = subprocess.run(
+            cmd,
+            cwd=scraper_dir,
+            capture_output=True,
+            text=True,
+            timeout=_SCRAPER_TIMEOUT_SEC,
+            check=False,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"LinkedIn scraper timed out after {_SCRAPER_TIMEOUT_SEC // 60} minutes. "
+            "It may be stuck on a login checkpoint — run `npm run login` headed in "
+            "your data linkedin/ folder and retry."
+        ) from None
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip()
+        raise RuntimeError(_clean_scraper_error(detail) if detail else "linkedin_scraper_failed")
+    if not output_path.is_file():
+        raise RuntimeError(f"linkedin_scraper_produced_no_output: {output_path}")
+
+
 def _run_scraper(*, output_path: Path, selections_path: Path) -> None:
     scraper_dir = LINKEDIN_SCRAPER_DIR
     package_json = scraper_dir / "package.json"
@@ -245,28 +307,14 @@ def _run_scraper(*, output_path: Path, selections_path: Path) -> None:
         "--output",
         str(output_path),
     ]
-    log.info("Running LinkedIn scraper: %s (cwd=%s)", " ".join(cmd), scraper_dir)
+
     try:
-        completed = subprocess.run(
-            cmd,
-            cwd=scraper_dir,
-            capture_output=True,
-            text=True,
-            timeout=_SCRAPER_TIMEOUT_SEC,
-            check=False,
-            env=env,
-        )
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(
-            f"LinkedIn scraper timed out after {_SCRAPER_TIMEOUT_SEC // 60} minutes. "
-            "It may be stuck on a login checkpoint — run `npm run login` headed in "
-            "your data linkedin/ folder and retry."
-        ) from None
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or "").strip()
-        raise RuntimeError(_clean_scraper_error(detail) if detail else "linkedin_scraper_failed")
-    if not output_path.is_file():
-        raise RuntimeError(f"linkedin_scraper_produced_no_output: {output_path}")
+        _attempt_scrape(cmd=cmd, scraper_dir=scraper_dir, output_path=output_path, env=env)
+    except RuntimeError:
+        log.warning("LinkedIn pull failed, prompting a session refresh before retrying")
+        if not _run_login(scraper_dir, tsx_cli):
+            raise
+        _attempt_scrape(cmd=cmd, scraper_dir=scraper_dir, output_path=output_path, env=env)
 
 
 def _read_export_rows(path: Path) -> List[Dict[str, str]]:
