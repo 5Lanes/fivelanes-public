@@ -13,6 +13,7 @@
 		A10000000000000000000024 /* DashboardConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* DashboardConfig.swift */; };
 		A10000000000000000000025 /* WebSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000007 /* WebSession.swift */; };
 		A10000000000000000000026 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000009 /* Assets.xcassets */; };
+		A10000000000000000000031 /* LocalNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000030 /* LocalNotifications.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -24,6 +25,7 @@
 		A10000000000000000000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000000000000000000009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000000000000000000000A /* Fivelanes.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Fivelanes.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000030 /* LocalNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNotifications.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -53,6 +55,7 @@
 				A10000000000000000000005 /* DashboardWebView.swift */,
 				A10000000000000000000006 /* DashboardConfig.swift */,
 				A10000000000000000000007 /* WebSession.swift */,
+				A10000000000000000000030 /* LocalNotifications.swift */,
 				A10000000000000000000009 /* Assets.xcassets */,
 				A10000000000000000000008 /* Info.plist */,
 			);
@@ -168,6 +171,7 @@
 				A10000000000000000000023 /* DashboardWebView.swift in Sources */,
 				A10000000000000000000024 /* DashboardConfig.swift in Sources */,
 				A10000000000000000000025 /* WebSession.swift in Sources */,
+				A10000000000000000000031 /* LocalNotifications.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
