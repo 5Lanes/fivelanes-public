@@ -5,6 +5,7 @@ import { laneAreaColorVar, sourcePillHtml, threadChannelForThread } from "../sha
 import { isLikelyOwnEmail } from "../shared/owner_config.js";
 import { escapeHtml, formatDate, formatRecipients, formatRelativeShort, str } from "../shared/utils.js";
 import { renderDashboardThreadsInline } from "./threads_page.js";
+import { setUnreadBadgeCount } from "../shared/native_bridge.js";
 function extractEmailAddress(raw) {
     const angle = /<([^<>]+@[^<>]+)>/.exec(raw);
     if (angle)
@@ -493,6 +494,7 @@ function renderOnebox() {
     syncReadKeysFromData(data);
     renderOneboxTrackFilter();
     const allTabs = trackTabs(data);
+    setUnreadBadgeCount(allTabs.reduce((sum, tab) => sum + unreadCount(tab), 0));
     if (!allTabs.length) {
         areaTabsEl.innerHTML = "";
         trackTabsEl.innerHTML = "";

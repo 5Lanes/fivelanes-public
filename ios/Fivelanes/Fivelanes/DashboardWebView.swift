@@ -15,6 +15,7 @@ struct DashboardWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        configuration.userContentController.add(context.coordinator, name: "fivelanesSetBadge")
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.isOpaque = false
@@ -54,9 +55,10 @@ struct DashboardWebView: UIViewRepresentable {
 
     static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
         NotificationCenter.default.removeObserver(coordinator)
+        uiView.configuration.userContentController.removeScriptMessageHandler(forName: "fivelanesSetBadge")
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         let parent: DashboardWebView
         weak var webView: WKWebView?
         weak var refreshControl: UIRefreshControl?
@@ -75,6 +77,13 @@ struct DashboardWebView: UIViewRepresentable {
 
         @objc func handleRefresh(_ sender: UIRefreshControl) {
             webView?.reload()
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == "fivelanesSetBadge",
+                  let payload = message.body as? [String: Any],
+                  let count = payload["count"] as? Int else { return }
+            LocalNotifications.setBadgeCount(count)
         }
 
         @objc func handleSoftRefresh() {

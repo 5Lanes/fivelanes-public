@@ -27,6 +27,7 @@ import { isLikelyOwnEmail } from "../shared/owner_config.js";
 import { escapeHtml, formatDate, formatRecipients, formatRelativeShort, str } from "../shared/utils.js";
 import type { LaneView, LooseObj, ThreadView } from "../shared/types.js";
 import { renderDashboardThreadsInline } from "./threads_page.js";
+import { setUnreadBadgeCount } from "../shared/native_bridge.js";
 
 function extractEmailAddress(raw: string): string {
   const angle = /<([^<>]+@[^<>]+)>/.exec(raw);
@@ -558,6 +559,7 @@ function renderOnebox(): void {
   renderOneboxTrackFilter();
 
   const allTabs = trackTabs(data);
+  setUnreadBadgeCount(allTabs.reduce((sum, tab) => sum + unreadCount(tab), 0));
   if (!allTabs.length) {
     areaTabsEl.innerHTML = "";
     trackTabsEl.innerHTML = "";
